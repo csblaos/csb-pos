@@ -1,7 +1,16 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  experimental: {
+    optimizePackageImports: [
+      "lucide-react",
+      "@tanstack/react-table",
+      "@hookform/resolvers",
+      "zod",
+      "drizzle-orm",
+      "@radix-ui/react-slot",
+    ],
+  },
 };
 
 export default nextConfig;

@@ -1,0 +1,139 @@
+import { and, asc, desc, eq, like, or } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
+
+import { db } from "@/lib/db/client";
+import { productUnits, products, units } from "@/lib/db/schema";
+
+export type UnitOption = {
+  id: string;
+  code: string;
+  nameTh: string;
+};
+
+export type ProductConversionView = {
+  unitId: string;
+  unitCode: string;
+  unitNameTh: string;
+  multiplierToBase: number;
+};
+
+export type ProductListItem = {
+  id: string;
+  sku: string;
+  name: string;
+  barcode: string | null;
+  baseUnitId: string;
+  baseUnitCode: string;
+  baseUnitNameTh: string;
+  priceBase: number;
+  costBase: number;
+  active: boolean;
+  createdAt: string;
+  conversions: ProductConversionView[];
+};
+
+export async function listUnits(): Promise<UnitOption[]> {
+  const rows = await db
+    .select({
+      id: units.id,
+      code: units.code,
+      nameTh: units.nameTh,
+    })
+    .from(units)
+    .orderBy(asc(units.code));
+
+  return rows;
+}
+
+export async function listStoreProducts(
+  storeId: string,
+  search?: string,
+): Promise<ProductListItem[]> {
+  const baseUnits = alias(units, "base_units");
+  const conversionUnits = alias(units, "conversion_units");
+
+  const keyword = search?.trim();
+  const withSearch = Boolean(keyword);
+
+  const rows = await db
+    .select({
+      id: products.id,
+      sku: products.sku,
+      name: products.name,
+      barcode: products.barcode,
+      baseUnitId: products.baseUnitId,
+      baseUnitCode: baseUnits.code,
+      baseUnitNameTh: baseUnits.nameTh,
+      priceBase: products.priceBase,
+      costBase: products.costBase,
+      active: products.active,
+      createdAt: products.createdAt,
+      conversionUnitId: conversionUnits.id,
+      conversionUnitCode: conversionUnits.code,
+      conversionUnitNameTh: conversionUnits.nameTh,
+      multiplierToBase: productUnits.multiplierToBase,
+    })
+    .from(products)
+    .innerJoin(baseUnits, eq(products.baseUnitId, baseUnits.id))
+    .leftJoin(productUnits, eq(productUnits.productId, products.id))
+    .leftJoin(conversionUnits, eq(productUnits.unitId, conversionUnits.id))
+    .where(
+      withSearch
+        ? and(
+            eq(products.storeId, storeId),
+            or(
+              like(products.name, `%${keyword}%`),
+              like(products.sku, `%${keyword}%`),
+              like(products.barcode, `%${keyword}%`),
+            ),
+          )
+        : eq(products.storeId, storeId),
+    )
+    .orderBy(desc(products.createdAt), asc(products.name));
+
+  const productMap = new Map<string, ProductListItem>();
+
+  for (const row of rows) {
+    const current = productMap.get(row.id);
+    if (!current) {
+      productMap.set(row.id, {
+        id: row.id,
+        sku: row.sku,
+        name: row.name,
+        barcode: row.barcode,
+        baseUnitId: row.baseUnitId,
+        baseUnitCode: row.baseUnitCode,
+        baseUnitNameTh: row.baseUnitNameTh,
+        priceBase: row.priceBase,
+        costBase: row.costBase,
+        active: Boolean(row.active),
+        createdAt: row.createdAt,
+        conversions: [],
+      });
+    }
+
+    if (
+      row.conversionUnitId &&
+      row.conversionUnitCode &&
+      row.conversionUnitNameTh &&
+      row.multiplierToBase !== null
+    ) {
+      const item = productMap.get(row.id);
+      if (item) {
+        item.conversions.push({
+          unitId: row.conversionUnitId,
+          unitCode: row.conversionUnitCode,
+          unitNameTh: row.conversionUnitNameTh,
+          multiplierToBase: row.multiplierToBase,
+        });
+      }
+    }
+  }
+
+  const productsList = [...productMap.values()];
+  productsList.forEach((item) => {
+    item.conversions.sort((a, b) => a.multiplierToBase - b.multiplierToBase);
+  });
+
+  return productsList;
+}
