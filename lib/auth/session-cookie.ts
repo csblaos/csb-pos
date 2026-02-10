@@ -1,9 +1,22 @@
 export const SESSION_COOKIE_NAME = "csb_pos_session";
 export const SESSION_TTL_SECONDS = 60 * 60 * 8;
 
+const resolveSecureCookie = () => {
+  const override = process.env.SESSION_COOKIE_SECURE?.trim();
+  if (override === "1") {
+    return true;
+  }
+
+  if (override === "0") {
+    return false;
+  }
+
+  return process.env.NODE_ENV === "production";
+};
+
 export const sessionCookieOptions = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
+  secure: resolveSecureCookie(),
   sameSite: "lax" as const,
   path: "/",
   maxAge: SESSION_TTL_SECONDS,

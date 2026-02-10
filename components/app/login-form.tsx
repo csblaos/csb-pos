@@ -1,7 +1,6 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -16,7 +15,6 @@ const loginSchema = z.object({
 type LoginInput = z.infer<typeof loginSchema>;
 
 export function LoginForm() {
-  const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
 
   const form = useForm<LoginInput>({
@@ -32,6 +30,7 @@ export function LoginForm() {
 
     const response = await fetch("/api/auth/login", {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
       },
@@ -47,8 +46,7 @@ export function LoginForm() {
       return;
     }
 
-    router.replace(data?.next ?? "/dashboard");
-    router.refresh();
+    window.location.assign(data?.next ?? "/dashboard");
   };
 
   return (

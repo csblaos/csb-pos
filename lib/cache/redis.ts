@@ -13,6 +13,7 @@ type RedisGlobal = {
   localClient?: LocalRedisClient;
   localConnectPromise?: Promise<LocalRedisClient | null>;
   warnedKeys?: Set<string>;
+  loggedKeys?: Set<string>;
 };
 
 const globalForRedis = globalThis as unknown as RedisGlobal;
@@ -31,9 +32,43 @@ function warnOnce(key: string, message: string) {
   console.warn(message);
 }
 
+function infoOnce(key: string, message: string) {
+  if (!globalForRedis.loggedKeys) {
+    globalForRedis.loggedKeys = new Set<string>();
+  }
+
+  if (globalForRedis.loggedKeys.has(key)) {
+    return;
+  }
+
+  globalForRedis.loggedKeys.add(key);
+  console.info(message);
+}
+
 function getRedisDriver(): RedisDriver {
   if (globalForRedis.driver) {
     return globalForRedis.driver;
+  }
+
+  const configuredDriver = process.env.REDIS_DRIVER?.trim().toLowerCase();
+  if (configuredDriver) {
+    if (
+      configuredDriver === "upstash" ||
+      configuredDriver === "local" ||
+      configuredDriver === "none"
+    ) {
+      globalForRedis.driver = configuredDriver;
+      infoOnce(
+        `redis_driver_env_${configuredDriver}`,
+        `[cache] redis driver=${configuredDriver} (from REDIS_DRIVER)`,
+      );
+      return globalForRedis.driver;
+    }
+
+    warnOnce(
+      "redis_driver_invalid",
+      `[cache] invalid REDIS_DRIVER="${configuredDriver}", fallback to auto mode`,
+    );
   }
 
   if (process.env.NODE_ENV === "production") {
@@ -42,6 +77,7 @@ function getRedisDriver(): RedisDriver {
       process.env.UPSTASH_REDIS_REST_TOKEN
     ) {
       globalForRedis.driver = "upstash";
+      infoOnce("redis_driver_upstash", "[cache] redis driver=upstash");
       return globalForRedis.driver;
     }
 
@@ -54,6 +90,7 @@ function getRedisDriver(): RedisDriver {
   }
 
   globalForRedis.driver = "local";
+  infoOnce("redis_driver_local", "[cache] redis driver=local");
   return globalForRedis.driver;
 }
 
@@ -64,6 +101,10 @@ function getUpstashClient() {
 
   try {
     globalForRedis.upstashClient = UpstashRedis.fromEnv();
+    infoOnce(
+      "upstash_init_success",
+      `[cache] redis connected driver=upstash target=${process.env.UPSTASH_REDIS_REST_URL ?? "fromEnv"}`,
+    );
     return globalForRedis.upstashClient;
   } catch (error) {
     warnOnce(
@@ -90,6 +131,10 @@ async function getLocalRedisClient() {
     .connect()
     .then(() => {
       globalForRedis.localClient = client;
+      infoOnce(
+        "local_redis_connect_success",
+        `[cache] redis connected driver=local target=${redisUrl}`,
+      );
       return client;
     })
     .catch((error) => {
@@ -106,7 +151,7 @@ async function getLocalRedisClient() {
   return globalForRedis.localConnectPromise;
 }
 
-async function getRaw(key: string): Promise<string | null> {
+async function getRaw(key: string): Promise<unknown | null> {
   const driver = getRedisDriver();
   const namespacedKey = `${CACHE_PREFIX}:${key}`;
 
@@ -117,7 +162,7 @@ async function getRaw(key: string): Promise<string | null> {
         return null;
       }
 
-      const value = await client.get<string>(namespacedKey);
+      const value = await client.get(namespacedKey);
       return value ?? null;
     }
 
@@ -207,8 +252,12 @@ async function deleteRaw(key: string) {
 
 export async function redisGetJson<T>(key: string): Promise<T | null> {
   const raw = await getRaw(key);
-  if (!raw) {
+  if (raw === null || raw === undefined) {
     return null;
+  }
+
+  if (typeof raw !== "string") {
+    return raw as T;
   }
 
   try {
