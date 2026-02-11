@@ -50,8 +50,6 @@ export async function POST(request: Request) {
     name: payload.data.name,
   });
 
-  const response = NextResponse.json({ ok: true, next: "/onboarding" });
-
   let sessionCookie;
   try {
     sessionCookie = await createSessionCookie(session);
@@ -64,6 +62,12 @@ export async function POST(request: Request) {
     }
     throw error;
   }
+
+  const response = NextResponse.json({
+    ok: true,
+    token: sessionCookie.value,
+    next: "/onboarding",
+  });
 
   response.cookies.set(
     sessionCookie.name,

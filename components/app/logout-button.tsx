@@ -3,14 +3,19 @@
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
+import { authFetch, clearClientAuthToken } from "@/lib/auth/client-token";
 
 export function LogoutButton() {
   const router = useRouter();
 
   const onLogout = async () => {
-    await fetch("/api/auth/logout", {
-      method: "POST",
-    });
+    try {
+      await authFetch("/api/auth/logout", {
+        method: "POST",
+      });
+    } finally {
+      clearClientAuthToken();
+    }
     router.replace("/login");
     router.refresh();
   };

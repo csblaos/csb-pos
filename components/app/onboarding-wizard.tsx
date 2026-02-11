@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { authFetch, setClientAuthToken } from "@/lib/auth/client-token";
 
 type ChannelStatus = "DISCONNECTED" | "CONNECTED" | "ERROR";
 
@@ -94,7 +95,7 @@ export function OnboardingWizard({ hasStoreMembership }: WizardProps) {
   }, [step]);
 
   const loadChannelStatus = async () => {
-    const response = await fetch("/api/onboarding/channels", {
+    const response = await authFetch("/api/onboarding/channels", {
       method: "GET",
       cache: "no-store",
     });
@@ -127,7 +128,7 @@ export function OnboardingWizard({ hasStoreMembership }: WizardProps) {
     setIsSubmitting(true);
     setErrorMessage(null);
 
-    const response = await fetch("/api/onboarding/store", {
+    const response = await authFetch("/api/onboarding/store", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -142,13 +143,17 @@ export function OnboardingWizard({ hasStoreMembership }: WizardProps) {
     });
 
     const data = (await response.json().catch(() => null)) as
-      | { message?: string }
+      | { token?: string; message?: string }
       | null;
 
     if (!response.ok) {
       setErrorMessage(data?.message ?? "สร้างร้านไม่สำเร็จ");
       setIsSubmitting(false);
       return;
+    }
+
+    if (data?.token) {
+      setClientAuthToken(data.token);
     }
 
     await loadChannelStatus();
@@ -160,7 +165,7 @@ export function OnboardingWizard({ hasStoreMembership }: WizardProps) {
     setIsSubmitting(true);
     setErrorMessage(null);
 
-    const response = await fetch("/api/onboarding/channels", {
+    const response = await authFetch("/api/onboarding/channels", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

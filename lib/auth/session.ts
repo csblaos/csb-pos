@@ -1,37 +1,53 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { cache } from "react";
-import { z } from "zod";
 
 import { redisDelete, redisGetJson, redisSetJson } from "@/lib/cache/redis";
 import {
   clearSessionCookie,
-  parseSessionId,
+  parseSessionToken,
   SESSION_COOKIE_NAME,
   sessionCookieOptions,
   SESSION_TTL_SECONDS,
 } from "@/lib/auth/session-cookie";
+import {
+  createSessionToken,
+  verifySessionTokenClaims,
+} from "@/lib/auth/session-token";
+import { sessionSchema, type AppSession } from "@/lib/auth/session-types";
 
-const sessionSchema = z.object({
-  userId: z.string(),
-  email: z.string().email(),
-  displayName: z.string(),
-  hasStoreMembership: z.boolean(),
-  activeStoreId: z.string().nullable(),
-  activeStoreName: z.string().nullable(),
-  activeRoleId: z.string().nullable(),
-  activeRoleName: z.string().nullable(),
-});
+export type { AppSession } from "@/lib/auth/session-types";
 
-export type AppSession = z.infer<typeof sessionSchema>;
-const SESSION_KEY_PREFIX = "auth:session";
+const SESSION_TOKEN_KEY_PREFIX = "auth:session-token";
+const USER_TOKEN_VERSION_KEY_PREFIX = "auth:user-token-version";
+const USER_TOKEN_VERSION_TTL_SECONDS = 60 * 60 * 24 * 365;
 const AUTH_DEBUG = process.env.AUTH_DEBUG === "1";
 
-const sessionCacheKey = (sessionId: string) => `${SESSION_KEY_PREFIX}:${sessionId}`;
+const sessionTokenCacheKey = (tokenId: string) =>
+  `${SESSION_TOKEN_KEY_PREFIX}:${tokenId}`;
+const userTokenVersionCacheKey = (userId: string) =>
+  `${USER_TOKEN_VERSION_KEY_PREFIX}:${userId}`;
 
-const createSessionId = () =>
+const isRedisSessionCheckEnabled = () => {
+  const configured = process.env.AUTH_JWT_REDIS_CHECK?.trim().toLowerCase();
+  return configured !== "0" && configured !== "false" && configured !== "off";
+};
+
+const createTokenId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+const parseTokenVersion = (rawValue: unknown) => {
+  if (typeof rawValue !== "number") {
+    return null;
+  }
+
+  if (!Number.isInteger(rawValue) || rawValue <= 0) {
+    return null;
+  }
+
+  return rawValue;
+};
 
 export class SessionStoreUnavailableError extends Error {
   constructor() {
@@ -39,80 +55,185 @@ export class SessionStoreUnavailableError extends Error {
   }
 }
 
-export async function createSessionCookie(session: AppSession) {
-  const sessionId = createSessionId();
-  const parsed = sessionSchema.parse(session);
+async function getOrCreateUserTokenVersion(userId: string) {
+  const current = parseTokenVersion(
+    await redisGetJson<unknown>(userTokenVersionCacheKey(userId)),
+  );
+  if (current) {
+    return current;
+  }
 
+  const defaultVersion = 1;
   const stored = await redisSetJson(
-    sessionCacheKey(sessionId),
-    parsed,
-    SESSION_TTL_SECONDS,
+    userTokenVersionCacheKey(userId),
+    defaultVersion,
+    USER_TOKEN_VERSION_TTL_SECONDS,
   );
   if (!stored) {
-    if (AUTH_DEBUG) {
-      console.warn("[auth] createSessionCookie failed to persist session");
-    }
     throw new SessionStoreUnavailableError();
+  }
+
+  return defaultVersion;
+}
+
+async function getUserTokenVersion(userId: string) {
+  return parseTokenVersion(await redisGetJson<unknown>(userTokenVersionCacheKey(userId)));
+}
+
+export async function createSessionCookie(session: AppSession) {
+  const parsed = sessionSchema.parse(session);
+  const tokenId = createTokenId();
+  let tokenVersion = 1;
+
+  if (isRedisSessionCheckEnabled()) {
+    tokenVersion = await getOrCreateUserTokenVersion(parsed.userId);
+  }
+
+  const token = await createSessionToken(parsed, {
+    jti: tokenId,
+    tokenVersion,
+  });
+
+  if (isRedisSessionCheckEnabled()) {
+    const stored = await redisSetJson(
+      sessionTokenCacheKey(tokenId),
+      { userId: parsed.userId, tokenVersion },
+      SESSION_TTL_SECONDS,
+    );
+    if (!stored) {
+      if (AUTH_DEBUG) {
+        console.warn("[auth] createSessionCookie failed to persist token state");
+      }
+      throw new SessionStoreUnavailableError();
+    }
   }
 
   if (AUTH_DEBUG) {
     console.info(
-      `[auth] session created id=${sessionId.slice(0, 8)}... user=${parsed.userId} store=${parsed.activeStoreId ?? "-"}`,
+      `[auth] session token created id=${tokenId.slice(0, 8)}... user=${parsed.userId} store=${parsed.activeStoreId ?? "-"} redisCheck=${isRedisSessionCheckEnabled() ? "on" : "off"}`,
     );
   }
 
   return {
     name: SESSION_COOKIE_NAME,
-    value: sessionId,
+    value: token,
     options: sessionCookieOptions,
   };
 }
 
-export async function deleteSessionById(sessionId?: string | null) {
-  const normalizedSessionId = parseSessionId(sessionId);
-  if (!normalizedSessionId) {
+export async function deleteSessionById(sessionToken?: string | null) {
+  const normalizedSessionToken = parseSessionToken(sessionToken);
+  if (!normalizedSessionToken || !isRedisSessionCheckEnabled()) {
     return;
   }
 
-  await redisDelete(sessionCacheKey(normalizedSessionId));
+  const claims = await verifySessionTokenClaims(normalizedSessionToken);
+  if (!claims) {
+    return;
+  }
+
+  await redisDelete(sessionTokenCacheKey(claims.jti));
 }
 
-export async function getSessionIdFromCookieStore() {
+export async function getSessionTokenFromCookieStore() {
   const cookieStore = await cookies();
-  return parseSessionId(cookieStore.get(SESSION_COOKIE_NAME)?.value);
+  return parseSessionToken(cookieStore.get(SESSION_COOKIE_NAME)?.value);
+}
+
+function parseBearerToken(rawAuthorizationHeader?: string | null) {
+  if (!rawAuthorizationHeader) {
+    return null;
+  }
+
+  const match = rawAuthorizationHeader.match(/^Bearer\s+(.+)$/i);
+  if (!match?.[1]) {
+    return null;
+  }
+
+  return parseSessionToken(match[1]);
+}
+
+export async function getSessionTokenFromAuthorizationHeader() {
+  const requestHeaders = await headers();
+  return parseBearerToken(requestHeaders.get("authorization"));
+}
+
+export async function getSessionTokenFromRequest() {
+  const authorizationToken = await getSessionTokenFromAuthorizationHeader();
+  if (authorizationToken) {
+    return authorizationToken;
+  }
+
+  return getSessionTokenFromCookieStore();
+}
+
+export async function invalidateUserSessions(userId: string) {
+  if (!isRedisSessionCheckEnabled()) {
+    return false;
+  }
+
+  const currentVersion = (await getUserTokenVersion(userId)) ?? 1;
+  const nextVersion = currentVersion + 1;
+  const stored = await redisSetJson(
+    userTokenVersionCacheKey(userId),
+    nextVersion,
+    USER_TOKEN_VERSION_TTL_SECONDS,
+  );
+
+  if (AUTH_DEBUG) {
+    console.info(
+      `[auth] invalidateUserSessions user=${userId} version=${nextVersion} ok=${stored ? "yes" : "no"}`,
+    );
+  }
+
+  return stored;
 }
 
 const readSession = async () => {
-  const sessionId = await getSessionIdFromCookieStore();
-  if (!sessionId) {
+  const sessionToken = await getSessionTokenFromRequest();
+  if (!sessionToken) {
     if (AUTH_DEBUG) {
-      console.info("[auth] readSession: missing session cookie");
+      console.info("[auth] readSession: missing bearer token and session cookie");
     }
     return null;
   }
 
-  const rawSession = await redisGetJson<unknown>(sessionCacheKey(sessionId));
-  if (!rawSession) {
+  const claims = await verifySessionTokenClaims(sessionToken);
+  if (!claims) {
     if (AUTH_DEBUG) {
-      console.warn(`[auth] readSession: cache miss id=${sessionId.slice(0, 8)}...`);
+      console.warn("[auth] readSession: invalid token");
     }
     return null;
   }
 
-  const parsed = sessionSchema.safeParse(rawSession);
+  if (isRedisSessionCheckEnabled()) {
+    const tokenState = await redisGetJson<unknown>(sessionTokenCacheKey(claims.jti));
+    if (!tokenState) {
+      if (AUTH_DEBUG) {
+        console.warn(`[auth] readSession: token revoked id=${claims.jti.slice(0, 8)}...`);
+      }
+      return null;
+    }
+
+    const currentVersion = await getUserTokenVersion(claims.userId);
+    if (!currentVersion || claims.tokenVersion !== currentVersion) {
+      if (AUTH_DEBUG) {
+        console.warn(
+          `[auth] readSession: token version mismatch id=${claims.jti.slice(0, 8)}...`,
+        );
+      }
+      return null;
+    }
+  }
+
+  const parsed = sessionSchema.safeParse(claims);
   if (!parsed.success) {
-    if (AUTH_DEBUG) {
-      console.warn(
-        `[auth] readSession: invalid payload id=${sessionId.slice(0, 8)}...`,
-      );
-    }
-    await deleteSessionById(sessionId);
     return null;
   }
 
   if (AUTH_DEBUG) {
     console.info(
-      `[auth] readSession: ok id=${sessionId.slice(0, 8)}... user=${parsed.data.userId}`,
+      `[auth] readSession: ok id=${claims.jti.slice(0, 8)}... user=${parsed.data.userId}`,
     );
   }
 
@@ -128,5 +249,5 @@ export {
   SESSION_TTL_SECONDS,
   sessionCookieOptions,
   clearSessionCookie,
-  parseSessionId,
+  parseSessionToken,
 };

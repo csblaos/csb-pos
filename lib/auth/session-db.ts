@@ -4,7 +4,6 @@ import { NextResponse } from "next/server";
 import { db } from "@/lib/db/client";
 import { roles, storeMembers, stores } from "@/lib/db/schema";
 import {
-  createSessionCookie,
   type AppSession,
   clearSessionCookie,
   deleteSessionById,
@@ -46,23 +45,6 @@ export async function buildSessionForUser(user: SessionUser): Promise<AppSession
     activeRoleId: membership?.roleId ?? null,
     activeRoleName: membership?.roleName ?? null,
   };
-}
-
-export async function createSessionResponse(
-  user: SessionUser,
-  payload: Record<string, unknown>,
-) {
-  const session = await buildSessionForUser(user);
-  const response = NextResponse.json(payload);
-  const sessionCookie = await createSessionCookie(session);
-
-  response.cookies.set(
-    sessionCookie.name,
-    sessionCookie.value,
-    sessionCookie.options,
-  );
-
-  return response;
 }
 
 export async function clearSessionResponse(

@@ -142,7 +142,6 @@ export async function POST(request: Request) {
   }
 
   const refreshedSession = await buildSessionForUser(user);
-  const response = NextResponse.json({ ok: true, next: "/onboarding?step=3" });
 
   let sessionCookie;
   try {
@@ -156,6 +155,12 @@ export async function POST(request: Request) {
     }
     throw error;
   }
+
+  const response = NextResponse.json({
+    ok: true,
+    token: sessionCookie.value,
+    next: "/onboarding?step=3",
+  });
 
   response.cookies.set(
     sessionCookie.name,

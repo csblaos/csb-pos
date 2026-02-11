@@ -8,6 +8,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { Button } from "@/components/ui/button";
+import { setClientAuthToken } from "@/lib/auth/client-token";
 
 const signupSchema = z
   .object({
@@ -54,12 +55,16 @@ export function SignupForm() {
     });
 
     const data = (await response.json().catch(() => null)) as
-      | { next?: string; message?: string }
+      | { next?: string; token?: string; message?: string }
       | null;
 
     if (!response.ok) {
       setServerError(data?.message ?? "สมัครสมาชิกไม่สำเร็จ กรุณาลองใหม่");
       return;
+    }
+
+    if (data?.token) {
+      setClientAuthToken(data.token);
     }
 
     router.replace(data?.next ?? "/onboarding");

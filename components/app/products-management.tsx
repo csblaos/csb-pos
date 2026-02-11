@@ -7,6 +7,7 @@ import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import { Button } from "@/components/ui/button";
+import { authFetch } from "@/lib/auth/client-token";
 import type { ProductListItem, UnitOption } from "@/lib/products/service";
 import {
   type ProductUpsertFormInput,
@@ -132,12 +133,12 @@ export function ProductsManagement({
 
     const response =
       mode === "create"
-        ? await fetch("/api/products", {
+        ? await authFetch("/api/products", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(values),
           })
-        : await fetch(`/api/products/${editingProductId}`, {
+        : await authFetch(`/api/products/${editingProductId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ action: "update", data: values }),
@@ -167,7 +168,7 @@ export function ProductsManagement({
     setSuccessMessage(null);
     setLoadingKey(`active-${product.id}`);
 
-    const response = await fetch(`/api/products/${product.id}`, {
+    const response = await authFetch(`/api/products/${product.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "set_active", active: nextActive }),

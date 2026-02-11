@@ -2,8 +2,9 @@ import { and, eq, inArray } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { invalidateUserSessions } from "@/lib/auth/session";
 import { db } from "@/lib/db/client";
-import { permissions, rolePermissions, roles } from "@/lib/db/schema";
+import { permissions, rolePermissions, roles, storeMembers } from "@/lib/db/schema";
 import { timeDbQuery } from "@/lib/perf/server";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { getPermissionCatalog } from "@/lib/rbac/queries";
@@ -144,6 +145,16 @@ export async function PATCH(
           .values(toInsert.map((permissionId) => ({ roleId, permissionId })))
           .onConflictDoNothing(),
       );
+    }
+
+    if (toInsert.length > 0 || toDelete.length > 0) {
+      const roleMemberRows = await db
+        .select({ userId: storeMembers.userId })
+        .from(storeMembers)
+        .where(and(eq(storeMembers.storeId, storeId), eq(storeMembers.roleId, roleId)));
+
+      const userIds = [...new Set(roleMemberRows.map((row) => row.userId))];
+      await Promise.all(userIds.map((userId) => invalidateUserSessions(userId)));
     }
 
     return NextResponse.json({ ok: true });

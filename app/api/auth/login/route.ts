@@ -45,11 +45,6 @@ export async function POST(request: Request) {
     name: user.name,
   });
 
-  const response = NextResponse.json({
-    ok: true,
-    next: session.hasStoreMembership ? "/dashboard" : "/onboarding",
-  });
-
   let sessionCookie;
   try {
     sessionCookie = await createSessionCookie(session);
@@ -62,6 +57,12 @@ export async function POST(request: Request) {
     }
     throw error;
   }
+
+  const response = NextResponse.json({
+    ok: true,
+    token: sessionCookie.value,
+    next: session.hasStoreMembership ? "/dashboard" : "/onboarding",
+  });
 
   response.cookies.set(
     sessionCookie.name,

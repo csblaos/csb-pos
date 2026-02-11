@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import { Button } from "@/components/ui/button";
+import { authFetch } from "@/lib/auth/client-token";
 import type { UnitOption } from "@/lib/products/service";
 import {
   createUnitSchema,
@@ -35,7 +36,7 @@ export function UnitsManagement({ units, canCreate }: UnitsManagementProps) {
     setMessage(null);
     setErrorMessage(null);
 
-    const response = await fetch("/api/units", {
+    const response = await authFetch("/api/units", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

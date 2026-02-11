@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { Button } from "@/components/ui/button";
+import { setClientAuthToken } from "@/lib/auth/client-token";
 
 const loginSchema = z.object({
   email: z.string().email("กรอกอีเมลให้ถูกต้อง"),
@@ -38,12 +39,16 @@ export function LoginForm() {
     });
 
     const data = (await response.json().catch(() => null)) as
-      | { next?: string; message?: string }
+      | { next?: string; token?: string; message?: string }
       | null;
 
     if (!response.ok) {
       setServerError(data?.message ?? "เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่");
       return;
+    }
+
+    if (data?.token) {
+      setClientAuthToken(data.token);
     }
 
     window.location.assign(data?.next ?? "/dashboard");

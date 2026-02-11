@@ -13,6 +13,7 @@ import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import { Button } from "@/components/ui/button";
+import { authFetch } from "@/lib/auth/client-token";
 import type {
   OrderCatalog,
   OrderListItem,
@@ -226,7 +227,7 @@ export function OrdersManagement({
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    const response = await fetch("/api/orders", {
+    const response = await authFetch("/api/orders", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

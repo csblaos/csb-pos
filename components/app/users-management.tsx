@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { authFetch } from "@/lib/auth/client-token";
 
 type MemberItem = {
   userId: string;
@@ -79,7 +80,7 @@ export function UsersManagement({
     setLoadingKey("create-user");
     setErrorMessage(null);
 
-    const response = await fetch("/api/settings/users", {
+    const response = await authFetch("/api/settings/users", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -122,7 +123,7 @@ export function UsersManagement({
     setLoadingKey(`role-${userId}`);
     setErrorMessage(null);
 
-    const response = await fetch(`/api/settings/users/${userId}`, {
+    const response = await authFetch(`/api/settings/users/${userId}`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
@@ -156,7 +157,7 @@ export function UsersManagement({
     setLoadingKey(`status-${member.userId}`);
     setErrorMessage(null);
 
-    const response = await fetch(`/api/settings/users/${member.userId}`, {
+    const response = await authFetch(`/api/settings/users/${member.userId}`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",

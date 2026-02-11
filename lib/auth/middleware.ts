@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-import { parseSessionId, SESSION_COOKIE_NAME } from "@/lib/auth/session-cookie";
+import { parseSessionToken, SESSION_COOKIE_NAME } from "@/lib/auth/session-cookie";
 
 const APP_PATHS = ["/dashboard", "/orders", "/stock", "/products", "/reports", "/settings"];
 const ONBOARDING_PATH = "/onboarding";
@@ -15,8 +15,8 @@ const isOnboardingPath = (pathname: string) =>
 export const authMiddleware = (request: NextRequest) => {
   const { pathname } = request.nextUrl;
   const sessionCookie = request.cookies.get(SESSION_COOKIE_NAME)?.value;
-  const sessionId = parseSessionId(sessionCookie);
-  const hasSession = Boolean(sessionId);
+  const sessionToken = parseSessionToken(sessionCookie);
+  const hasSession = Boolean(sessionToken);
   const appPath = isAppPath(pathname);
   const onboardingPath = isOnboardingPath(pathname);
 

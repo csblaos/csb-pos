@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { invalidateUserSessions } from "@/lib/auth/session";
 import { db } from "@/lib/db/client";
 import { roles, storeMembers } from "@/lib/db/schema";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
@@ -94,6 +95,8 @@ export async function PATCH(
         .update(storeMembers)
         .set({ roleId: targetRole.id })
         .where(and(eq(storeMembers.storeId, storeId), eq(storeMembers.userId, userId)));
+
+      await invalidateUserSessions(userId);
     }
 
     if (payload.data.action === "set_status") {
@@ -122,6 +125,8 @@ export async function PATCH(
         .update(storeMembers)
         .set({ status: payload.data.status })
         .where(and(eq(storeMembers.storeId, storeId), eq(storeMembers.userId, userId)));
+
+      await invalidateUserSessions(userId);
     }
 
     return NextResponse.json({ ok: true });

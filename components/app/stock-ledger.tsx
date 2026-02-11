@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
+import { authFetch } from "@/lib/auth/client-token";
 import type {
   InventoryMovementView,
   StockProductOption,
@@ -119,7 +120,7 @@ export function StockLedger({
     setErrorMessage(null);
     setSuccessMessage(null);
 
-    const response = await fetch("/api/stock/movements", {
+    const response = await authFetch("/api/stock/movements", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
