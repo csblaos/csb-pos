@@ -38,6 +38,17 @@ export function SystemAdminBottomNav() {
 
   const navigateToTab = (href: string) => {
     if (isTabActive(pathname, href)) {
+      if (pathname !== href) {
+        setOptimisticPath(href);
+        startTransition(() => {
+          router.push(href);
+        });
+        return;
+      }
+
+      startTransition(() => {
+        router.refresh();
+      });
       return;
     }
 

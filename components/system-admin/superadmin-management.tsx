@@ -12,15 +12,24 @@ type SuperadminItem = {
   name: string;
   canCreateStores: boolean;
   maxStores: number | null;
+  canCreateBranches: boolean | null;
+  maxBranchesPerStore: number | null;
   activeOwnerStoreCount: number;
   createdAt: string;
 };
 
 type SuperadminManagementProps = {
   superadmins: SuperadminItem[];
+  globalBranchDefaults: {
+    defaultCanCreateBranches: boolean;
+    defaultMaxBranchesPerStore: number | null;
+  };
 };
 
-export function SuperadminManagement({ superadmins }: SuperadminManagementProps) {
+export function SuperadminManagement({
+  superadmins,
+  globalBranchDefaults,
+}: SuperadminManagementProps) {
   const router = useRouter();
 
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
@@ -32,6 +41,15 @@ export function SuperadminManagement({ superadmins }: SuperadminManagementProps)
   const [formPassword, setFormPassword] = useState("");
   const [formCanCreateStores, setFormCanCreateStores] = useState(true);
   const [formMaxStores, setFormMaxStores] = useState("1");
+  const [formUseGlobalBranchPolicy, setFormUseGlobalBranchPolicy] = useState(true);
+  const [formCanCreateBranches, setFormCanCreateBranches] = useState(
+    globalBranchDefaults.defaultCanCreateBranches,
+  );
+  const [formMaxBranchesPerStore, setFormMaxBranchesPerStore] = useState(
+    globalBranchDefaults.defaultMaxBranchesPerStore !== null
+      ? String(globalBranchDefaults.defaultMaxBranchesPerStore)
+      : "",
+  );
 
   const [draftCanCreateMap, setDraftCanCreateMap] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(superadmins.map((item) => [item.userId, item.canCreateStores])),
@@ -39,6 +57,43 @@ export function SuperadminManagement({ superadmins }: SuperadminManagementProps)
   const [draftMaxStoresMap, setDraftMaxStoresMap] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       superadmins.map((item) => [item.userId, item.maxStores ? String(item.maxStores) : ""]),
+    ),
+  );
+
+  const [draftUseGlobalBranchMap, setDraftUseGlobalBranchMap] = useState<
+    Record<string, boolean>
+  >(() =>
+    Object.fromEntries(
+      superadmins.map((item) => [
+        item.userId,
+        item.canCreateBranches === null && item.maxBranchesPerStore === null,
+      ]),
+    ),
+  );
+  const [draftCanCreateBranchesMap, setDraftCanCreateBranchesMap] = useState<
+    Record<string, boolean>
+  >(() =>
+    Object.fromEntries(
+      superadmins.map((item) => [
+        item.userId,
+        typeof item.canCreateBranches === "boolean"
+          ? item.canCreateBranches
+          : globalBranchDefaults.defaultCanCreateBranches,
+      ]),
+    ),
+  );
+  const [draftMaxBranchesPerStoreMap, setDraftMaxBranchesPerStoreMap] = useState<
+    Record<string, string>
+  >(() =>
+    Object.fromEntries(
+      superadmins.map((item) => [
+        item.userId,
+        item.maxBranchesPerStore !== null
+          ? String(item.maxBranchesPerStore)
+          : globalBranchDefaults.defaultMaxBranchesPerStore !== null
+            ? String(globalBranchDefaults.defaultMaxBranchesPerStore)
+            : "",
+      ]),
     ),
   );
 
@@ -56,14 +111,18 @@ export function SuperadminManagement({ superadmins }: SuperadminManagementProps)
     setSuccessMessage(message);
   };
 
-  const parseMaxStores = (rawValue: string) => {
+  const parseOptionalIntWithinRange = (rawValue: string, options: { min: number; max: number }) => {
     const trimmed = rawValue.trim();
     if (!trimmed) {
       return null;
     }
 
     const parsed = Number(trimmed);
-    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 100) {
+    if (
+      !Number.isInteger(parsed) ||
+      parsed < options.min ||
+      parsed > options.max
+    ) {
       return Number.NaN;
     }
 
@@ -71,9 +130,21 @@ export function SuperadminManagement({ superadmins }: SuperadminManagementProps)
   };
 
   const createSuperadmin = async () => {
-    const parsedMaxStores = parseMaxStores(formMaxStores);
+    const parsedMaxStores = parseOptionalIntWithinRange(formMaxStores, {
+      min: 1,
+      max: 100,
+    });
     if (Number.isNaN(parsedMaxStores)) {
       handleError("โควตาร้านต้องเป็นตัวเลข 1-100 หรือเว้นว่างเพื่อไม่จำกัด");
+      return;
+    }
+
+    const parsedMaxBranches = parseOptionalIntWithinRange(formMaxBranchesPerStore, {
+      min: 0,
+      max: 500,
+    });
+    if (Number.isNaN(parsedMaxBranches)) {
+      handleError("โควตาสาขาต่อร้านต้องเป็นตัวเลข 0-500 หรือเว้นว่างเพื่อไม่จำกัด");
       return;
     }
 
@@ -91,6 +162,9 @@ export function SuperadminManagement({ superadmins }: SuperadminManagementProps)
         password: formPassword,
         canCreateStores: formCanCreateStores,
         maxStores: formCanCreateStores ? parsedMaxStores : null,
+        canCreateBranches: formUseGlobalBranchPolicy ? null : formCanCreateBranches,
+        maxBranchesPerStore:
+          formUseGlobalBranchPolicy || !formCanCreateBranches ? null : parsedMaxBranches,
       }),
     });
 
@@ -111,6 +185,13 @@ export function SuperadminManagement({ superadmins }: SuperadminManagementProps)
     setFormPassword("");
     setFormCanCreateStores(true);
     setFormMaxStores("1");
+    setFormUseGlobalBranchPolicy(true);
+    setFormCanCreateBranches(globalBranchDefaults.defaultCanCreateBranches);
+    setFormMaxBranchesPerStore(
+      globalBranchDefaults.defaultMaxBranchesPerStore !== null
+        ? String(globalBranchDefaults.defaultMaxBranchesPerStore)
+        : "",
+    );
 
     handleSuccess("สร้างบัญชี SUPERADMIN เรียบร้อยแล้ว");
     setLoadingKey(null);
@@ -119,9 +200,26 @@ export function SuperadminManagement({ superadmins }: SuperadminManagementProps)
 
   const updateStoreCreationConfig = async (userId: string) => {
     const canCreateStores = Boolean(draftCanCreateMap[userId]);
-    const parsedMaxStores = parseMaxStores(draftMaxStoresMap[userId] ?? "");
+    const parsedMaxStores = parseOptionalIntWithinRange(draftMaxStoresMap[userId] ?? "", {
+      min: 1,
+      max: 100,
+    });
     if (Number.isNaN(parsedMaxStores)) {
       handleError("โควตาร้านต้องเป็นตัวเลข 1-100 หรือเว้นว่างเพื่อไม่จำกัด");
+      return;
+    }
+
+    const useGlobalBranchPolicy = Boolean(draftUseGlobalBranchMap[userId]);
+    const canCreateBranches = Boolean(draftCanCreateBranchesMap[userId]);
+    const parsedMaxBranches = parseOptionalIntWithinRange(
+      draftMaxBranchesPerStoreMap[userId] ?? "",
+      {
+        min: 0,
+        max: 500,
+      },
+    );
+    if (Number.isNaN(parsedMaxBranches)) {
+      handleError("โควตาสาขาต่อร้านต้องเป็นตัวเลข 0-500 หรือเว้นว่างเพื่อไม่จำกัด");
       return;
     }
 
@@ -137,6 +235,9 @@ export function SuperadminManagement({ superadmins }: SuperadminManagementProps)
         action: "set_store_creation_config",
         canCreateStores,
         maxStores: canCreateStores ? parsedMaxStores : null,
+        canCreateBranches: useGlobalBranchPolicy ? null : canCreateBranches,
+        maxBranchesPerStore:
+          useGlobalBranchPolicy || !canCreateBranches ? null : parsedMaxBranches,
       }),
     });
 
@@ -147,12 +248,12 @@ export function SuperadminManagement({ superadmins }: SuperadminManagementProps)
       | null;
 
     if (!response.ok) {
-      handleError(data?.message ?? "บันทึกโควตาสร้างร้านไม่สำเร็จ");
+      handleError(data?.message ?? "บันทึกโควตาไม่สำเร็จ");
       setLoadingKey(null);
       return;
     }
 
-    handleSuccess("อัปเดตโควตาสร้างร้านแล้ว");
+    handleSuccess("อัปเดตโควตาแล้ว");
     setLoadingKey(null);
     refreshPage();
   };
@@ -229,6 +330,50 @@ export function SuperadminManagement({ superadmins }: SuperadminManagementProps)
           />
         </div>
 
+        <div className="space-y-2 rounded-md border border-dashed p-3">
+          <label className="flex items-center justify-between gap-2 text-sm">
+            <span>ใช้ค่า Global Branch Policy</span>
+            <input
+              type="checkbox"
+              checked={formUseGlobalBranchPolicy}
+              onChange={(event) => setFormUseGlobalBranchPolicy(event.target.checked)}
+              disabled={loadingKey !== null}
+            />
+          </label>
+          <p className="text-xs text-muted-foreground">
+            Global ตอนนี้ (จากฐานข้อมูล):{" "}
+            {globalBranchDefaults.defaultCanCreateBranches ? "อนุญาตสร้างสาขา" : "ไม่อนุญาตสร้างสาขา"}{" "}
+            / โควตา{" "}
+            {globalBranchDefaults.defaultMaxBranchesPerStore !== null
+              ? `${globalBranchDefaults.defaultMaxBranchesPerStore} สาขา`
+              : "ไม่จำกัด"}
+          </p>
+
+          {!formUseGlobalBranchPolicy ? (
+            <>
+              <label className="flex items-center justify-between gap-2 rounded-md border p-2 text-sm">
+                <span>อนุญาตให้สร้างสาขา</span>
+                <input
+                  type="checkbox"
+                  checked={formCanCreateBranches}
+                  onChange={(event) => setFormCanCreateBranches(event.target.checked)}
+                  disabled={loadingKey !== null}
+                />
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={500}
+                value={formMaxBranchesPerStore}
+                onChange={(event) => setFormMaxBranchesPerStore(event.target.value)}
+                className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+                placeholder="โควตาสาขาต่อร้าน (ว่าง = ไม่จำกัด)"
+                disabled={loadingKey !== null || !formCanCreateBranches}
+              />
+            </>
+          ) : null}
+        </div>
+
         <Button className="h-10 w-full" onClick={createSuperadmin} disabled={loadingKey !== null}>
           {loadingKey === "create-superadmin" ? "กำลังสร้าง..." : "สร้างบัญชี SUPERADMIN"}
         </Button>
@@ -246,23 +391,23 @@ export function SuperadminManagement({ superadmins }: SuperadminManagementProps)
                 ร้านที่เป็น Owner อยู่: {item.activeOwnerStoreCount}
               </p>
 
-              <div className="mt-3 space-y-2">
-                <label className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <span>อนุญาตให้สร้างร้าน</span>
-                  <input
-                    type="checkbox"
-                    checked={Boolean(draftCanCreateMap[item.userId])}
-                    onChange={(event) =>
-                      setDraftCanCreateMap((previous) => ({
-                        ...previous,
-                        [item.userId]: event.target.checked,
-                      }))
-                    }
-                    disabled={loadingKey !== null}
-                  />
-                </label>
+              <div className="mt-3 space-y-3">
+                <div className="space-y-2">
+                  <label className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span>อนุญาตให้สร้างร้าน</span>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(draftCanCreateMap[item.userId])}
+                      onChange={(event) =>
+                        setDraftCanCreateMap((previous) => ({
+                          ...previous,
+                          [item.userId]: event.target.checked,
+                        }))
+                      }
+                      disabled={loadingKey !== null}
+                    />
+                  </label>
 
-                <div className="grid grid-cols-[1fr_auto] gap-2">
                   <input
                     type="number"
                     min={1}
@@ -278,16 +423,71 @@ export function SuperadminManagement({ superadmins }: SuperadminManagementProps)
                     className="h-9 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
                     disabled={loadingKey !== null || !Boolean(draftCanCreateMap[item.userId])}
                   />
-
-                  <Button
-                    variant="outline"
-                    className="h-9"
-                    onClick={() => updateStoreCreationConfig(item.userId)}
-                    disabled={loadingKey !== null}
-                  >
-                    {loadingKey === `update-${item.userId}` ? "กำลังบันทึก..." : "บันทึก"}
-                  </Button>
                 </div>
+
+                <div className="space-y-2 rounded-md border border-dashed p-2">
+                  <label className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span>ใช้ค่า Global Branch Policy</span>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(draftUseGlobalBranchMap[item.userId])}
+                      onChange={(event) =>
+                        setDraftUseGlobalBranchMap((previous) => ({
+                          ...previous,
+                          [item.userId]: event.target.checked,
+                        }))
+                      }
+                      disabled={loadingKey !== null}
+                    />
+                  </label>
+
+                  {!Boolean(draftUseGlobalBranchMap[item.userId]) ? (
+                    <>
+                      <label className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                        <span>อนุญาตให้สร้างสาขา</span>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(draftCanCreateBranchesMap[item.userId])}
+                          onChange={(event) =>
+                            setDraftCanCreateBranchesMap((previous) => ({
+                              ...previous,
+                              [item.userId]: event.target.checked,
+                            }))
+                          }
+                          disabled={loadingKey !== null}
+                        />
+                      </label>
+
+                      <input
+                        type="number"
+                        min={0}
+                        max={500}
+                        value={draftMaxBranchesPerStoreMap[item.userId] ?? ""}
+                        onChange={(event) =>
+                          setDraftMaxBranchesPerStoreMap((previous) => ({
+                            ...previous,
+                            [item.userId]: event.target.value,
+                          }))
+                        }
+                        placeholder="โควตาสาขาต่อร้าน (ว่าง = ไม่จำกัด)"
+                        className="h-9 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+                        disabled={
+                          loadingKey !== null ||
+                          !Boolean(draftCanCreateBranchesMap[item.userId])
+                        }
+                      />
+                    </>
+                  ) : null}
+                </div>
+
+                <Button
+                  variant="outline"
+                  className="h-9"
+                  onClick={() => updateStoreCreationConfig(item.userId)}
+                  disabled={loadingKey !== null}
+                >
+                  {loadingKey === `update-${item.userId}` ? "กำลังบันทึก..." : "บันทึก"}
+                </Button>
               </div>
             </div>
           ))}

@@ -16,6 +16,8 @@ const createSuperadminSchema = z.object({
   password: z.string().min(8).max(128),
   canCreateStores: z.boolean().default(true),
   maxStores: z.number().int().min(1).max(100).nullable().default(null),
+  canCreateBranches: z.boolean().nullable().default(null),
+  maxBranchesPerStore: z.number().int().min(0).max(500).nullable().default(null),
 });
 
 export async function GET() {
@@ -61,6 +63,9 @@ export async function POST(request: Request) {
       systemRole: "SUPERADMIN",
       canCreateStores: payload.data.canCreateStores,
       maxStores: payload.data.canCreateStores ? payload.data.maxStores : null,
+      canCreateBranches: payload.data.canCreateBranches,
+      maxBranchesPerStore:
+        payload.data.canCreateBranches === false ? null : payload.data.maxBranchesPerStore,
     });
 
     const superadmins = await listSuperadmins();

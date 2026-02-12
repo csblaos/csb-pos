@@ -1,7 +1,7 @@
 import { getSession } from "@/lib/auth/session";
 import { getUserSystemRole } from "@/lib/auth/system-admin";
 import { getUserPermissionsForCurrentSession } from "@/lib/rbac/access";
-import { getPreferredAuthorizedRoute } from "@/lib/rbac/navigation";
+import { getStorefrontEntryRoute } from "@/lib/storefront/routing";
 import { redirect } from "next/navigation";
 
 export default async function HomePage() {
@@ -21,5 +21,5 @@ export default async function HomePage() {
   }
 
   const permissionKeys = await getUserPermissionsForCurrentSession();
-  redirect(getPreferredAuthorizedRoute(permissionKeys) ?? "/dashboard");
+  redirect(getStorefrontEntryRoute(session.activeStoreType, permissionKeys));
 }

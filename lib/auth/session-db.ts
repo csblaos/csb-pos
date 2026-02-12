@@ -18,6 +18,7 @@ type SessionUser = {
 export type ActiveMembership = {
   storeId: string;
   storeName: string;
+  storeType: "ONLINE_RETAIL" | "RESTAURANT" | "CAFE" | "OTHER";
   roleId: string;
   roleName: string;
 };
@@ -32,6 +33,7 @@ async function findPrimaryMembership(userId: string) {
     .select({
       storeId: storeMembers.storeId,
       storeName: stores.name,
+      storeType: stores.storeType,
       roleId: roles.id,
       roleName: roles.name,
     })
@@ -53,6 +55,7 @@ export async function findActiveMembershipByStore(
     .select({
       storeId: storeMembers.storeId,
       storeName: stores.name,
+      storeType: stores.storeType,
       roleId: roles.id,
       roleName: roles.name,
     })
@@ -76,6 +79,7 @@ export async function listActiveMemberships(userId: string): Promise<ActiveMembe
     .select({
       storeId: storeMembers.storeId,
       storeName: stores.name,
+      storeType: stores.storeType,
       roleId: roles.id,
       roleName: roles.name,
     })
@@ -117,6 +121,7 @@ export async function buildSessionForUser(
     hasStoreMembership: Boolean(membership),
     activeStoreId: membership?.storeId ?? null,
     activeStoreName: membership?.storeName ?? null,
+    activeStoreType: membership?.storeType ?? null,
     activeRoleId: membership?.roleId ?? null,
     activeRoleName: membership?.roleName ?? null,
   };

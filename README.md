@@ -130,6 +130,16 @@ npm run db:migrate
 
 - คำสั่ง DB (`db:migrate`, `db:repair`, `db:push`) ควรรันหลัง `source .env.local` เพื่อให้ชี้ DB เป้าหมายถูกต้อง
 - ถ้าไม่โหลด env อาจไปรันผิดฐานข้อมูล
+- ถ้าต้องการอัปโหลดโลโก้ร้านจาก onboarding ต้องตั้งค่า Cloudflare R2 ใน `.env.local`:
+
+```bash
+R2_ACCOUNT_ID=...
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
+R2_BUCKET=...
+R2_PUBLIC_BASE_URL=... # optional
+R2_STORE_LOGO_PREFIX=store-logos # optional
+```
 
 ## 8) แนวทางก่อน merge/push
 
@@ -139,4 +149,3 @@ Checklist แนะนำ:
 - migration ใหม่ apply ได้จริง
 - ไม่มีไฟล์ migration ตกหล่น
 - flow สำคัญของฟีเจอร์ที่แก้ทำงานจริง
-

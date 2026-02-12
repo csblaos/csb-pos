@@ -4,7 +4,7 @@ import { SignupForm } from "@/components/app/signup-form";
 import { getSession } from "@/lib/auth/session";
 import { getUserSystemRole } from "@/lib/auth/system-admin";
 import { getUserPermissionsForCurrentSession } from "@/lib/rbac/access";
-import { getPreferredAuthorizedRoute } from "@/lib/rbac/navigation";
+import { getStorefrontEntryRoute } from "@/lib/storefront/routing";
 
 export default async function SignupPage() {
   const session = await getSession();
@@ -19,7 +19,7 @@ export default async function SignupPage() {
     }
 
     const permissionKeys = await getUserPermissionsForCurrentSession();
-    redirect(getPreferredAuthorizedRoute(permissionKeys) ?? "/dashboard");
+    redirect(getStorefrontEntryRoute(session.activeStoreType, permissionKeys));
   }
 
   return (

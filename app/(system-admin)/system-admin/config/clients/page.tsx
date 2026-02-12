@@ -1,8 +1,14 @@
 import { SuperadminManagement } from "@/components/system-admin/superadmin-management";
+import { getGlobalBranchPolicy } from "@/lib/branches/policy";
 import { listSuperadmins } from "@/lib/system-admin/superadmins";
 
+export const dynamic = "force-dynamic";
+
 export default async function SystemAdminClientsConfigPage() {
-  const superadmins = await listSuperadmins();
+  const [superadmins, globalBranchDefaults] = await Promise.all([
+    listSuperadmins(),
+    getGlobalBranchPolicy(),
+  ]);
 
   return (
     <section className="space-y-4">
@@ -13,7 +19,10 @@ export default async function SystemAdminClientsConfigPage() {
         </p>
       </header>
 
-      <SuperadminManagement superadmins={superadmins} />
+      <SuperadminManagement
+        superadmins={superadmins}
+        globalBranchDefaults={globalBranchDefaults}
+      />
     </section>
   );
 }

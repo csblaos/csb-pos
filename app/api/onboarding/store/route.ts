@@ -17,6 +17,7 @@ import {
   rolePermissions,
   roles,
   storeMembers,
+  storeBranches,
   stores,
   users,
   waConnections,
@@ -29,13 +30,147 @@ import {
   permissionKey,
 } from "@/lib/rbac/defaults";
 import { ensurePermissionCatalog } from "@/lib/rbac/catalog";
+import { isR2Configured, uploadStoreLogoToR2 } from "@/lib/storage/r2";
+import { getGlobalStoreLogoPolicy } from "@/lib/system-config/policy";
+
+const storeTypeSchema = z.enum(["ONLINE_RETAIL", "RESTAURANT", "CAFE", "OTHER"]);
+
+const createStoreJsonSchema = z.object({
+  storeType: storeTypeSchema,
+  storeName: z.string().trim().min(2).max(120),
+  logoName: z.string().trim().min(1).max(120).optional(),
+  address: z.string().trim().min(4).max(300).optional(),
+  phoneNumber: z
+    .string()
+    .trim()
+    .min(6)
+    .max(20)
+    .regex(/^[0-9+\-\s()]+$/)
+    .optional(),
+  currency: z.enum(["LAK", "THB", "USD"]).optional(),
+  vatEnabled: z.boolean().optional(),
+  vatRate: z.number().int().min(0).max(10000).optional(),
+});
+
+const createStoreMultipartSchema = z.object({
+  storeType: storeTypeSchema,
+  storeName: z.string().trim().min(2).max(120),
+  logoName: z.string().trim().min(1).max(120),
+  address: z.string().trim().min(4).max(300),
+  phoneNumber: z
+    .string()
+    .trim()
+    .min(6)
+    .max(20)
+    .regex(/^[0-9+\-\s()]+$/),
+});
+
+type CreateStoreInput = {
+  storeType: z.infer<typeof storeTypeSchema>;
+  storeName: string;
+  logoName: string | null;
+  address: string | null;
+  phoneNumber: string | null;
+  currency: "LAK" | "THB" | "USD";
+  vatEnabled: boolean;
+  vatRate: number;
+  logoFile: File | null;
+};
+
+function normalizeOptionalText(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function isFileLike(value: FormDataEntryValue | null): value is File {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as {
+    size?: unknown;
+    type?: unknown;
+    arrayBuffer?: unknown;
+  };
+
+  return (
+    typeof candidate.size === "number" &&
+    typeof candidate.type === "string" &&
+    typeof candidate.arrayBuffer === "function"
+  );
+}
+
+async function parseCreateStoreInput(request: Request) {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (contentType.includes("multipart/form-data")) {
+    const formData = await request.formData();
+    const payload = createStoreMultipartSchema.safeParse({
+      storeType: formData.get("storeType"),
+      storeName: formData.get("storeName"),
+      logoName: formData.get("logoName"),
+      address: formData.get("address"),
+      phoneNumber: formData.get("phoneNumber"),
+    });
+
+    if (!payload.success) {
+      return {
+        ok: false as const,
+        response: NextResponse.json({ message: "ข้อมูลร้านค้าไม่ถูกต้อง" }, { status: 400 }),
+      };
+    }
+
+    const logoFileValue = formData.get("logoFile");
+    const logoFile = isFileLike(logoFileValue) && logoFileValue.size > 0 ? logoFileValue : null;
+
+    return {
+      ok: true as const,
+      value: {
+        storeType: payload.data.storeType,
+        storeName: payload.data.storeName,
+        logoName: payload.data.logoName,
+        address: payload.data.address,
+        phoneNumber: payload.data.phoneNumber,
+        // ค่าเริ่มต้นตาม requirement: ยังไม่ตั้งค่า currency/vat ใน onboarding
+        currency: "LAK" as const,
+        vatEnabled: false,
+        vatRate: 700,
+        logoFile,
+      } satisfies CreateStoreInput,
+    };
+  }
+
+  const raw = await request.json().catch(() => null);
+  const payload = createStoreJsonSchema.safeParse(raw);
+  if (!payload.success) {
+    return {
+      ok: false as const,
+      response: NextResponse.json({ message: "ข้อมูลร้านค้าไม่ถูกต้อง" }, { status: 400 }),
+    };
+  }
+
+  return {
+    ok: true as const,
+    value: {
+      storeType: payload.data.storeType,
+      storeName: payload.data.storeName,
+      logoName: normalizeOptionalText(payload.data.logoName),
+      address: normalizeOptionalText(payload.data.address),
+      phoneNumber: normalizeOptionalText(payload.data.phoneNumber),
+      currency: payload.data.currency ?? "LAK",
+      vatEnabled: payload.data.vatEnabled ?? false,
+      vatRate: payload.data.vatRate ?? 700,
+      logoFile: null,
+    } satisfies CreateStoreInput,
+  };
+}
 
 const createStoreSchema = z.object({
   storeType: z.enum(["ONLINE_RETAIL", "RESTAURANT", "CAFE", "OTHER"]),
   storeName: z.string().trim().min(2).max(120),
-  currency: z.enum(["LAK", "THB", "USD"]),
-  vatEnabled: z.boolean(),
-  vatRate: z.number().int().min(0).max(10000),
 });
 
 export async function POST(request: Request) {
@@ -60,19 +195,67 @@ export async function POST(request: Request) {
     );
   }
 
-  const payload = createStoreSchema.safeParse(await request.json());
+  const parsedInput = await parseCreateStoreInput(request);
+  if (!parsedInput.ok) {
+    return parsedInput.response;
+  }
+  const input = parsedInput.value;
+
+  const payload = createStoreSchema.safeParse({
+    storeType: input.storeType,
+    storeName: input.storeName,
+  });
   if (!payload.success) {
     return NextResponse.json({ message: "ข้อมูลร้านค้าไม่ถูกต้อง" }, { status: 400 });
   }
 
-  if (payload.data.storeType !== "ONLINE_RETAIL") {
-    return NextResponse.json(
-      { message: "ประเภทร้านนี้ยังไม่เปิดให้ใช้งาน" },
-      { status: 400 },
-    );
+  const storeId = randomUUID();
+  const mainBranchId = randomUUID();
+  let logoUrl: string | null = null;
+  let warningMessage: string | null = null;
+  let configuredLogoMaxSizeMb = 5;
+
+  if (input.logoFile) {
+    if (!isR2Configured()) {
+      warningMessage = "ยังไม่ได้ตั้งค่า Cloudflare R2 ระบบจะข้ามการอัปโหลดโลโก้ชั่วคราว";
+    } else {
+      try {
+        const storeLogoPolicy = await getGlobalStoreLogoPolicy();
+        configuredLogoMaxSizeMb = storeLogoPolicy.maxSizeMb;
+        const upload = await uploadStoreLogoToR2({
+          storeId,
+          logoName: input.logoName ?? input.storeName,
+          file: input.logoFile,
+          policy: {
+            maxSizeBytes: storeLogoPolicy.maxSizeMb * 1024 * 1024,
+            autoResize: storeLogoPolicy.autoResize,
+            resizeMaxWidth: storeLogoPolicy.resizeMaxWidth,
+          },
+        });
+        logoUrl = upload.url;
+      } catch (error) {
+        if (error instanceof Error) {
+          if (error.message === "UNSUPPORTED_FILE_TYPE") {
+            return NextResponse.json(
+              { message: "รองรับเฉพาะไฟล์รูปภาพสำหรับโลโก้ร้าน" },
+              { status: 400 },
+            );
+          }
+          if (error.message === "FILE_TOO_LARGE") {
+            return NextResponse.json(
+              {
+                message: `ไฟล์โลโก้ใหญ่เกินกำหนด (ไม่เกิน ${configuredLogoMaxSizeMb}MB)`,
+              },
+              { status: 400 },
+            );
+          }
+        }
+
+        return NextResponse.json({ message: "อัปโหลดโลโก้ไม่สำเร็จ" }, { status: 500 });
+      }
+    }
   }
 
-  const storeId = randomUUID();
   const roleIds = Object.fromEntries(
     defaultRoleNames.map((name) => [name, randomUUID()]),
   ) as Record<(typeof defaultRoleNames)[number], string>;
@@ -83,10 +266,14 @@ export async function POST(request: Request) {
     await tx.insert(stores).values({
       id: storeId,
       name: payload.data.storeName,
+      logoName: input.logoName,
+      logoUrl,
+      address: input.address,
+      phoneNumber: input.phoneNumber,
       storeType: payload.data.storeType,
-      currency: payload.data.currency,
-      vatEnabled: payload.data.vatEnabled,
-      vatRate: payload.data.vatRate,
+      currency: input.currency,
+      vatEnabled: input.vatEnabled,
+      vatRate: input.vatRate,
     });
 
     await tx.insert(roles).values(
@@ -120,6 +307,14 @@ export async function POST(request: Request) {
       userId: session.userId,
       roleId: roleIds.Owner,
       status: "ACTIVE",
+    });
+
+    await tx.insert(storeBranches).values({
+      id: mainBranchId,
+      storeId,
+      name: "สาขาหลัก",
+      code: "MAIN",
+      address: null,
     });
 
     await tx.insert(fbConnections).values({
@@ -175,6 +370,7 @@ export async function POST(request: Request) {
     ok: true,
     token: sessionCookie.value,
     next: "/dashboard",
+    warning: warningMessage,
   });
 
   response.cookies.set(

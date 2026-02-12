@@ -8,7 +8,7 @@ import { createSessionCookie, SessionStoreUnavailableError } from "@/lib/auth/se
 import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
 import { getUserPermissions } from "@/lib/rbac/access";
-import { getPreferredAuthorizedRoute } from "@/lib/rbac/navigation";
+import { getStorefrontEntryRoute } from "@/lib/storefront/routing";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -77,7 +77,7 @@ export async function POST(request: Request) {
       { userId: session.userId },
       session.activeStoreId,
     );
-    nextRoute = getPreferredAuthorizedRoute(permissionKeys) ?? "/dashboard";
+    nextRoute = getStorefrontEntryRoute(session.activeStoreType, permissionKeys);
   }
 
   const response = NextResponse.json({

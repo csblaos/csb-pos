@@ -4,7 +4,7 @@ import { z } from "zod";
 import { createSessionCookie, getSession, SessionStoreUnavailableError } from "@/lib/auth/session";
 import { findActiveMembershipByStore } from "@/lib/auth/session-db";
 import { getUserPermissions } from "@/lib/rbac/access";
-import { getPreferredAuthorizedRoute } from "@/lib/rbac/navigation";
+import { getStorefrontEntryRoute } from "@/lib/storefront/routing";
 
 const switchStoreSchema = z.object({
   storeId: z.string().min(1),
@@ -38,6 +38,7 @@ export async function POST(request: Request) {
       hasStoreMembership: true,
       activeStoreId: membership.storeId,
       activeStoreName: membership.storeName,
+      activeStoreType: membership.storeType,
       activeRoleId: membership.roleId,
       activeRoleName: membership.roleName,
     });
@@ -55,7 +56,7 @@ export async function POST(request: Request) {
     { userId: session.userId },
     membership.storeId,
   );
-  const nextRoute = getPreferredAuthorizedRoute(permissionKeys) ?? "/dashboard";
+  const nextRoute = getStorefrontEntryRoute(membership.storeType, permissionKeys);
 
   const response = NextResponse.json({
     ok: true,

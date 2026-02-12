@@ -10,6 +10,8 @@ const updateSuperadminSchema = z.object({
   action: z.literal("set_store_creation_config"),
   canCreateStores: z.boolean(),
   maxStores: z.number().int().min(1).max(100).nullable(),
+  canCreateBranches: z.boolean().nullable(),
+  maxBranchesPerStore: z.number().int().min(0).max(500).nullable(),
 });
 
 export async function PATCH(
@@ -50,6 +52,11 @@ export async function PATCH(
       .set({
         canCreateStores: payload.data.canCreateStores,
         maxStores: payload.data.canCreateStores ? payload.data.maxStores : null,
+        canCreateBranches: payload.data.canCreateBranches,
+        maxBranchesPerStore:
+          payload.data.canCreateBranches === false
+            ? null
+            : payload.data.maxBranchesPerStore,
       })
       .where(eq(users.id, userId));
 

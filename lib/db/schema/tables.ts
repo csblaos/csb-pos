@@ -59,6 +59,8 @@ export const users = sqliteTable(
       .default("USER"),
     canCreateStores: integer("can_create_stores", { mode: "boolean" }),
     maxStores: integer("max_stores"),
+    canCreateBranches: integer("can_create_branches", { mode: "boolean" }),
+    maxBranchesPerStore: integer("max_branches_per_store"),
     sessionLimit: integer("session_limit"),
     createdAt: text("created_at").notNull().default(createdAtDefault),
   },
@@ -73,6 +75,10 @@ export const stores = sqliteTable(
   {
     id: id(),
     name: text("name").notNull(),
+    logoName: text("logo_name"),
+    logoUrl: text("logo_url"),
+    address: text("address"),
+    phoneNumber: text("phone_number"),
     storeType: text("store_type", { enum: storeTypeEnum })
       .notNull()
       .default("ONLINE_RETAIL"),
@@ -81,10 +87,71 @@ export const stores = sqliteTable(
       .notNull()
       .default(false),
     vatRate: integer("vat_rate").notNull().default(700),
+    maxBranchesOverride: integer("max_branches_override"),
     createdAt: text("created_at").notNull().default(createdAtDefault),
   },
   (table) => ({
     storesCreatedAtIdx: index("stores_created_at_idx").on(table.createdAt),
+  }),
+);
+
+export const systemConfig = sqliteTable("system_config", {
+  id: text("id").primaryKey().notNull().default("global"),
+  defaultCanCreateBranches: integer("default_can_create_branches", { mode: "boolean" })
+    .notNull()
+    .default(true),
+  defaultMaxBranchesPerStore: integer("default_max_branches_per_store").default(1),
+  defaultSessionLimit: integer("default_session_limit").notNull().default(1),
+  storeLogoMaxSizeMb: integer("store_logo_max_size_mb").notNull().default(5),
+  storeLogoAutoResize: integer("store_logo_auto_resize", { mode: "boolean" })
+    .notNull()
+    .default(true),
+  storeLogoResizeMaxWidth: integer("store_logo_resize_max_width").notNull().default(1280),
+  createdAt: text("created_at").notNull().default(createdAtDefault),
+  updatedAt: text("updated_at").notNull().default(createdAtDefault),
+});
+
+export const storeTypeTemplates = sqliteTable(
+  "store_type_templates",
+  {
+    storeType: text("store_type", { enum: storeTypeEnum }).primaryKey().notNull(),
+    appLayout: text("app_layout").notNull(),
+    displayName: text("display_name").notNull(),
+    description: text("description").notNull(),
+    createdAt: text("created_at").notNull().default(createdAtDefault),
+    updatedAt: text("updated_at").notNull().default(createdAtDefault),
+  },
+  (table) => ({
+    storeTypeTemplatesLayoutIdx: index("store_type_templates_app_layout_idx").on(table.appLayout),
+  }),
+);
+
+export const storeBranches = sqliteTable(
+  "store_branches",
+  {
+    id: id(),
+    storeId: text("store_id")
+      .notNull()
+      .references(() => stores.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    code: text("code"),
+    address: text("address"),
+    createdAt: text("created_at").notNull().default(createdAtDefault),
+  },
+  (table) => ({
+    storeBranchesStoreIdIdx: index("store_branches_store_id_idx").on(table.storeId),
+    storeBranchesStoreCreatedAtIdx: index("store_branches_store_created_at_idx").on(
+      table.storeId,
+      table.createdAt,
+    ),
+    storeBranchesStoreNameUnique: uniqueIndex("store_branches_store_name_unique").on(
+      table.storeId,
+      table.name,
+    ),
+    storeBranchesStoreCodeUnique: uniqueIndex("store_branches_store_code_unique").on(
+      table.storeId,
+      table.code,
+    ),
   }),
 );
 

@@ -17,6 +17,7 @@ import {
 import { sessionSchema, type AppSession } from "@/lib/auth/session-types";
 import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
+import { getGlobalSessionPolicy } from "@/lib/system-config/policy";
 
 export type { AppSession } from "@/lib/auth/session-types";
 
@@ -24,7 +25,6 @@ const SESSION_TOKEN_KEY_PREFIX = "auth:session-token";
 const USER_TOKEN_VERSION_KEY_PREFIX = "auth:user-token-version";
 const USER_ACTIVE_SESSIONS_KEY_PREFIX = "auth:user-active-sessions";
 const USER_TOKEN_VERSION_TTL_SECONDS = 60 * 60 * 24 * 365;
-const DEFAULT_MAX_SESSIONS_PER_USER = 1;
 const AUTH_DEBUG = process.env.AUTH_DEBUG === "1";
 
 const sessionTokenCacheKey = (tokenId: string) =>
@@ -67,20 +67,6 @@ const parseSessionLimit = (rawValue: unknown) => {
   }
 
   return rawValue;
-};
-
-const parseMaxSessionsFromEnv = () => {
-  const rawValue = process.env.AUTH_MAX_SESSIONS_PER_USER?.trim();
-  if (!rawValue) {
-    return DEFAULT_MAX_SESSIONS_PER_USER;
-  }
-
-  const parsed = Number(rawValue);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    return DEFAULT_MAX_SESSIONS_PER_USER;
-  }
-
-  return parsed;
 };
 
 const isActiveSessionRef = (rawValue: unknown): rawValue is ActiveSessionRef => {
@@ -161,7 +147,8 @@ const getEffectiveSessionLimit = async (userId: string) => {
     return overrideLimit;
   }
 
-  return parseMaxSessionsFromEnv();
+  const globalPolicy = await getGlobalSessionPolicy();
+  return globalPolicy.defaultSessionLimit;
 };
 
 async function enforceSessionLimit(userId: string, nextSession?: ActiveSessionRef) {

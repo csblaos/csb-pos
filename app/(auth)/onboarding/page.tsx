@@ -16,5 +16,10 @@ export default async function OnboardingPage() {
     redirect("/system-admin");
   }
 
-  return <OnboardingWizard hasStoreMembership={session.hasStoreMembership} />;
+  return (
+    <OnboardingWizard
+      hasStoreMembership={session.hasStoreMembership}
+      activeStoreType={session.activeStoreType}
+    />
+  );
 }

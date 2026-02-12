@@ -1,18 +1,24 @@
 import Link from "next/link";
-import { Settings2, ShieldCheck, Users } from "lucide-react";
+import { Settings2, ShieldCheck, Store, Users } from "lucide-react";
 
 const menus = [
   {
     href: "/system-admin/config/clients",
     title: "Manage Client",
-    description: "จัดการบัญชี SUPERADMIN และโควตาการสร้างร้าน",
+    description: "จัดการบัญชี SUPERADMIN และโควตาร้าน/สาขา",
     icon: Users,
   },
   {
     href: "/system-admin/config/system",
     title: "System Config",
-    description: "ตั้งค่าระบบกลางและนโยบายหลักของแพลตฟอร์ม",
+    description: "ตั้งค่า Global Policy เช่นโควตาสาขาเริ่มต้น",
     icon: Settings2,
+  },
+  {
+    href: "/system-admin/config/stores-users",
+    title: "Store & User Config",
+    description: "ตั้งค่าร้านทั้งหมดและผู้ใช้ทั้งหมดโดย SYSTEM_ADMIN",
+    icon: Store,
   },
   {
     href: "/system-admin/config/security",
@@ -32,7 +38,7 @@ export default function SystemAdminConfigPage() {
         </p>
       </header>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
         {menus.map((menu) => {
           const Icon = menu.icon;
 

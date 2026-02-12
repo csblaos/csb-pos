@@ -124,6 +124,67 @@ async function insertPermissions() {
   }
 }
 
+async function ensureGlobalBranchConfig() {
+  await db.execute({
+    sql: `
+      INSERT INTO system_config (
+        id,
+        default_can_create_branches,
+        default_max_branches_per_store,
+        default_session_limit
+      )
+      VALUES ('global', 1, 1, 1)
+      ON CONFLICT(id) DO NOTHING
+    `,
+    args: [],
+  });
+
+  await db.execute({
+    sql: `
+      UPDATE system_config
+      SET
+        default_max_branches_per_store = 1,
+        default_session_limit = 1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = 'global'
+    `,
+    args: [],
+  });
+}
+
+async function ensureStoreTypeTemplates() {
+  await db.execute({
+    sql: `
+      CREATE TABLE IF NOT EXISTS store_type_templates (
+        store_type text PRIMARY KEY NOT NULL,
+        app_layout text NOT NULL,
+        display_name text NOT NULL,
+        description text NOT NULL,
+        created_at text NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+        updated_at text NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+      )
+    `,
+    args: [],
+  });
+
+  await db.execute({
+    sql: `
+      INSERT INTO store_type_templates (store_type, app_layout, display_name, description)
+      VALUES
+        ('ONLINE_RETAIL', 'ONLINE_POS', 'Online POS', 'UI หลักสำหรับร้านค้าที่เน้นขายออนไลน์'),
+        ('RESTAURANT', 'RESTAURANT_POS', 'Restaurant POS', 'Template ขั้นต้นสำหรับร้านอาหาร'),
+        ('CAFE', 'CAFE_POS', 'Cafe POS', 'Template ขั้นต้นสำหรับคาเฟ่'),
+        ('OTHER', 'OTHER_POS', 'Other POS', 'Template ขั้นต้นสำหรับธุรกิจอื่นๆ')
+      ON CONFLICT(store_type) DO UPDATE SET
+        app_layout = excluded.app_layout,
+        display_name = excluded.display_name,
+        description = excluded.description,
+        updated_at = CURRENT_TIMESTAMP
+    `,
+    args: [],
+  });
+}
+
 async function insertStoreAndOwner() {
   let ownerUserId = "user_owner_demo";
   const storeId = "store_demo_main";
@@ -153,6 +214,14 @@ async function insertStoreAndOwner() {
       VALUES (?, ?, ?, ?, ?, ?)
     `,
     args: [storeId, "Demo POS Store", "ONLINE_RETAIL", "LAK", 1, 700],
+  });
+
+  await db.execute({
+    sql: `
+      INSERT OR IGNORE INTO store_branches (id, store_id, name, code, address)
+      VALUES (?, ?, ?, ?, ?)
+    `,
+    args: ["branch_demo_main", storeId, "สาขาหลัก", "MAIN", "สำนักงานใหญ่"],
   });
 
   return { ownerUserId, storeId };
@@ -353,6 +422,8 @@ async function summarize(storeId) {
 }
 
 async function main() {
+  await ensureGlobalBranchConfig();
+  await ensureStoreTypeTemplates();
   const { ownerUserId, storeId } = await insertStoreAndOwner();
   await insertPermissions();
   await insertRoles(storeId, ownerUserId);
