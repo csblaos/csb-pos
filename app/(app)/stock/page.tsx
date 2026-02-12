@@ -1,6 +1,6 @@
+import dynamic from "next/dynamic";
 import { redirect } from "next/navigation";
 
-import { StockLedger } from "@/components/app/stock-ledger";
 import { getSession } from "@/lib/auth/session";
 import {
   getUserPermissionsForCurrentSession,
@@ -8,6 +8,17 @@ import {
 } from "@/lib/rbac/access";
 import { createPerfScope } from "@/server/perf/perf";
 import { getStockOverview } from "@/server/services/stock.service";
+
+const StockLedger = dynamic(
+  () => import("@/components/app/stock-ledger").then((module) => module.StockLedger),
+  {
+    loading: () => (
+      <div className="rounded-xl border bg-white p-4 text-sm text-muted-foreground">
+        กำลังโหลดหน้าสต็อก...
+      </div>
+    ),
+  },
+);
 
 export default async function StockPage() {
   const perf = createPerfScope("page.stock", "render");

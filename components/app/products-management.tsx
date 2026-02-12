@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 
@@ -42,8 +42,13 @@ export function ProductsManagement({
   canArchive,
   canManageUnits,
 }: ProductsManagementProps) {
+  const PRODUCT_PAGE_SIZE = 20;
+
   const router = useRouter();
+  const [productItems, setProductItems] = useState<ProductListItem[]>(products);
   const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query);
+  const [productPage, setProductPage] = useState(1);
   const [mode, setMode] = useState<"create" | "edit">("create");
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -66,20 +71,37 @@ export function ProductsManagement({
 
   const unitById = useMemo(() => new Map(units.map((unit) => [unit.id, unit])), [units]);
 
+  useEffect(() => {
+    setProductItems(products);
+  }, [products]);
+
   const filteredProducts = useMemo(() => {
-    const keyword = query.trim().toLowerCase();
+    const keyword = deferredQuery.trim().toLowerCase();
     if (!keyword) {
-      return products;
+      return productItems;
     }
 
-    return products.filter((item) => {
+    return productItems.filter((item) => {
       const barcode = item.barcode ?? "";
       return [item.sku, item.name, barcode, item.baseUnitCode]
         .join(" ")
         .toLowerCase()
         .includes(keyword);
     });
-  }, [products, query]);
+  }, [deferredQuery, productItems]);
+
+  const productPageCount = Math.max(1, Math.ceil(filteredProducts.length / PRODUCT_PAGE_SIZE));
+  const currentProductPage = Math.min(productPage, productPageCount);
+  const paginatedProducts = useMemo(() => {
+    const start = (currentProductPage - 1) * PRODUCT_PAGE_SIZE;
+    return filteredProducts.slice(start, start + PRODUCT_PAGE_SIZE);
+  }, [currentProductPage, filteredProducts]);
+
+  useEffect(() => {
+    if (productPage > productPageCount) {
+      setProductPage(productPageCount);
+    }
+  }, [productPage, productPageCount]);
 
   const beginCreate = () => {
     if (!canCreate) {
@@ -131,6 +153,46 @@ export function ProductsManagement({
     const requestKey = mode === "create" ? "create" : `update-${editingProductId}`;
     setLoadingKey(requestKey);
 
+    const previousProducts = productItems;
+
+    if (mode === "edit" && editingProductId) {
+      const selectedBaseUnit = unitById.get(values.baseUnitId);
+      const nextConversions: ProductListItem["conversions"] = values.conversions
+        .flatMap((conversion) => {
+          const unit = unitById.get(conversion.unitId);
+          if (!unit) {
+            return [];
+          }
+
+          return [{
+            unitId: conversion.unitId,
+            unitCode: unit.code,
+            unitNameTh: unit.nameTh,
+            multiplierToBase: conversion.multiplierToBase,
+          }];
+        })
+        .sort((a, b) => a.multiplierToBase - b.multiplierToBase);
+
+      setProductItems((previous) =>
+        previous.map((item) =>
+          item.id === editingProductId
+            ? {
+                ...item,
+                sku: values.sku,
+                name: values.name,
+                barcode: values.barcode?.trim() ? values.barcode.trim() : null,
+                baseUnitId: values.baseUnitId,
+                baseUnitCode: selectedBaseUnit?.code ?? item.baseUnitCode,
+                baseUnitNameTh: selectedBaseUnit?.nameTh ?? item.baseUnitNameTh,
+                priceBase: values.priceBase,
+                costBase: values.costBase,
+                conversions: nextConversions,
+              }
+            : item,
+        ),
+      );
+    }
+
     const response =
       mode === "create"
         ? await authFetch("/api/products", {
@@ -147,13 +209,21 @@ export function ProductsManagement({
     const data = (await response.json().catch(() => null)) as
       | {
           message?: string;
+          product?: ProductListItem;
         }
       | null;
 
     if (!response.ok) {
+      setProductItems(previousProducts);
       setErrorMessage(data?.message ?? "บันทึกสินค้าไม่สำเร็จ");
       setLoadingKey(null);
       return;
+    }
+
+    const createdProduct = data?.product;
+    if (mode === "create" && createdProduct) {
+      setProductItems((previous) => [createdProduct, ...previous]);
+      setProductPage(1);
     }
 
     setSuccessMessage(mode === "create" ? "สร้างสินค้าเรียบร้อย" : "อัปเดตสินค้าเรียบร้อย");
@@ -168,6 +238,12 @@ export function ProductsManagement({
     setSuccessMessage(null);
     setLoadingKey(`active-${product.id}`);
 
+    setProductItems((previous) =>
+      previous.map((item) =>
+        item.id === product.id ? { ...item, active: nextActive } : item,
+      ),
+    );
+
     const response = await authFetch(`/api/products/${product.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -181,6 +257,11 @@ export function ProductsManagement({
       | null;
 
     if (!response.ok) {
+      setProductItems((previous) =>
+        previous.map((item) =>
+          item.id === product.id ? { ...item, active: product.active } : item,
+        ),
+      );
       setErrorMessage(data?.message ?? "เปลี่ยนสถานะสินค้าไม่สำเร็จ");
       setLoadingKey(null);
       return;
@@ -199,7 +280,10 @@ export function ProductsManagement({
         <div className="flex items-center gap-2">
           <input
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setProductPage(1);
+            }}
             placeholder="ค้นหา SKU, ชื่อสินค้า, บาร์โค้ด"
             className="h-10 flex-1 rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
           />
@@ -426,7 +510,7 @@ export function ProductsManagement({
           </article>
         ) : null}
 
-        {filteredProducts.map((product) => (
+        {paginatedProducts.map((product) => (
           <article key={product.id} className="space-y-2 rounded-xl border bg-white p-4 shadow-sm">
             <div className="flex items-start justify-between gap-2">
               <div>
@@ -487,6 +571,40 @@ export function ProductsManagement({
             </div>
           </article>
         ))}
+
+        {filteredProducts.length > 0 ? (
+          <div className="flex items-center justify-between rounded-lg border bg-white px-3 py-2 text-xs">
+            <p className="text-muted-foreground">
+              หน้า {currentProductPage.toLocaleString("th-TH")} /{" "}
+              {productPageCount.toLocaleString("th-TH")} (
+              {filteredProducts.length.toLocaleString("th-TH")} รายการ)
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-8 px-2 text-xs"
+                disabled={currentProductPage <= 1}
+                onClick={() =>
+                  setProductPage((previous) => Math.max(1, previous - 1))
+                }
+              >
+                ก่อนหน้า
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-8 px-2 text-xs"
+                disabled={currentProductPage >= productPageCount}
+                onClick={() =>
+                  setProductPage((previous) => Math.min(productPageCount, previous + 1))
+                }
+              >
+                ถัดไป
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       {successMessage ? <p className="text-sm text-emerald-700">{successMessage}</p> : null}

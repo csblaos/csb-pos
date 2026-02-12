@@ -6,12 +6,7 @@ import {
   getUserPermissionsForCurrentSession,
   isPermissionGranted,
 } from "@/lib/rbac/access";
-import {
-  getGrossProfitSummary,
-  getSalesByChannel,
-  getSalesSummary,
-  getTopProducts,
-} from "@/lib/reports/queries";
+import { getReportsViewData } from "@/server/services/reports.service";
 
 const channelLabel: Record<"WALK_IN" | "FACEBOOK" | "WHATSAPP", string> = {
   WALK_IN: "Walk-in",
@@ -20,7 +15,10 @@ const channelLabel: Record<"WALK_IN" | "FACEBOOK" | "WHATSAPP", string> = {
 };
 
 export default async function ReportsPage() {
-  const session = await getSession();
+  const [session, permissionKeys] = await Promise.all([
+    getSession(),
+    getUserPermissionsForCurrentSession(),
+  ]);
   if (!session) {
     redirect("/login");
   }
@@ -29,7 +27,6 @@ export default async function ReportsPage() {
     redirect("/onboarding");
   }
 
-  const permissionKeys = await getUserPermissionsForCurrentSession();
   const canView = isPermissionGranted(permissionKeys, "reports.view");
 
   if (!canView) {
@@ -41,12 +38,12 @@ export default async function ReportsPage() {
     );
   }
 
-  const [salesSummary, topProducts, salesByChannel, grossProfit] = await Promise.all([
-    getSalesSummary(session.activeStoreId),
-    getTopProducts(session.activeStoreId, 10),
-    getSalesByChannel(session.activeStoreId),
-    getGrossProfitSummary(session.activeStoreId),
-  ]);
+  const { salesSummary, topProducts, salesByChannel, grossProfit } =
+    await getReportsViewData({
+      storeId: session.activeStoreId,
+      topProductsLimit: 10,
+      useCache: true,
+    });
 
   return (
     <section className="space-y-4">

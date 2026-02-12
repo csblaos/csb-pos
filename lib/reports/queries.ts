@@ -61,7 +61,8 @@ async function fetchDashboardMetrics(storeId: string): Promise<DashboardMetrics>
           and(
             eq(orders.storeId, storeId),
             inArray(orders.status, paidStatuses),
-            sql`date(${orders.paidAt}) = date('now', 'localtime')`,
+            sql`${orders.paidAt} >= datetime('now', 'localtime', 'start of day', 'utc')`,
+            sql`${orders.paidAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')`,
           ),
         ),
     ),
@@ -74,7 +75,8 @@ async function fetchDashboardMetrics(storeId: string): Promise<DashboardMetrics>
         .where(
           and(
             eq(orders.storeId, storeId),
-            sql`date(${orders.createdAt}) = date('now', 'localtime')`,
+            sql`${orders.createdAt} >= datetime('now', 'localtime', 'start of day', 'utc')`,
+            sql`${orders.createdAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')`,
           ),
         ),
     ),
@@ -123,7 +125,8 @@ export async function getSalesSummary(storeId: string): Promise<SalesSummary> {
           and(
             eq(orders.storeId, storeId),
             inArray(orders.status, paidStatuses),
-            sql`date(${orders.paidAt}) = date('now', 'localtime')`,
+            sql`${orders.paidAt} >= datetime('now', 'localtime', 'start of day', 'utc')`,
+            sql`${orders.paidAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')`,
           ),
         ),
     ),
@@ -137,8 +140,8 @@ export async function getSalesSummary(storeId: string): Promise<SalesSummary> {
           and(
             eq(orders.storeId, storeId),
             inArray(orders.status, paidStatuses),
-            sql`date(${orders.paidAt}) >= date('now', 'start of month', 'localtime')`,
-            sql`date(${orders.paidAt}) <= date('now', 'localtime')`,
+            sql`${orders.paidAt} >= datetime('now', 'localtime', 'start of month', 'utc')`,
+            sql`${orders.paidAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')`,
           ),
         ),
     ),

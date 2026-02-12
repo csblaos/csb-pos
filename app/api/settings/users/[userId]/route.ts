@@ -2,9 +2,9 @@ import { and, eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { invalidateUserSessions } from "@/lib/auth/session";
+import { enforceUserSessionLimitNow, invalidateUserSessions } from "@/lib/auth/session";
 import { db } from "@/lib/db/client";
-import { roles, storeMembers } from "@/lib/db/schema";
+import { roles, storeMembers, users } from "@/lib/db/schema";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 
 const updateUserSchema = z.discriminatedUnion("action", [
@@ -15,6 +15,10 @@ const updateUserSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("set_status"),
     status: z.enum(["ACTIVE", "INVITED", "SUSPENDED"]),
+  }),
+  z.object({
+    action: z.literal("set_session_limit"),
+    sessionLimit: z.number().int().min(1).max(10).nullable(),
   }),
 ]);
 
@@ -127,6 +131,15 @@ export async function PATCH(
         .where(and(eq(storeMembers.storeId, storeId), eq(storeMembers.userId, userId)));
 
       await invalidateUserSessions(userId);
+    }
+
+    if (payload.data.action === "set_session_limit") {
+      await db
+        .update(users)
+        .set({ sessionLimit: payload.data.sessionLimit })
+        .where(eq(users.id, userId));
+
+      await enforceUserSessionLimitNow(userId);
     }
 
     return NextResponse.json({ ok: true });

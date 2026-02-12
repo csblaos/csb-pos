@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
@@ -52,7 +52,16 @@ export function StockLedger({
   canAdjust,
   canInbound,
 }: StockLedgerProps) {
+  const PRODUCT_PAGE_SIZE = 20;
+  const MOVEMENT_PAGE_SIZE = 20;
+
   const router = useRouter();
+  const [, startTransition] = useTransition();
+
+  const [productItems, setProductItems] = useState(products);
+  const [movementItems, setMovementItems] = useState(recentMovements);
+  const [productPage, setProductPage] = useState(1);
+  const [movementPage, setMovementPage] = useState(1);
 
   const movementTypeOptions = useMemo(() => {
     const options: MovementType[] = [];
@@ -78,9 +87,47 @@ export function StockLedger({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    setProductItems(products);
+  }, [products]);
+
+  useEffect(() => {
+    setMovementItems(recentMovements);
+  }, [recentMovements]);
+
+  useEffect(() => {
+    if (movementTypeOptions.length === 0) {
+      return;
+    }
+
+    if (!movementTypeOptions.includes(movementType)) {
+      setMovementType(movementTypeOptions[0]);
+    }
+  }, [movementType, movementTypeOptions]);
+
+  useEffect(() => {
+    if (productItems.length === 0) {
+      setProductId("");
+      setUnitId("");
+      return;
+    }
+
+    const selected = productItems.find((item) => item.productId === productId);
+    if (!selected) {
+      setProductId(productItems[0].productId);
+      setUnitId(productItems[0].unitOptions[0]?.unitId ?? "");
+      return;
+    }
+
+    const matchedUnit = selected.unitOptions.find((unit) => unit.unitId === unitId);
+    if (!matchedUnit) {
+      setUnitId(selected.unitOptions[0]?.unitId ?? "");
+    }
+  }, [productId, productItems, unitId]);
+
   const selectedProduct = useMemo(
-    () => products.find((item) => item.productId === productId),
-    [products, productId],
+    () => productItems.find((item) => item.productId === productId),
+    [productId, productItems],
   );
 
   const selectedUnit = selectedProduct?.unitOptions.find((unit) => unit.unitId === unitId);
@@ -106,9 +153,41 @@ export function StockLedger({
 
   const onProductChange = (nextProductId: string) => {
     setProductId(nextProductId);
-    const product = products.find((item) => item.productId === nextProductId);
+    const product = productItems.find((item) => item.productId === nextProductId);
     setUnitId(product?.unitOptions[0]?.unitId ?? "");
   };
+
+  const productPageCount = Math.max(
+    1,
+    Math.ceil(productItems.length / PRODUCT_PAGE_SIZE),
+  );
+  const currentProductPage = Math.min(productPage, productPageCount);
+  const paginatedProducts = useMemo(() => {
+    const start = (currentProductPage - 1) * PRODUCT_PAGE_SIZE;
+    return productItems.slice(start, start + PRODUCT_PAGE_SIZE);
+  }, [currentProductPage, productItems]);
+
+  const movementPageCount = Math.max(
+    1,
+    Math.ceil(movementItems.length / MOVEMENT_PAGE_SIZE),
+  );
+  const currentMovementPage = Math.min(movementPage, movementPageCount);
+  const paginatedMovements = useMemo(() => {
+    const start = (currentMovementPage - 1) * MOVEMENT_PAGE_SIZE;
+    return movementItems.slice(start, start + MOVEMENT_PAGE_SIZE);
+  }, [currentMovementPage, movementItems]);
+
+  useEffect(() => {
+    if (productPage > productPageCount) {
+      setProductPage(productPageCount);
+    }
+  }, [productPage, productPageCount]);
+
+  useEffect(() => {
+    if (movementPage > movementPageCount) {
+      setMovementPage(movementPageCount);
+    }
+  }, [movementPage, movementPageCount]);
 
   const submitMovement = async () => {
     if (!canCreate) {
@@ -147,11 +226,55 @@ export function StockLedger({
       return;
     }
 
+    if (selectedProduct && qtyBasePreview !== null) {
+      const now = new Date().toISOString();
+      const movementTypeForView: InventoryMovementView["type"] =
+        movementType === "IN"
+          ? "IN"
+          : movementType === "RETURN"
+            ? "RETURN"
+            : "ADJUST";
+
+      setProductItems((previous) =>
+        previous.map((item) => {
+          if (item.productId !== selectedProduct.productId) {
+            return item;
+          }
+
+          const nextOnHand = item.onHand + qtyBasePreview;
+          return {
+            ...item,
+            onHand: nextOnHand,
+            available: nextOnHand - item.reserved,
+          };
+        }),
+      );
+
+      setMovementItems((previous) => [
+        {
+          id: `local-${Date.now()}`,
+          productId: selectedProduct.productId,
+          productSku: selectedProduct.sku,
+          productName: selectedProduct.name,
+          type: movementTypeForView,
+          qtyBase: qtyBasePreview,
+          note: note.trim() ? note.trim() : null,
+          createdAt: now,
+          createdByName: "คุณ",
+        },
+        ...previous,
+      ]);
+      setProductPage(1);
+      setMovementPage(1);
+    }
+
     setSuccessMessage("บันทึกรายการสต็อกเรียบร้อย");
     setNote("");
     setQty("1");
     setLoading(false);
-    router.refresh();
+    startTransition(() => {
+      router.refresh();
+    });
   };
 
   return (
@@ -168,9 +291,9 @@ export function StockLedger({
             value={productId}
             onChange={(event) => onProductChange(event.target.value)}
             className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
-            disabled={loading || products.length === 0}
+            disabled={loading || productItems.length === 0}
           >
-            {products.map((product) => (
+            {productItems.map((product) => (
               <option key={product.productId} value={product.productId}>
                 {product.sku} - {product.name}
               </option>
@@ -281,11 +404,11 @@ export function StockLedger({
       <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold">สรุปสต็อกปัจจุบัน</h2>
 
-        {products.length === 0 ? (
+        {productItems.length === 0 ? (
           <p className="text-sm text-muted-foreground">ยังไม่มีสินค้าในร้าน</p>
         ) : (
           <div className="space-y-2">
-            {products.map((product) => (
+            {paginatedProducts.map((product) => (
               <div key={product.productId} className="rounded-lg border p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -322,6 +445,40 @@ export function StockLedger({
                 </div>
               </div>
             ))}
+
+            <div className="flex items-center justify-between rounded-lg border bg-white px-3 py-2 text-xs">
+              <p className="text-muted-foreground">
+                หน้า {currentProductPage.toLocaleString("th-TH")} /{" "}
+                {productPageCount.toLocaleString("th-TH")} (
+                {productItems.length.toLocaleString("th-TH")} รายการ)
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-8 px-2 text-xs"
+                  disabled={currentProductPage <= 1}
+                  onClick={() =>
+                    setProductPage((previous) => Math.max(1, previous - 1))
+                  }
+                >
+                  ก่อนหน้า
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-8 px-2 text-xs"
+                  disabled={currentProductPage >= productPageCount}
+                  onClick={() =>
+                    setProductPage((previous) =>
+                      Math.min(productPageCount, previous + 1),
+                    )
+                  }
+                >
+                  ถัดไป
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </article>
@@ -329,11 +486,11 @@ export function StockLedger({
       <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold">สมุดบัญชีสต็อกล่าสุด</h2>
 
-        {recentMovements.length === 0 ? (
+        {movementItems.length === 0 ? (
           <p className="text-sm text-muted-foreground">ยังไม่มีประวัติการเคลื่อนไหว</p>
         ) : (
           <div className="space-y-2">
-            {recentMovements.map((movement) => (
+            {paginatedMovements.map((movement) => (
               <div key={movement.id} className="rounded-lg border p-3">
                 <div className="flex items-start justify-between gap-2">
                   <div>
@@ -358,6 +515,40 @@ export function StockLedger({
                 </p>
               </div>
             ))}
+
+            <div className="flex items-center justify-between rounded-lg border bg-white px-3 py-2 text-xs">
+              <p className="text-muted-foreground">
+                หน้า {currentMovementPage.toLocaleString("th-TH")} /{" "}
+                {movementPageCount.toLocaleString("th-TH")} (
+                {movementItems.length.toLocaleString("th-TH")} รายการ)
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-8 px-2 text-xs"
+                  disabled={currentMovementPage <= 1}
+                  onClick={() =>
+                    setMovementPage((previous) => Math.max(1, previous - 1))
+                  }
+                >
+                  ก่อนหน้า
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-8 px-2 text-xs"
+                  disabled={currentMovementPage >= movementPageCount}
+                  onClick={() =>
+                    setMovementPage((previous) =>
+                      Math.min(movementPageCount, previous + 1),
+                    )
+                  }
+                >
+                  ถัดไป
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </article>

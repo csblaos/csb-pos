@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `session_limit` integer;

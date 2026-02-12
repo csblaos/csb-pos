@@ -3,7 +3,16 @@ import { NextResponse } from "next/server";
 
 import { parseSessionToken, SESSION_COOKIE_NAME } from "@/lib/auth/session-cookie";
 
-const APP_PATHS = ["/dashboard", "/orders", "/stock", "/products", "/reports", "/settings"];
+const APP_PATHS = [
+  "/dashboard",
+  "/orders",
+  "/stock",
+  "/products",
+  "/reports",
+  "/stores",
+  "/settings",
+  "/system-admin",
+];
 const ONBOARDING_PATH = "/onboarding";
 
 const isAppPath = (pathname: string) =>

@@ -1,14 +1,19 @@
 import Link from "next/link";
 import { LogoutButton } from "@/components/app/logout-button";
 import { getSession } from "@/lib/auth/session";
+import { getUserSystemRole } from "@/lib/auth/system-admin";
 import {
   getUserPermissionsForCurrentSession,
   isPermissionGranted,
 } from "@/lib/rbac/access";
 
 export default async function SettingsPage() {
-  const session = await getSession();
-  const permissionKeys = await getUserPermissionsForCurrentSession();
+  const [session, permissionKeys] = await Promise.all([
+    getSession(),
+    getUserPermissionsForCurrentSession(),
+  ]);
+  const systemRole = session ? await getUserSystemRole(session.userId) : "USER";
+  const isSuperadmin = systemRole === "SUPERADMIN";
   const canViewSettings = isPermissionGranted(permissionKeys, "settings.view");
   const canViewUsers = isPermissionGranted(permissionKeys, "members.view");
   const canViewRoles = isPermissionGranted(permissionKeys, "rbac.roles.view");
@@ -50,6 +55,13 @@ export default async function SettingsPage() {
 
       <article className="space-y-2 rounded-xl border bg-white p-4 shadow-sm">
         <p className="text-sm font-medium">การจัดการทีมงาน</p>
+
+        <Link
+          href="/stores"
+          className="block rounded-lg border px-3 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50"
+        >
+          เลือกร้าน / เปลี่ยนร้าน{isSuperadmin ? " / สร้างร้านใหม่" : ""}
+        </Link>
 
         {canViewUsers ? (
           <Link

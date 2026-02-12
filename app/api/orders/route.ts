@@ -11,6 +11,8 @@ import {
   type OrderListTab,
   listOrdersByTab,
 } from "@/lib/orders/queries";
+import { invalidateDashboardSummaryCache } from "@/server/services/dashboard.service";
+import { invalidateReportsOverviewCache } from "@/server/services/reports.service";
 
 const computeOrderTotals = (payload: {
   subtotal: number;
@@ -31,6 +33,13 @@ const computeOrderTotals = (payload: {
     vatAmount,
     total,
   };
+};
+
+const invalidateOrderReadCaches = async (storeId: string) => {
+  await Promise.all([
+    invalidateDashboardSummaryCache(storeId),
+    invalidateReportsOverviewCache(storeId),
+  ]);
 };
 
 export async function GET(request: Request) {
@@ -173,6 +182,8 @@ export async function POST(request: Request) {
       );
 
     });
+
+    await invalidateOrderReadCaches(storeId);
 
     return NextResponse.json({ ok: true, orderId, orderNo }, { status: 201 });
   } catch (error) {

@@ -4,7 +4,8 @@ import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { buildSessionForUser } from "@/lib/auth/session-db";
+import { buildSessionForUser, getUserMembershipFlags } from "@/lib/auth/session-db";
+import { canUserCreateStore } from "@/lib/auth/store-creation";
 import {
   createSessionCookie,
   getSession,
@@ -43,8 +44,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
   }
 
-  if (session.hasStoreMembership) {
-    return NextResponse.json({ ok: true, next: "/onboarding?step=3" });
+  const membershipFlags = await getUserMembershipFlags(session.userId);
+  if (membershipFlags.hasSuspendedMembership && !membershipFlags.hasActiveMembership) {
+    return NextResponse.json(
+      { message: "บัญชีของคุณถูกระงับการใช้งาน ไม่สามารถสร้างร้านใหม่ได้" },
+      { status: 403 },
+    );
+  }
+
+  const storeCreationAccess = await canUserCreateStore(session.userId);
+  if (!storeCreationAccess.allowed) {
+    return NextResponse.json(
+      { message: storeCreationAccess.reason ?? "ไม่สามารถสร้างร้านใหม่ได้" },
+      { status: 403 },
+    );
   }
 
   const payload = createStoreSchema.safeParse(await request.json());
@@ -141,7 +154,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "ไม่พบข้อมูลผู้ใช้" }, { status: 404 });
   }
 
-  const refreshedSession = await buildSessionForUser(user);
+  const refreshedSession = await buildSessionForUser(user, {
+    preferredStoreId: storeId,
+  });
 
   let sessionCookie;
   try {
@@ -159,7 +174,7 @@ export async function POST(request: Request) {
   const response = NextResponse.json({
     ok: true,
     token: sessionCookie.value,
-    next: "/onboarding?step=3",
+    next: "/dashboard",
   });
 
   response.cookies.set(

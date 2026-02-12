@@ -14,6 +14,8 @@
     --primary: 221.2 83.2% 53.3%;
     --primary-foreground: 210 40% 98%;
     --radius: 0.75rem;
+    --app-shell-max-width: 70rem;
+    --auth-shell-max-width: 45rem;
   }
 
   * {

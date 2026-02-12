@@ -3,10 +3,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { verifyPassword } from "@/lib/auth/password";
-import { buildSessionForUser } from "@/lib/auth/session-db";
+import { buildSessionForUser, getUserMembershipFlags } from "@/lib/auth/session-db";
 import { createSessionCookie, SessionStoreUnavailableError } from "@/lib/auth/session";
 import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
+import { getUserPermissions } from "@/lib/rbac/access";
+import { getPreferredAuthorizedRoute } from "@/lib/rbac/navigation";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -25,6 +27,7 @@ export async function POST(request: Request) {
       email: users.email,
       name: users.name,
       passwordHash: users.passwordHash,
+      systemRole: users.systemRole,
     })
     .from(users)
     .where(eq(users.email, payload.data.email.toLowerCase()))
@@ -37,6 +40,14 @@ export async function POST(request: Request) {
   const isValid = await verifyPassword(payload.data.password, user.passwordHash);
   if (!isValid) {
     return NextResponse.json({ message: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" }, { status: 401 });
+  }
+
+  const membershipFlags = await getUserMembershipFlags(user.id);
+  if (membershipFlags.hasSuspendedMembership && !membershipFlags.hasActiveMembership) {
+    return NextResponse.json(
+      { message: "บัญชีของคุณถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ" },
+      { status: 403 },
+    );
   }
 
   const session = await buildSessionForUser({
@@ -58,10 +69,21 @@ export async function POST(request: Request) {
     throw error;
   }
 
+  let nextRoute = "/onboarding";
+  if (user.systemRole === "SYSTEM_ADMIN") {
+    nextRoute = "/system-admin";
+  } else if (session.hasStoreMembership && session.activeStoreId) {
+    const permissionKeys = await getUserPermissions(
+      { userId: session.userId },
+      session.activeStoreId,
+    );
+    nextRoute = getPreferredAuthorizedRoute(permissionKeys) ?? "/dashboard";
+  }
+
   const response = NextResponse.json({
     ok: true,
     token: sessionCookie.value,
-    next: session.hasStoreMembership ? "/dashboard" : "/onboarding",
+    next: nextRoute,
   });
 
   response.cookies.set(

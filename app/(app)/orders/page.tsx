@@ -29,7 +29,12 @@ export default async function OrdersPage({
   const finishRenderTimer = startServerRenderTimer("page.orders");
 
   try {
-    const session = await getSession();
+    const [session, permissionKeys, params] = await Promise.all([
+      getSession(),
+      getUserPermissionsForCurrentSession(),
+      searchParams,
+    ]);
+
     if (!session) {
       redirect("/login");
     }
@@ -38,7 +43,6 @@ export default async function OrdersPage({
       redirect("/onboarding");
     }
 
-    const params = await searchParams;
     const tabParam = params.tab ?? "ALL";
     const tab: OrderListTab =
       tabParam === "PENDING_PAYMENT" || tabParam === "PAID" || tabParam === "SHIPPED"
@@ -47,7 +51,6 @@ export default async function OrdersPage({
     const pageParam = Number(params.page ?? "1");
     const page = Number.isFinite(pageParam) ? pageParam : 1;
 
-    const permissionKeys = await getUserPermissionsForCurrentSession();
     const canView = isPermissionGranted(permissionKeys, "orders.view");
     const canCreate = isPermissionGranted(permissionKeys, "orders.create");
 

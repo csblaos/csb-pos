@@ -20,7 +20,8 @@ export async function getTodaySales(storeId: string) {
         and(
           eq(orders.storeId, storeId),
           inArray(orders.status, paidStatuses),
-          sql`date(${orders.paidAt}) = date('now', 'localtime')`,
+          sql`${orders.paidAt} >= datetime('now', 'localtime', 'start of day', 'utc')`,
+          sql`${orders.paidAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')`,
         ),
       ),
   );
@@ -38,7 +39,8 @@ export async function getOrdersCountToday(storeId: string) {
       .where(
         and(
           eq(orders.storeId, storeId),
-          sql`date(${orders.createdAt}) = date('now', 'localtime')`,
+          sql`${orders.createdAt} >= datetime('now', 'localtime', 'start of day', 'utc')`,
+          sql`${orders.createdAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')`,
         ),
       ),
   );

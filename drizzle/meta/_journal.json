@@ -15,6 +15,34 @@
       "when": 1770694188554,
       "tag": "0001_volatile_firedrake",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1770792419111,
+      "tag": "0002_watery_inertia",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1770793456242,
+      "tag": "0003_parched_stepford_cuckoos",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1770798453723,
+      "tag": "0004_shocking_shockwave",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1770908400000,
+      "tag": "0005_quiet_dragon",
+      "breakpoints": true
     }
   ]
 }

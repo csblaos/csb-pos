@@ -21,6 +21,9 @@ import {
 } from "@/lib/orders/queries";
 import { updateOrderSchema } from "@/lib/orders/validation";
 import { getInventoryBalancesByStore } from "@/lib/inventory/queries";
+import { invalidateDashboardSummaryCache } from "@/server/services/dashboard.service";
+import { invalidateReportsOverviewCache } from "@/server/services/reports.service";
+import { invalidateStockOverviewCache } from "@/server/services/stock.service";
 
 const nowIso = () => new Date().toISOString();
 
@@ -79,6 +82,14 @@ const ensureActionPermission = async (
   if (!cancelAllowed && !deleteAllowed) {
     throw new RBACError(403, "ไม่มีสิทธิ์ยกเลิกออเดอร์");
   }
+};
+
+const invalidateOrderCaches = async (storeId: string) => {
+  await Promise.all([
+    invalidateDashboardSummaryCache(storeId),
+    invalidateReportsOverviewCache(storeId),
+    invalidateStockOverviewCache(storeId),
+  ]);
 };
 
 export async function GET(
@@ -154,6 +165,7 @@ export async function PATCH(
         })
         .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
 
+      await invalidateOrderCaches(storeId);
       return NextResponse.json({ ok: true });
     }
 
@@ -221,6 +233,7 @@ export async function PATCH(
         })
         .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
 
+      await invalidateOrderCaches(storeId);
       return NextResponse.json({ ok: true });
     }
 
@@ -264,6 +277,7 @@ export async function PATCH(
         })
         .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
 
+      await invalidateOrderCaches(storeId);
       return NextResponse.json({ ok: true });
     }
 
@@ -277,6 +291,7 @@ export async function PATCH(
         .set({ status: "PACKED" })
         .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
 
+      await invalidateOrderCaches(storeId);
       return NextResponse.json({ ok: true });
     }
 
@@ -293,6 +308,7 @@ export async function PATCH(
         })
         .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
 
+      await invalidateOrderCaches(storeId);
       return NextResponse.json({ ok: true });
     }
 
@@ -338,6 +354,7 @@ export async function PATCH(
       .set({ status: "CANCELLED" })
       .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
 
+    await invalidateOrderCaches(storeId);
     return NextResponse.json({ ok: true });
   } catch (error) {
     return toRBACErrorResponse(error);

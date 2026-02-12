@@ -1,13 +1,30 @@
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { redirect } from "next/navigation";
 
-import { ProductsManagement } from "@/components/app/products-management";
 import { getSession } from "@/lib/auth/session";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 import { listStoreProducts, listUnits } from "@/lib/products/service";
 
+const ProductsManagement = dynamic(
+  () =>
+    import("@/components/app/products-management").then(
+      (module) => module.ProductsManagement,
+    ),
+  {
+    loading: () => (
+      <div className="rounded-xl border bg-white p-4 text-sm text-muted-foreground">
+        กำลังโหลดหน้าจัดการสินค้า...
+      </div>
+    ),
+  },
+);
+
 export default async function ProductsPage() {
-  const session = await getSession();
+  const [session, permissionKeys] = await Promise.all([
+    getSession(),
+    getUserPermissionsForCurrentSession(),
+  ]);
   if (!session) {
     redirect("/login");
   }
@@ -16,7 +33,6 @@ export default async function ProductsPage() {
     redirect("/onboarding");
   }
 
-  const permissionKeys = await getUserPermissionsForCurrentSession();
   const canView = isPermissionGranted(permissionKeys, "products.view");
   const canCreate = isPermissionGranted(permissionKeys, "products.create");
   const canUpdate = isPermissionGranted(permissionKeys, "products.update");

@@ -52,6 +52,14 @@ export const users = sqliteTable(
     email: text("email").notNull(),
     name: text("name").notNull(),
     passwordHash: text("password_hash").notNull(),
+    systemRole: text("system_role", {
+      enum: ["USER", "SUPERADMIN", "SYSTEM_ADMIN"],
+    })
+      .notNull()
+      .default("USER"),
+    canCreateStores: integer("can_create_stores", { mode: "boolean" }),
+    maxStores: integer("max_stores"),
+    sessionLimit: integer("session_limit"),
     createdAt: text("created_at").notNull().default(createdAtDefault),
   },
   (table) => ({
@@ -313,6 +321,23 @@ export const orders = sqliteTable(
     ordersStoreIdIdx: index("orders_store_id_idx").on(table.storeId),
     ordersOrderNoIdx: index("orders_order_no_idx").on(table.orderNo),
     ordersCreatedAtIdx: index("orders_created_at_idx").on(table.createdAt),
+    ordersStoreCreatedAtIdx: index("orders_store_created_at_idx").on(
+      table.storeId,
+      table.createdAt,
+    ),
+    ordersStoreStatusCreatedAtIdx: index(
+      "orders_store_status_created_at_idx",
+    ).on(table.storeId, table.status, table.createdAt),
+    ordersStoreStatusPaidAtIdx: index("orders_store_status_paid_at_idx").on(
+      table.storeId,
+      table.status,
+      table.paidAt,
+    ),
+    ordersStoreStatusChannelIdx: index("orders_store_status_channel_idx").on(
+      table.storeId,
+      table.status,
+      table.channel,
+    ),
     ordersStoreOrderNoUnique: uniqueIndex("orders_store_order_no_unique").on(
       table.storeId,
       table.orderNo,

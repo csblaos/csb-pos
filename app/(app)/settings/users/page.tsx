@@ -6,6 +6,7 @@ import { UsersManagement } from "@/components/app/users-management";
 import { db } from "@/lib/db/client";
 import { roles, storeMembers, users } from "@/lib/db/schema";
 import { getSession } from "@/lib/auth/session";
+import { getUserSystemRole } from "@/lib/auth/system-admin";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 
 export default async function SettingsUsersPage() {
@@ -22,6 +23,8 @@ export default async function SettingsUsersPage() {
   const canView = isPermissionGranted(permissionKeys, "members.view");
   const canCreate = isPermissionGranted(permissionKeys, "members.create");
   const canUpdate = isPermissionGranted(permissionKeys, "members.update");
+  const systemRole = await getUserSystemRole(session.userId);
+  const canLinkExisting = systemRole === "SUPERADMIN";
 
   if (!canView) {
     return (
@@ -40,6 +43,8 @@ export default async function SettingsUsersPage() {
       userId: users.id,
       email: users.email,
       name: users.name,
+      systemRole: users.systemRole,
+      sessionLimit: users.sessionLimit,
       roleId: roles.id,
       roleName: roles.name,
       status: storeMembers.status,
@@ -69,6 +74,7 @@ export default async function SettingsUsersPage() {
         roles={roleOptions}
         canCreate={canCreate}
         canUpdate={canUpdate}
+        canLinkExisting={canLinkExisting}
       />
 
       <Link href="/settings" className="text-sm font-medium text-blue-700 hover:underline">
