@@ -277,8 +277,8 @@ async function insertUnitsProductsInventory(storeId, ownerUserId) {
 
   for (const [id, code, nameTh] of units) {
     await db.execute({
-      sql: `INSERT OR IGNORE INTO units (id, code, name_th) VALUES (?, ?, ?)`,
-      args: [id, code, nameTh],
+      sql: `INSERT OR IGNORE INTO units (id, code, name_th, scope, store_id) VALUES (?, ?, ?, ?, ?)`,
+      args: [id, code, nameTh, "SYSTEM", null],
     });
   }
 

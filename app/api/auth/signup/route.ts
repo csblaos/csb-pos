@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -42,6 +42,7 @@ export async function POST(request: Request) {
     email: normalizedEmail,
     name: payload.data.name,
     passwordHash,
+    passwordUpdatedAt: sql`CURRENT_TIMESTAMP`,
   });
 
   const session = await buildSessionForUser({

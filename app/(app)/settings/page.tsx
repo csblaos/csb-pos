@@ -9,6 +9,7 @@ import {
   Shield,
   Store,
   Users,
+  type LucideIcon,
 } from "lucide-react";
 
 import { LogoutButton } from "@/components/app/logout-button";
@@ -34,9 +35,6 @@ const channelStatusLabels = {
   ERROR: "พบปัญหา",
 } as const;
 
-const quickActionLinkClassName =
-  "flex min-h-11 items-center justify-between rounded-lg border px-3.5 py-2.5 text-sm font-medium text-blue-700 hover:bg-blue-50";
-
 type ChannelStatus = keyof typeof channelStatusLabels;
 
 type UserCapability = {
@@ -46,14 +44,17 @@ type UserCapability = {
   granted: boolean;
 };
 
-function ChannelBadge({
-  label,
-  status,
-}: {
-  label: string;
-  status: ChannelStatus;
-}) {
-  const tone =
+type SettingsLinkItem = {
+  id: string;
+  href: string;
+  title: string;
+  description: string;
+  icon: LucideIcon;
+  visible: boolean;
+};
+
+function ChannelStatusPill({ status }: { status: ChannelStatus }) {
+  const toneClassName =
     status === "CONNECTED"
       ? "border-emerald-200 bg-emerald-50 text-emerald-700"
       : status === "ERROR"
@@ -61,10 +62,34 @@ function ChannelBadge({
         : "border-slate-200 bg-slate-50 text-slate-600";
 
   return (
-    <div className={`rounded-lg border px-3 py-2 ${tone}`}>
-      <p className="text-xs font-medium">{label}</p>
-      <p className="mt-1 text-sm">{channelStatusLabels[status]}</p>
-    </div>
+    <span
+      className={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-1 text-[11px] font-medium ${toneClassName}`}
+    >
+      {channelStatusLabels[status]}
+    </span>
+  );
+}
+
+function SettingsLinkRow({
+  href,
+  title,
+  description,
+  icon: Icon,
+}: Omit<SettingsLinkItem, "id" | "visible">) {
+  return (
+    <Link
+      href={href}
+      className="group flex min-h-14 items-center gap-3 px-4 py-3 transition-colors hover:bg-slate-50"
+    >
+      <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+        <Icon className="h-4 w-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-slate-900">{title}</span>
+        <span className="mt-0.5 block truncate text-xs text-slate-500">{description}</span>
+      </span>
+      <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
+    </Link>
   );
 }
 
@@ -135,6 +160,7 @@ export default async function SettingsPage() {
 
   const fbStatus: ChannelStatus = fbConnection?.status ?? "DISCONNECTED";
   const waStatus: ChannelStatus = waConnection?.status ?? "DISCONNECTED";
+
   const userCapabilities: UserCapability[] = [
     {
       id: "settings.view",
@@ -179,243 +205,248 @@ export default async function SettingsPage() {
       granted: canViewConnections,
     },
   ];
+
   const grantedCapabilitiesCount = userCapabilities.filter(
     (capability) => capability.granted,
   ).length;
 
+  const settingsLinks: SettingsLinkItem[] = [
+    {
+      id: "store-profile",
+      href: "/settings/store",
+      title: "ข้อมูลร้าน",
+      description: "ชื่อร้าน โลโก้ ที่อยู่ และช่องทางติดต่อ",
+      icon: Store,
+      visible: true,
+    },
+    {
+      id: "switch-store",
+      href: "/stores",
+      title: "เลือกร้าน / เปลี่ยนร้าน",
+      description: isSuperadmin ? "สลับร้านหรือสร้างร้านใหม่" : "สลับร้านที่กำลังใช้งาน",
+      icon: Settings2,
+      visible: true,
+    },
+    {
+      id: "users",
+      href: "/settings/users",
+      title: "ผู้ใช้และสมาชิก",
+      description: "จัดการสมาชิกทีมและสถานะผู้ใช้งาน",
+      icon: Users,
+      visible: canViewUsers,
+    },
+    {
+      id: "roles",
+      href: "/settings/roles",
+      title: "บทบาทและสิทธิ์",
+      description: "กำหนดสิทธิ์การเข้าถึงของแต่ละตำแหน่ง",
+      icon: Shield,
+      visible: canViewRoles,
+    },
+    {
+      id: "units",
+      href: "/settings/units",
+      title: "หน่วยสินค้า",
+      description: "จัดการหน่วยพื้นฐาน เช่น PCS, PACK, BOX",
+      icon: Settings2,
+      visible: canViewUnits,
+    },
+    {
+      id: "reports",
+      href: "/reports",
+      title: "รายงาน",
+      description: "ดูภาพรวมยอดขายและแนวโน้ม",
+      icon: PlugZap,
+      visible: canViewReports,
+    },
+  ];
+
+  const storeTypeLabel = storeSummary
+    ? storeTypeLabels[storeSummary.storeType] ?? storeSummary.storeType
+    : "ยังไม่ระบุ";
+
   return (
     <section className="space-y-5">
-      <header className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 p-5 text-white">
-        <p className="text-xs text-slate-200">Settings Dashboard</p>
-        <h1 className="mt-1 text-2xl font-semibold">ตั้งค่าร้านและบัญชี</h1>
-        <p className="mt-2 text-sm text-slate-200">
-          จัดการข้อมูลร้าน ทีมงาน สิทธิ์ และสถานะการเชื่อมต่อจากหน้าเดียว
-        </p>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <span className="rounded-full bg-white/15 px-3 py-1 text-xs">
-            ร้าน: {session?.activeStoreName ?? "ยังไม่ได้เลือกร้าน"}
-          </span>
-          <span className="rounded-full bg-white/15 px-3 py-1 text-xs">
-            บทบาท: {session?.activeRoleName ?? "ยังไม่มี"}
-          </span>
-          <span className="rounded-full bg-white/15 px-3 py-1 text-xs">
-            System Role: {systemRole}
-          </span>
-        </div>
+      <header className="space-y-1 px-1">
+        <h1 className="text-[28px] font-semibold tracking-tight text-slate-900">การตั้งค่า</h1>
+        <p className="text-sm text-slate-500">จัดการร้าน ทีมงาน สิทธิ์ และการเชื่อมต่อจากที่เดียว</p>
       </header>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <article className="space-y-2 rounded-xl border bg-white p-4 shadow-sm lg:col-span-2">
-          <div className="flex items-center gap-2">
-            <Store className="h-4 w-4 text-sky-700" />
-            <p className="text-sm font-semibold">ภาพรวมร้านที่กำลังใช้งาน</p>
-          </div>
-
-          {storeSummary ? (
-            <div className="grid gap-2 sm:grid-cols-2">
-              <div className="rounded-lg border bg-slate-50 px-3 py-2">
-                <p className="text-xs text-muted-foreground">ประเภทร้าน</p>
-                <p className="text-sm font-medium">
-                  {storeTypeLabels[storeSummary.storeType] ?? storeSummary.storeType}
-                </p>
-              </div>
-              <div className="rounded-lg border bg-slate-50 px-3 py-2">
-                <p className="text-xs text-muted-foreground">สกุลเงิน</p>
-                <p className="text-sm font-medium">{storeSummary.currency}</p>
-              </div>
-              <div className="rounded-lg border bg-slate-50 px-3 py-2">
-                <p className="text-xs text-muted-foreground">ที่อยู่ร้าน</p>
-                <p className="text-sm font-medium">{storeSummary.address ?? "ยังไม่ระบุ"}</p>
-              </div>
-              <div className="rounded-lg border bg-slate-50 px-3 py-2">
-                <p className="text-xs text-muted-foreground">เบอร์โทรร้าน</p>
-                <p className="text-sm font-medium">{storeSummary.phoneNumber ?? "ยังไม่ระบุ"}</p>
-              </div>
-            </div>
-          ) : (
-            <p className="rounded-lg border bg-slate-50 px-3 py-2 text-sm text-muted-foreground">
-              ยังไม่พบข้อมูลร้านที่กำลังใช้งาน
-            </p>
-          )}
-
-          {canViewConnections ? (
-            <div className="grid gap-2 sm:grid-cols-2">
-              <ChannelBadge label="Facebook Page" status={fbStatus} />
-              <ChannelBadge label="WhatsApp" status={waStatus} />
-            </div>
-          ) : (
-            <p className="rounded-lg border bg-slate-50 px-3 py-2 text-sm text-muted-foreground">
-              บัญชีนี้ไม่มีสิทธิ์ดูสถานะการเชื่อมต่อช่องทาง
-            </p>
-          )}
-        </article>
-
-        <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
-          <div className="flex items-center gap-2">
-            <Settings2 className="h-4 w-4 text-violet-700" />
-            <p className="text-sm font-semibold">Quick Actions</p>
-          </div>
-
-          <Link
-            href="/settings/store"
-            className={quickActionLinkClassName}
-          >
-            ข้อมูลร้าน
-            <ChevronRight className="h-[18px] w-[18px]" />
-          </Link>
-
-          <Link
-            href="/stores"
-            className={quickActionLinkClassName}
-          >
-            เลือกร้าน / เปลี่ยนร้าน{isSuperadmin ? " / สร้างร้าน" : ""}
-            <ChevronRight className="h-[18px] w-[18px]" />
-          </Link>
-
-          {canViewUsers ? (
-            <Link
-              href="/settings/users"
-              className={quickActionLinkClassName}
-            >
-              จัดการผู้ใช้และสมาชิก
-              <ChevronRight className="h-[18px] w-[18px]" />
-            </Link>
-          ) : null}
-
-          {canViewRoles ? (
-            <Link
-              href="/settings/roles"
-              className={quickActionLinkClassName}
-            >
-              จัดการบทบาทและสิทธิ์
-              <ChevronRight className="h-[18px] w-[18px]" />
-            </Link>
-          ) : null}
-
-          {canViewUnits ? (
-            <Link
-              href="/settings/units"
-              className={quickActionLinkClassName}
-            >
-              จัดการหน่วยสินค้า
-              <ChevronRight className="h-[18px] w-[18px]" />
-            </Link>
-          ) : null}
-
-          {canViewReports ? (
-            <Link
-              href="/reports"
-              className={quickActionLinkClassName}
-            >
-              ไปหน้ารายงาน
-              <ChevronRight className="h-[18px] w-[18px]" />
-            </Link>
-          ) : null}
-
-          {!canUpdateSettings ? (
-            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              บัญชีนี้ไม่มีสิทธิ์แก้ไขข้อมูลร้าน
-            </p>
-          ) : null}
-        </article>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
-          <div className="flex items-center gap-2">
-            <Shield className="h-4 w-4 text-emerald-700" />
-            <p className="text-sm font-semibold">สิทธิ์การใช้งาน</p>
-          </div>
-          <p className="text-xs text-muted-foreground">สิ่งที่บัญชีนี้ใช้งานได้ในร้านปัจจุบัน</p>
-          <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-            ใช้งานได้ {grantedCapabilitiesCount} จาก {userCapabilities.length} รายการ
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+            บัญชีและร้าน
           </p>
-          <ul className="divide-y rounded-lg border bg-slate-50">
-            {userCapabilities.map((capability) => (
-              <li
-                key={capability.id}
-                className="flex items-start justify-between gap-3 px-3 py-2"
-              >
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-slate-900">{capability.title}</p>
-                  <p className="text-xs text-muted-foreground">{capability.description}</p>
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <ul className="divide-y divide-slate-100">
+              <li className="flex min-h-14 items-center gap-3 px-4 py-3">
+                <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+                  <Store className="h-4 w-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-slate-900">
+                    {session?.activeStoreName ?? "ยังไม่ได้เลือกร้าน"}
+                  </p>
+                  <p className="truncate text-xs text-slate-500">
+                    {storeTypeLabel} • {storeSummary?.currency ?? "-"}
+                  </p>
                 </div>
-                <span
-                  className={
-                    capability.granted
-                      ? "inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700"
-                      : "inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"
-                  }
-                >
-                  {capability.granted ? (
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                  ) : (
-                    <CircleAlert className="h-3.5 w-3.5" />
-                  )}
-                  {capability.granted ? "ทำได้" : "ยังไม่มีสิทธิ์"}
+                <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-700">
+                  {session?.activeRoleName ?? "ไม่มีบทบาท"}
                 </span>
               </li>
-            ))}
-          </ul>
-          <details className="rounded-lg border bg-slate-50 p-3">
-            <summary className="cursor-pointer text-xs font-medium text-slate-700">
-              ดูรหัสสิทธิ์แบบเทคนิค (สำหรับผู้ดูแลระบบ)
-            </summary>
-            <ul className="mt-2 space-y-1 text-xs text-slate-600">
-              {permissionKeys.map((permissionKey) => (
-                <li key={permissionKey}>{permissionKey}</li>
+
+              <li className="flex min-h-14 items-center justify-between gap-3 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-900">ที่อยู่ร้าน</p>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {storeSummary?.address?.trim() ? storeSummary.address : "ยังไม่ระบุ"}
+                  </p>
+                </div>
+                <span className="shrink-0 text-xs font-medium text-slate-500">System: {systemRole}</span>
+              </li>
+
+              <li className="flex min-h-14 items-center justify-between gap-3 px-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-900">เบอร์โทรร้าน</p>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {storeSummary?.phoneNumber?.trim() ? storeSummary.phoneNumber : "ยังไม่ระบุ"}
+                  </p>
+                </div>
+                {!canUpdateSettings ? (
+                  <span className="inline-flex shrink-0 items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700">
+                    สิทธิ์ดูอย่างเดียว
+                  </span>
+                ) : null}
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+            การจัดการ
+          </p>
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <ul className="divide-y divide-slate-100">
+              {settingsLinks
+                .filter((item) => item.visible)
+                .map((item) => (
+                  <li key={item.id}>
+                    <SettingsLinkRow
+                      href={item.href}
+                      title={item.title}
+                      description={item.description}
+                      icon={item.icon}
+                    />
+                  </li>
+                ))}
+            </ul>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+            การเชื่อมต่อช่องทาง
+          </p>
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            {canViewConnections ? (
+              <ul className="divide-y divide-slate-100">
+                <li className="flex min-h-14 items-center justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-900">Facebook Page</p>
+                    <p className="truncate text-xs text-slate-500">
+                      {fbConnection?.pageName?.trim() ? fbConnection.pageName : "ยังไม่ผูกเพจ"}
+                    </p>
+                  </div>
+                  <ChannelStatusPill status={fbStatus} />
+                </li>
+                <li className="flex min-h-14 items-center justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-900">WhatsApp</p>
+                    <p className="truncate text-xs text-slate-500">
+                      {waConnection?.phoneNumber?.trim()
+                        ? waConnection.phoneNumber
+                        : "ยังไม่ผูกหมายเลข"}
+                    </p>
+                  </div>
+                  <ChannelStatusPill status={waStatus} />
+                </li>
+              </ul>
+            ) : (
+              <p className="px-4 py-3 text-sm text-slate-500">
+                บัญชีนี้ไม่มีสิทธิ์ดูสถานะการเชื่อมต่อช่องทาง
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+            สิทธิ์ของบัญชี
+          </p>
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-100 px-4 py-3">
+              <p className="text-sm font-medium text-slate-900">
+                ใช้งานได้ {grantedCapabilitiesCount} จาก {userCapabilities.length} รายการ
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500">อ้างอิงตามบทบาทในร้านที่กำลังใช้งาน</p>
+            </div>
+            <ul className="divide-y divide-slate-100">
+              {userCapabilities.map((capability) => (
+                <li
+                  key={capability.id}
+                  className="flex min-h-14 items-center justify-between gap-3 px-4 py-3"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-900">{capability.title}</p>
+                    <p className="truncate text-xs text-slate-500">{capability.description}</p>
+                  </div>
+                  <span
+                    className={
+                      capability.granted
+                        ? "inline-flex shrink-0 items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700"
+                        : "inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700"
+                    }
+                  >
+                    {capability.granted ? (
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                    ) : (
+                      <CircleAlert className="h-3.5 w-3.5" />
+                    )}
+                    {capability.granted ? "ทำได้" : "ไม่มีสิทธิ์"}
+                  </span>
+                </li>
               ))}
             </ul>
-          </details>
-        </article>
+            <details className="border-t border-slate-100 bg-slate-50 px-4 py-3">
+              <summary className="cursor-pointer text-xs font-medium text-slate-700">
+                ดูรหัสสิทธิ์แบบเทคนิค
+              </summary>
+              <ul className="mt-2 space-y-1 text-xs text-slate-600">
+                {permissionKeys.map((permissionKey) => (
+                  <li key={permissionKey}>{permissionKey}</li>
+                ))}
+              </ul>
+            </details>
+          </div>
+        </div>
 
-        <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
-          <div className="flex items-center gap-2">
-            <Users className="h-4 w-4 text-amber-700" />
-            <p className="text-sm font-semibold">สถานะบัญชี</p>
+        <div className="space-y-2">
+          <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+            ความปลอดภัย
+          </p>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex items-start gap-2 text-sm text-slate-700">
+              <PlugZap className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
+              ออกจากระบบหลังใช้งาน เพื่อความปลอดภัยของบัญชี
+            </div>
+            <div className="sm:max-w-[220px]">
+              <LogoutButton />
+            </div>
           </div>
-          <div className="space-y-2 text-sm">
-            <p className="rounded-lg border bg-slate-50 px-3 py-2 text-slate-700">
-              ชื่อผู้ใช้: <span className="font-medium">{session?.displayName ?? "-"}</span>
-            </p>
-            <p className="rounded-lg border bg-slate-50 px-3 py-2 text-slate-700">
-              ร้านที่ใช้งาน: <span className="font-medium">{session?.activeStoreName ?? "-"}</span>
-            </p>
-            <p className="rounded-lg border bg-slate-50 px-3 py-2 text-slate-700">
-              ระบบ: <span className="font-medium">{systemRole}</span>
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700">
-              <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />
-              เข้าถึง Settings ได้
-            </p>
-            <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700">
-              {canUpdateSettings ? (
-                <>
-                  <CheckCircle2 className="mr-1 inline h-3.5 w-3.5" />
-                  แก้ไข Settings ได้
-                </>
-              ) : (
-                <>
-                  <CircleAlert className="mr-1 inline h-3.5 w-3.5" />
-                  ดูได้อย่างเดียว
-                </>
-              )}
-            </p>
-          </div>
-        </article>
+        </div>
       </div>
-
-      <article className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-white p-4 shadow-sm">
-        <div className="flex items-center gap-2 text-sm text-slate-700">
-          <PlugZap className="h-4 w-4 text-slate-500" />
-          ออกจากระบบเมื่อใช้งานเสร็จ เพื่อความปลอดภัยของบัญชี
-        </div>
-        <div className="w-full sm:w-auto sm:max-w-[220px]">
-          <LogoutButton />
-        </div>
-      </article>
     </section>
   );
 }

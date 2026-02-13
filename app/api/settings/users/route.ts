@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -85,21 +86,31 @@ const parseCreateStoreUserPayload = (
 };
 
 const listUsers = async (storeId: string) => {
+  const userCreators = alias(users, "user_creators");
+  const memberAdders = alias(users, "member_adders");
+
   const rows = await db
     .select({
       userId: users.id,
       email: users.email,
       name: users.name,
       systemRole: users.systemRole,
+      mustChangePassword: users.mustChangePassword,
       sessionLimit: users.sessionLimit,
+      createdByUserId: users.createdBy,
+      createdByName: userCreators.name,
       roleId: roles.id,
       roleName: roles.name,
       status: storeMembers.status,
       joinedAt: storeMembers.createdAt,
+      addedByUserId: storeMembers.addedBy,
+      addedByName: memberAdders.name,
     })
     .from(storeMembers)
     .innerJoin(users, eq(storeMembers.userId, users.id))
     .innerJoin(roles, eq(storeMembers.roleId, roles.id))
+    .leftJoin(userCreators, eq(users.createdBy, userCreators.id))
+    .leftJoin(memberAdders, eq(storeMembers.addedBy, memberAdders.id))
     .where(eq(storeMembers.storeId, storeId))
     .orderBy(asc(users.name));
 
@@ -167,6 +178,7 @@ const canSuperadminLinkUserAcrossOwnedStores = async (
 const upsertMembershipWithRoleGuard = async (params: {
   storeId: string;
   userId: string;
+  actorUserId: string;
   nextRoleId: string;
   nextRoleName: string;
 }) => {
@@ -218,6 +230,7 @@ const upsertMembershipWithRoleGuard = async (params: {
     userId: params.userId,
     roleId: params.nextRoleId,
     status: "ACTIVE",
+    addedBy: params.actorUserId,
   });
 };
 
@@ -298,6 +311,7 @@ export async function POST(request: Request) {
         await upsertMembershipWithRoleGuard({
           storeId,
           userId: existingUser.id,
+          actorUserId: session.userId,
           nextRoleId: role.id,
           nextRoleName: role.name,
         });
@@ -339,11 +353,15 @@ export async function POST(request: Request) {
       email: normalizedEmail,
       name: payload.data.name,
       passwordHash,
+      createdBy: session.userId,
+      mustChangePassword: true,
+      passwordUpdatedAt: null,
     });
 
     await upsertMembershipWithRoleGuard({
       storeId,
       userId,
+      actorUserId: session.userId,
       nextRoleId: role.id,
       nextRoleName: role.name,
     });

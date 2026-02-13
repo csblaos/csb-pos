@@ -1,4 +1,6 @@
-import { and, eq } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+
+import { and, eq, or, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db/client";
@@ -8,16 +10,24 @@ import { createUnitSchema, normalizeUnitPayload } from "@/lib/products/validatio
 
 export async function GET() {
   try {
-    await enforcePermission("units.view");
+    const { storeId } = await enforcePermission("units.view");
 
     const rows = await db
       .select({
         id: units.id,
         code: units.code,
         nameTh: units.nameTh,
+        scope: units.scope,
+        storeId: units.storeId,
       })
       .from(units)
-      .orderBy(units.code);
+      .where(
+        or(
+          eq(units.scope, "SYSTEM"),
+          and(eq(units.scope, "STORE"), eq(units.storeId, storeId)),
+        ),
+      )
+      .orderBy(sql`case when ${units.scope} = 'STORE' then 0 else 1 end`, units.code);
 
     return NextResponse.json({ ok: true, units: rows });
   } catch (error) {
@@ -27,7 +37,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await enforcePermission("units.create");
+    const { storeId } = await enforcePermission("units.create");
 
     const parsed = createUnitSchema.safeParse(await request.json());
     if (!parsed.success) {
@@ -39,26 +49,55 @@ export async function POST(request: Request) {
     const [existing] = await db
       .select({ id: units.id })
       .from(units)
-      .where(eq(units.code, payload.code))
+      .where(
+        and(
+          eq(units.code, payload.code),
+          or(
+            eq(units.scope, "SYSTEM"),
+            and(eq(units.scope, "STORE"), eq(units.storeId, storeId)),
+          ),
+        ),
+      )
       .limit(1);
 
     if (existing) {
       return NextResponse.json({ message: "รหัสหน่วยนี้มีอยู่แล้ว" }, { status: 409 });
     }
 
-    await db.insert(units).values(payload);
+    const unitId = randomUUID();
+    await db.insert(units).values({
+      id: unitId,
+      code: payload.code,
+      nameTh: payload.nameTh,
+      scope: "STORE",
+      storeId,
+    });
 
     const [created] = await db
       .select({
         id: units.id,
         code: units.code,
         nameTh: units.nameTh,
+        scope: units.scope,
+        storeId: units.storeId,
       })
       .from(units)
-      .where(and(eq(units.code, payload.code), eq(units.nameTh, payload.nameTh)))
+      .where(eq(units.id, unitId))
       .limit(1);
 
-    return NextResponse.json({ ok: true, unit: created ?? payload }, { status: 201 });
+    return NextResponse.json(
+      {
+        ok: true,
+        unit: created ?? {
+          id: unitId,
+          code: payload.code,
+          nameTh: payload.nameTh,
+          scope: "STORE",
+          storeId,
+        },
+      },
+      { status: 201 },
+    );
   } catch (error) {
     return toRBACErrorResponse(error);
   }

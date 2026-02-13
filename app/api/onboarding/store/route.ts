@@ -307,6 +307,7 @@ export async function POST(request: Request) {
       userId: session.userId,
       roleId: roleIds.Owner,
       status: "ACTIVE",
+      addedBy: session.userId,
     });
 
     await tx.insert(storeBranches).values({

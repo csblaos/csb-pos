@@ -96,6 +96,36 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     console.info("[db:repair] added column users.max_branches_per_store");
   }
 
+  if (!(await columnExists("users", "created_by"))) {
+    await client.execute("alter table `users` add `created_by` text");
+    console.info("[db:repair] added column users.created_by");
+  }
+
+  if (!(await columnExists("users", "must_change_password"))) {
+    await client.execute(
+      "alter table `users` add `must_change_password` integer not null default 0",
+    );
+    console.info("[db:repair] added column users.must_change_password");
+  }
+
+  if (!(await columnExists("users", "password_updated_at"))) {
+    await client.execute("alter table `users` add `password_updated_at` text");
+    console.info("[db:repair] added column users.password_updated_at");
+  }
+
+  await client.execute(
+    "update `users` set `password_updated_at` = coalesce(`created_at`, CURRENT_TIMESTAMP) where `password_updated_at` is null",
+  );
+  console.info("[db:repair] normalized users.password_updated_at");
+
+  await client.execute(
+    "create index if not exists `users_created_by_idx` on `users` (`created_by`)",
+  );
+  await client.execute(
+    "create index if not exists `users_must_change_password_idx` on `users` (`must_change_password`)",
+  );
+  console.info("[db:repair] ensured users created_by/must_change_password indexes");
+
   if (!(await columnExists("stores", "max_branches_override"))) {
     await client.execute("alter table `stores` add `max_branches_override` integer");
     console.info("[db:repair] added column stores.max_branches_override");
@@ -241,6 +271,16 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     "create unique index if not exists `store_branches_store_code_unique` on `store_branches` (`store_id`,`code`)",
   );
   console.info("[db:repair] ensured store_branches indexes");
+
+  if (!(await columnExists("store_members", "added_by"))) {
+    await client.execute("alter table `store_members` add `added_by` text");
+    console.info("[db:repair] added column store_members.added_by");
+  }
+
+  await client.execute(
+    "create index if not exists `store_members_added_by_idx` on `store_members` (`added_by`)",
+  );
+  console.info("[db:repair] ensured store_members.added_by index");
 }
 
 async function ensureMigrationTable() {

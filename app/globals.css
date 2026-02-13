@@ -16,6 +16,7 @@
     --radius: 0.75rem;
     --app-shell-max-width: 70rem;
     --auth-shell-max-width: 45rem;
+    --bottom-tab-nav-height: 5.5rem;
   }
 
   * {
@@ -24,5 +25,11 @@
 
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@media (display-mode: standalone) {
+  :root {
+    --bottom-tab-nav-height: 5.15rem;
   }
 }

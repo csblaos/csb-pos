@@ -16,6 +16,13 @@ export default async function OnboardingPage() {
     redirect("/system-admin");
   }
 
+  if (systemRole !== "SUPERADMIN") {
+    if (session.hasStoreMembership && session.activeStoreId) {
+      redirect("/dashboard");
+    }
+    redirect("/login");
+  }
+
   return (
     <OnboardingWizard
       hasStoreMembership={session.hasStoreMembership}

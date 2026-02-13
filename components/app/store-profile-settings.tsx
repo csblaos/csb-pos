@@ -117,6 +117,7 @@ export function StoreProfileSettings({
 }: StoreProfileSettingsProps) {
   const router = useRouter();
   const logoInputRef = useRef<HTMLInputElement | null>(null);
+  const saveActionRef = useRef<HTMLElement | null>(null);
   const initialAddressFields = useMemo(
     () => createAddressFieldsFromAddress(initialAddress),
     [initialAddress],
@@ -146,6 +147,7 @@ export function StoreProfileSettings({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSaveActionVisible, setIsSaveActionVisible] = useState(true);
 
   useEffect(() => {
     if (!logoFile) {
@@ -208,6 +210,8 @@ export function StoreProfileSettings({
     normalizedAddressDetail !== savedAddressDetail.trim();
   const contactCardDirty = normalizedPhoneNumber !== savedPhoneNumber.trim();
   const hasAnyChanges = storeCardDirty || addressCardDirty || contactCardDirty;
+  const showFloatingScrollButton =
+    canUpdate && hasAnyChanges && !isSaveActionVisible && !isConfirmOpen;
 
   const addressPreview = useMemo(() => {
     if (!provinceId || !districtId || !normalizedVillage) {
@@ -317,6 +321,10 @@ export function StoreProfileSettings({
     setIsConfirmOpen(true);
   };
 
+  const scrollToSaveAction = () => {
+    saveActionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+
   const saveProfile = async () => {
     const validation = validateInput();
     if (!validation.ok) {
@@ -407,228 +415,309 @@ export function StoreProfileSettings({
     }
   };
 
+  const fieldClassName =
+    "h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none ring-primary focus:ring-2 disabled:bg-slate-100";
+  const infoCardClassName =
+    "rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700";
+
+  useEffect(() => {
+    if (!canUpdate) {
+      setIsSaveActionVisible(true);
+      return;
+    }
+
+    const element = saveActionRef.current;
+    if (!element) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsSaveActionVisible(entry.isIntersecting);
+      },
+      { threshold: 0.25 },
+    );
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [canUpdate]);
+
   return (
-    <section className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-muted-foreground">จัดการข้อมูลหน้าร้านให้พร้อมใช้งานจริง</p>
-        {canUpdate ? (
-          <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            โหมดแก้ไข
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
-            <Lock className="h-3.5 w-3.5" />
-            โหมดอ่านอย่างเดียว
-          </span>
-        )}
+    <section className="space-y-5">
+      <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground">จัดการข้อมูลหน้าร้านให้พร้อมใช้งานจริง</p>
+          <div className="flex items-center gap-2">
+            {canUpdate ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-lg text-xs"
+                onClick={scrollToSaveAction}
+              >
+                ไปปุ่มบันทึก
+              </Button>
+            ) : null}
+            {canUpdate ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                โหมดแก้ไข
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                <Lock className="h-3.5 w-3.5" />
+                โหมดอ่านอย่างเดียว
+              </span>
+            )}
+          </div>
+        </div>
       </div>
 
-      <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Store className="h-4 w-4 text-sky-700" />
-            <p className="text-sm font-semibold">ข้อมูลร้าน</p>
+      <div className="space-y-2">
+        <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+          ข้อมูลร้าน
+        </p>
+        <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Store className="h-4 w-4 text-slate-600" />
+              <p className="text-sm font-semibold text-slate-900">ชื่อร้านและโลโก้</p>
+            </div>
+            <CardStatusBadge dirty={storeCardDirty} />
           </div>
-          <CardStatusBadge dirty={storeCardDirty} />
-        </div>
 
-        <div className="space-y-2">
-          <label className="text-xs text-muted-foreground" htmlFor="store-name">
-            ชื่อร้าน
-          </label>
-          <input
-            id="store-name"
-            value={storeNameValue}
-            onChange={(event) => setStoreNameValue(event.target.value)}
-            disabled={!canUpdate || isSaving}
-            className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2 disabled:bg-slate-100"
-            placeholder="เช่น Cafe Riverside"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-xs text-muted-foreground">โลโก้ร้าน</label>
-          <div className="rounded-lg border bg-slate-50 p-4">
-            <div className="flex flex-col items-center gap-2 text-center">
-              <button
-                type="button"
-                onClick={() => logoInputRef.current?.click()}
-                disabled={!canUpdate || isSaving}
-                className="group relative h-24 w-24 overflow-hidden rounded-full border-2 border-dashed border-slate-300 bg-white disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {renderedLogoUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={renderedLogoUrl}
-                    alt="โลโก้ร้านปัจจุบัน"
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  <span className="flex h-full w-full items-center justify-center">
-                    <ImagePlus className="h-7 w-7 text-slate-400" />
-                  </span>
-                )}
-                {canUpdate ? (
-                  <span className="absolute inset-0 hidden items-center justify-center bg-black/35 text-[11px] font-medium text-white group-hover:flex">
-                    เปลี่ยนรูป
-                  </span>
-                ) : null}
-              </button>
-
+          <div className="space-y-4 p-4">
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground" htmlFor="store-name">
+                ชื่อร้าน
+              </label>
               <input
-                ref={logoInputRef}
-                type="file"
-                accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                onChange={(event) => setLogoFile(event.target.files?.[0] ?? null)}
+                id="store-name"
+                value={storeNameValue}
+                onChange={(event) => setStoreNameValue(event.target.value)}
                 disabled={!canUpdate || isSaving}
-                className="sr-only"
+                className={fieldClassName}
+                placeholder="เช่น Cafe Riverside"
               />
+            </div>
 
-              <p className="text-xs text-muted-foreground">
-                {canUpdate ? "คลิกที่รูปเพื่ออัปโหลดโลโก้ใหม่" : "โลโก้ร้านปัจจุบัน"}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                รองรับ JPG, PNG, WEBP, SVG (ขนาดสูงสุดตามที่ระบบกำหนด)
-              </p>
-              {renderedLogoName ? (
-                <p className="max-w-[220px] truncate text-xs text-slate-700" title={renderedLogoName}>
-                  {renderedLogoName}
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">ยังไม่มีโลโก้ร้าน</p>
-              )}
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground">โลโก้ร้าน</label>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-col items-center gap-2 text-center">
+                  <button
+                    type="button"
+                    onClick={() => logoInputRef.current?.click()}
+                    disabled={!canUpdate || isSaving}
+                    className="group relative h-24 w-24 overflow-hidden rounded-full border-2 border-dashed border-slate-300 bg-white disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {renderedLogoUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={renderedLogoUrl}
+                        alt="โลโก้ร้านปัจจุบัน"
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <span className="flex h-full w-full items-center justify-center">
+                        <ImagePlus className="h-7 w-7 text-slate-400" />
+                      </span>
+                    )}
+                    {canUpdate ? (
+                      <span className="absolute inset-0 hidden items-center justify-center bg-black/35 text-[11px] font-medium text-white group-hover:flex">
+                        เปลี่ยนรูป
+                      </span>
+                    ) : null}
+                  </button>
+
+                  <input
+                    ref={logoInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                    onChange={(event) => setLogoFile(event.target.files?.[0] ?? null)}
+                    disabled={!canUpdate || isSaving}
+                    className="sr-only"
+                  />
+
+                  <p className="text-xs text-muted-foreground">
+                    {canUpdate ? "แตะที่รูปเพื่ออัปโหลดโลโก้ใหม่" : "โลโก้ร้านปัจจุบัน"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    รองรับ JPG, PNG, WEBP, SVG (ขนาดสูงสุดตามที่ระบบกำหนด)
+                  </p>
+                  {renderedLogoName ? (
+                    <p
+                      className="max-w-[220px] truncate text-xs text-slate-700"
+                      title={renderedLogoName}
+                    >
+                      {renderedLogoName}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">ยังไม่มีโลโก้ร้าน</p>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </article>
+        </article>
+      </div>
 
-      <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <MapPin className="h-4 w-4 text-violet-700" />
-            <p className="text-sm font-semibold">ที่อยู่ร้าน</p>
-          </div>
-          <CardStatusBadge dirty={addressCardDirty} />
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-2">
-            <label className="text-xs text-muted-foreground" htmlFor="store-province">
-              Province
-            </label>
-            <select
-              id="store-province"
-              value={provinceId ?? ""}
-              onChange={(event) => {
-                const nextProvinceId = Number(event.target.value) || null;
-                setProvinceId(nextProvinceId);
-                setDistrictId(null);
-              }}
-              disabled={!canUpdate || isSaving}
-              className="h-10 w-full rounded-md border bg-white px-3 text-sm outline-none ring-primary focus:ring-2 disabled:bg-slate-100"
-            >
-              <option value="">เลือก Province</option>
-              {laosProvinces.map((province) => (
-                <option key={province.id} value={province.id}>
-                  {province.nameEn}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs text-muted-foreground" htmlFor="store-district">
-              District
-            </label>
-            <select
-              id="store-district"
-              value={districtId ?? ""}
-              onChange={(event) => setDistrictId(Number(event.target.value) || null)}
-              disabled={!canUpdate || isSaving || !provinceId}
-              className="h-10 w-full rounded-md border bg-white px-3 text-sm outline-none ring-primary focus:ring-2 disabled:bg-slate-100"
-            >
-              <option value="">เลือก District</option>
-              {districtOptions.map((district) => (
-                <option key={district.id} value={district.id}>
-                  {district.nameEn}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs text-muted-foreground" htmlFor="store-village">
-              Village
-            </label>
-            <input
-              id="store-village"
-              value={village}
-              onChange={(event) => setVillage(event.target.value)}
-              disabled={!canUpdate || isSaving}
-              className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2 disabled:bg-slate-100"
-              placeholder="เช่น Ban Phonxay"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs text-muted-foreground" htmlFor="store-address-detail">
-              รายละเอียดเพิ่ม (optional)
-            </label>
-            <input
-              id="store-address-detail"
-              value={addressDetail}
-              onChange={(event) => setAddressDetail(event.target.value)}
-              disabled={!canUpdate || isSaving}
-              className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2 disabled:bg-slate-100"
-              placeholder="เช่น ซอย 2 ใกล้ตลาด"
-            />
-          </div>
-        </div>
-
-        <p className="rounded-lg border bg-slate-50 px-3 py-2 text-xs text-slate-700">
-          ที่อยู่ที่จะแสดง: <span className="font-medium">{addressPreview}</span>
+      <div className="space-y-2">
+        <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+          ที่อยู่ร้าน
         </p>
-      </article>
-
-      <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <Phone className="h-4 w-4 text-emerald-700" />
-            <p className="text-sm font-semibold">ติดต่อร้าน</p>
+        <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+            <div className="flex items-center gap-2">
+              <MapPin className="h-4 w-4 text-slate-600" />
+              <p className="text-sm font-semibold text-slate-900">ข้อมูลที่อยู่</p>
+            </div>
+            <CardStatusBadge dirty={addressCardDirty} />
           </div>
-          <CardStatusBadge dirty={contactCardDirty} />
-        </div>
 
-        <div className="space-y-2">
-          <label className="text-xs text-muted-foreground" htmlFor="store-phone-number">
-            เบอร์โทรร้าน
-          </label>
-          <input
-            id="store-phone-number"
-            value={phoneNumber}
-            onChange={(event) => setPhoneNumber(event.target.value)}
-            disabled={!canUpdate || isSaving}
-            className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2 disabled:bg-slate-100"
-            placeholder="เช่น +856 20 9999 9999"
-          />
-        </div>
-      </article>
+          <div className="space-y-4 p-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <label className="text-xs text-muted-foreground" htmlFor="store-province">
+                  Province
+                </label>
+                <select
+                  id="store-province"
+                  value={provinceId ?? ""}
+                  onChange={(event) => {
+                    const nextProvinceId = Number(event.target.value) || null;
+                    setProvinceId(nextProvinceId);
+                    setDistrictId(null);
+                  }}
+                  disabled={!canUpdate || isSaving}
+                  className={fieldClassName}
+                >
+                  <option value="">เลือก Province</option>
+                  {laosProvinces.map((province) => (
+                    <option key={province.id} value={province.id}>
+                      {province.nameEn}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-      {successMessage ? <p className="text-sm text-emerald-700">{successMessage}</p> : null}
-      {warningMessage ? <p className="text-sm text-amber-700">{warningMessage}</p> : null}
-      {errorMessage ? <p className="text-sm text-red-600">{errorMessage}</p> : null}
+              <div className="space-y-2">
+                <label className="text-xs text-muted-foreground" htmlFor="store-district">
+                  District
+                </label>
+                <select
+                  id="store-district"
+                  value={districtId ?? ""}
+                  onChange={(event) => setDistrictId(Number(event.target.value) || null)}
+                  disabled={!canUpdate || isSaving || !provinceId}
+                  className={fieldClassName}
+                >
+                  <option value="">เลือก District</option>
+                  {districtOptions.map((district) => (
+                    <option key={district.id} value={district.id}>
+                      {district.nameEn}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs text-muted-foreground" htmlFor="store-village">
+                  Village
+                </label>
+                <input
+                  id="store-village"
+                  value={village}
+                  onChange={(event) => setVillage(event.target.value)}
+                  disabled={!canUpdate || isSaving}
+                  className={fieldClassName}
+                  placeholder="เช่น Ban Phonxay"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs text-muted-foreground" htmlFor="store-address-detail">
+                  รายละเอียดเพิ่ม (optional)
+                </label>
+                <input
+                  id="store-address-detail"
+                  value={addressDetail}
+                  onChange={(event) => setAddressDetail(event.target.value)}
+                  disabled={!canUpdate || isSaving}
+                  className={fieldClassName}
+                  placeholder="เช่น ซอย 2 ใกล้ตลาด"
+                />
+              </div>
+            </div>
+
+            <p className={infoCardClassName}>
+              ที่อยู่ที่จะแสดง: <span className="font-medium">{addressPreview}</span>
+            </p>
+          </div>
+        </article>
+      </div>
+
+      <div className="space-y-2">
+        <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+          ติดต่อร้าน
+        </p>
+        <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+            <div className="flex items-center gap-2">
+              <Phone className="h-4 w-4 text-slate-600" />
+              <p className="text-sm font-semibold text-slate-900">ข้อมูลติดต่อ</p>
+            </div>
+            <CardStatusBadge dirty={contactCardDirty} />
+          </div>
+
+          <div className="space-y-2 p-4">
+            <label className="text-xs text-muted-foreground" htmlFor="store-phone-number">
+              เบอร์โทรร้าน
+            </label>
+            <input
+              id="store-phone-number"
+              value={phoneNumber}
+              onChange={(event) => setPhoneNumber(event.target.value)}
+              disabled={!canUpdate || isSaving}
+              className={fieldClassName}
+              placeholder="เช่น +856 20 9999 9999"
+            />
+          </div>
+        </article>
+      </div>
+
+      <div className="space-y-2">
+        <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+          สถานะการบันทึก
+        </p>
+        {successMessage ? (
+          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            {successMessage}
+          </p>
+        ) : null}
+        {warningMessage ? (
+          <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+            {warningMessage}
+          </p>
+        ) : null}
+        {errorMessage ? (
+          <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+            {errorMessage}
+          </p>
+        ) : null}
+      </div>
 
       {canUpdate ? (
-        <article className="space-y-2 rounded-xl border bg-white p-4 shadow-sm">
-          <div className="flex items-center justify-between gap-2 text-xs">
+        <article ref={saveActionRef} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center justify-between gap-2 text-xs">
             <p className="text-muted-foreground">
               {hasAnyChanges ? "มีข้อมูลที่ยังไม่บันทึก" : "ข้อมูลล่าสุดถูกบันทึกแล้ว"}
             </p>
             <CardStatusBadge dirty={hasAnyChanges} />
           </div>
           <Button
-            className="h-10 w-full"
+            className="h-11 w-full rounded-xl"
             onClick={handleOpenConfirm}
             disabled={isSaving || !hasAnyChanges}
           >
@@ -636,10 +725,20 @@ export function StoreProfileSettings({
           </Button>
         </article>
       ) : (
-        <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+        <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
           บัญชีนี้ไม่มีสิทธิ์แก้ไขข้อมูลร้าน กรุณาติดต่อผู้ดูแลระบบร้าน
         </p>
       )}
+
+      {showFloatingScrollButton ? (
+        <Button
+          type="button"
+          className="fixed bottom-[calc(env(safe-area-inset-bottom)+5.25rem)] right-4 z-30 h-10 rounded-full px-4 shadow-lg sm:bottom-6"
+          onClick={scrollToSaveAction}
+        >
+          ไปปุ่มบันทึก
+        </Button>
+      ) : null}
 
       {isConfirmOpen ? (
         <div
@@ -651,10 +750,10 @@ export function StoreProfileSettings({
           }}
         >
           <div
-            className="w-full max-w-md rounded-xl border bg-white p-4 shadow-xl"
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="text-base font-semibold">ยืนยันการบันทึกข้อมูลร้าน</h2>
+            <h2 className="text-base font-semibold text-slate-900">ยืนยันการบันทึกข้อมูลร้าน</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               ตรวจสอบข้อมูลด้านล่าง แล้วกดยืนยันเพื่อบันทึกการเปลี่ยนแปลง
             </p>
@@ -666,7 +765,7 @@ export function StoreProfileSettings({
             ) : null}
             {errorMessage ? <p className="mt-2 text-xs text-red-600">{errorMessage}</p> : null}
 
-            <div className="mt-4 space-y-2 rounded-lg border bg-slate-50 p-3 text-xs text-slate-700">
+            <div className="mt-4 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
               <p>
                 ชื่อร้าน: <span className="font-medium">{normalizedStoreName || "-"}</span>
               </p>
@@ -688,12 +787,13 @@ export function StoreProfileSettings({
               <Button
                 type="button"
                 variant="outline"
+                className="h-10 rounded-xl"
                 onClick={() => setIsConfirmOpen(false)}
                 disabled={isSaving}
               >
                 ยกเลิก
               </Button>
-              <Button type="button" onClick={saveProfile} disabled={isSaving}>
+              <Button type="button" className="h-10 rounded-xl" onClick={saveProfile} disabled={isSaving}>
                 {isSaving ? (
                   <span className="inline-flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" />

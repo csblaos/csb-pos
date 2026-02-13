@@ -54,7 +54,7 @@ export default async function ProductsPage() {
 
   const [products, units] = await Promise.all([
     listStoreProducts(session.activeStoreId),
-    listUnits(),
+    listUnits(session.activeStoreId),
   ]);
 
   return (

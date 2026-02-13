@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, like, or } from "drizzle-orm";
+import { and, asc, desc, eq, like, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 
 import { db } from "@/lib/db/client";
@@ -8,6 +8,8 @@ export type UnitOption = {
   id: string;
   code: string;
   nameTh: string;
+  scope: "SYSTEM" | "STORE";
+  storeId: string | null;
 };
 
 export type ProductConversionView = {
@@ -32,15 +34,23 @@ export type ProductListItem = {
   conversions: ProductConversionView[];
 };
 
-export async function listUnits(): Promise<UnitOption[]> {
+export async function listUnits(storeId: string): Promise<UnitOption[]> {
   const rows = await db
     .select({
       id: units.id,
       code: units.code,
       nameTh: units.nameTh,
+      scope: units.scope,
+      storeId: units.storeId,
     })
     .from(units)
-    .orderBy(asc(units.code));
+    .where(
+      or(
+        eq(units.scope, "SYSTEM"),
+        and(eq(units.scope, "STORE"), eq(units.storeId, storeId)),
+      ),
+    )
+    .orderBy(sql`case when ${units.scope} = 'STORE' then 0 else 1 end`, asc(units.code));
 
   return rows;
 }

@@ -33,7 +33,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    await enforceSystemAdminSession();
+    const { session } = await enforceSystemAdminSession();
 
     const payload = createSuperadminSchema.safeParse(await request.json());
     if (!payload.success) {
@@ -60,6 +60,7 @@ export async function POST(request: Request) {
       email: normalizedEmail,
       name: payload.data.name,
       passwordHash,
+      createdBy: session.userId,
       systemRole: "SUPERADMIN",
       canCreateStores: payload.data.canCreateStores,
       maxStores: payload.data.canCreateStores ? payload.data.maxStores : null,

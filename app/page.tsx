@@ -17,7 +17,10 @@ export default async function HomePage() {
   }
 
   if (!session.hasStoreMembership || !session.activeStoreId) {
-    redirect("/onboarding");
+    if (systemRole === "SUPERADMIN") {
+      redirect("/onboarding");
+    }
+    redirect("/login");
   }
 
   const permissionKeys = await getUserPermissionsForCurrentSession();

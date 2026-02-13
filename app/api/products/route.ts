@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db/client";
@@ -49,7 +49,15 @@ export async function POST(request: Request) {
     const unitRows = await db
       .select({ id: units.id })
       .from(units)
-      .where(inArray(units.id, unitIds));
+      .where(
+        and(
+          inArray(units.id, unitIds),
+          or(
+            eq(units.scope, "SYSTEM"),
+            and(eq(units.scope, "STORE"), eq(units.storeId, storeId)),
+          ),
+        ),
+      );
 
     if (unitRows.length !== unitIds.length) {
       return NextResponse.json({ message: "พบหน่วยสินค้าที่ไม่ถูกต้อง" }, { status: 400 });

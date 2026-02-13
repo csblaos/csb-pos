@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { generateTemporaryPassword, hashPassword } from "@/lib/auth/password";
 import { enforceUserSessionLimitNow, invalidateUserSessions } from "@/lib/auth/session";
 import { db } from "@/lib/db/client";
 import { roles, storeMembers, users } from "@/lib/db/schema";
@@ -19,6 +20,9 @@ const updateUserSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("set_session_limit"),
     sessionLimit: z.number().int().min(1).max(10).nullable(),
+  }),
+  z.object({
+    action: z.literal("reset_password"),
   }),
 ]);
 
@@ -140,6 +144,23 @@ export async function PATCH(
         .where(eq(users.id, userId));
 
       await enforceUserSessionLimitNow(userId);
+    }
+
+    if (payload.data.action === "reset_password") {
+      const temporaryPassword = generateTemporaryPassword(10);
+      const passwordHash = await hashPassword(temporaryPassword);
+
+      await db
+        .update(users)
+        .set({
+          passwordHash,
+          mustChangePassword: true,
+          passwordUpdatedAt: null,
+        })
+        .where(eq(users.id, userId));
+
+      await invalidateUserSessions(userId);
+      return NextResponse.json({ ok: true, temporaryPassword });
     }
 
     return NextResponse.json({ ok: true });

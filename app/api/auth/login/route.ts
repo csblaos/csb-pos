@@ -1,8 +1,8 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { verifyPassword } from "@/lib/auth/password";
+import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { buildSessionForUser, getUserMembershipFlags } from "@/lib/auth/session-db";
 import { createSessionCookie, SessionStoreUnavailableError } from "@/lib/auth/session";
 import { db } from "@/lib/db/client";
@@ -13,6 +13,7 @@ import { getStorefrontEntryRoute } from "@/lib/storefront/routing";
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
+  newPassword: z.string().min(8).max(128).optional(),
 });
 
 export async function POST(request: Request) {
@@ -27,6 +28,7 @@ export async function POST(request: Request) {
       email: users.email,
       name: users.name,
       passwordHash: users.passwordHash,
+      mustChangePassword: users.mustChangePassword,
       systemRole: users.systemRole,
     })
     .from(users)
@@ -42,10 +44,52 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "อีเมลหรือรหัสผ่านไม่ถูกต้อง" }, { status: 401 });
   }
 
+  if (user.mustChangePassword) {
+    const nextPassword = payload.data.newPassword?.trim();
+    if (!nextPassword) {
+      return NextResponse.json({
+        ok: false,
+        requiresPasswordChange: true,
+        email: user.email,
+        message: "บัญชีนี้ต้องเปลี่ยนรหัสผ่านก่อนเข้าใช้งาน",
+      });
+    }
+
+    const isSamePassword = await verifyPassword(nextPassword, user.passwordHash);
+    if (isSamePassword) {
+      return NextResponse.json(
+        { message: "รหัสผ่านใหม่ต้องไม่ซ้ำรหัสผ่านเดิม" },
+        { status: 400 },
+      );
+    }
+
+    const nextPasswordHash = await hashPassword(nextPassword);
+    await db
+      .update(users)
+      .set({
+        passwordHash: nextPasswordHash,
+        mustChangePassword: false,
+        passwordUpdatedAt: sql`CURRENT_TIMESTAMP`,
+      })
+      .where(eq(users.id, user.id));
+  }
+
   const membershipFlags = await getUserMembershipFlags(user.id);
   if (membershipFlags.hasSuspendedMembership && !membershipFlags.hasActiveMembership) {
     return NextResponse.json(
       { message: "บัญชีของคุณถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ" },
+      { status: 403 },
+    );
+  }
+
+  const canAccessOnboarding = user.systemRole === "SUPERADMIN";
+  const canAccessSystemAdmin = user.systemRole === "SYSTEM_ADMIN";
+  if (!membershipFlags.hasActiveMembership && !canAccessOnboarding && !canAccessSystemAdmin) {
+    return NextResponse.json(
+      {
+        message:
+          "บัญชีนี้ยังไม่มีร้านที่เปิดใช้งาน และไม่มีสิทธิ์สร้างร้านใหม่ กรุณาติดต่อ SUPERADMIN",
+      },
       { status: 403 },
     );
   }
@@ -70,7 +114,7 @@ export async function POST(request: Request) {
   }
 
   let nextRoute = "/onboarding";
-  if (user.systemRole === "SYSTEM_ADMIN") {
+  if (canAccessSystemAdmin) {
     nextRoute = "/system-admin";
   } else if (session.hasStoreMembership && session.activeStoreId) {
     const permissionKeys = await getUserPermissions(

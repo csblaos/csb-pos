@@ -29,6 +29,26 @@ const getCompactLabel = (label: string, href: string) => {
   return label;
 };
 
+const getGridColumnsClass = (tabCount: number) => {
+  if (tabCount >= 5) {
+    return "grid-cols-5";
+  }
+
+  if (tabCount === 4) {
+    return "grid-cols-4";
+  }
+
+  if (tabCount === 3) {
+    return "grid-cols-3";
+  }
+
+  if (tabCount === 2) {
+    return "grid-cols-2";
+  }
+
+  return "grid-cols-1";
+};
+
 export function BottomTabNav({ permissionKeys, storeType }: BottomTabNavProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -75,21 +95,15 @@ export function BottomTabNav({ permissionKeys, storeType }: BottomTabNavProps) {
   }
 
   return (
-    <nav className="fixed bottom-0 left-1/2 z-20 w-full -translate-x-1/2 px-3 pb-[calc(env(safe-area-inset-bottom)+0.55rem)] pt-2 lg:max-w-[var(--app-shell-max-width)] lg:px-4">
-      <div className="mx-auto rounded-2xl border border-slate-200/90 bg-white/90 shadow-[0_8px_20px_rgba(15,23,42,0.08)] backdrop-blur supports-[backdrop-filter]:bg-white/80">
-        <ul
-          className={`mx-auto grid w-full gap-1.5 p-1.5 lg:max-w-4xl lg:gap-2 lg:p-2 ${
-            visibleTabs.length >= 5
-              ? "grid-cols-5"
-              : visibleTabs.length === 4
-              ? "grid-cols-4"
-              : visibleTabs.length === 3
-                ? "grid-cols-3"
-                : visibleTabs.length === 2
-                  ? "grid-cols-2"
-                  : "grid-cols-1"
-          }`}
-        >
+    <nav
+      aria-label="เมนูหลัก"
+      className="pointer-events-none fixed bottom-0 left-0 right-0 z-20 w-full bg-white lg:left-1/2 lg:right-auto lg:max-w-[var(--app-shell-max-width)] lg:-translate-x-1/2"
+      style={{
+        paddingBottom: "env(safe-area-inset-bottom)",
+      }}
+    >
+      <div className="pointer-events-auto mx-auto w-full overflow-hidden border-x-0 border-t border-slate-200 bg-white shadow-[0_-1px_0_rgba(148,163,184,0.28),0_-10px_24px_rgba(15,23,42,0.08)]">
+        <ul className={`mx-auto grid w-full gap-1.5 px-1.5 py-1.5 ${getGridColumnsClass(visibleTabs.length)}`}>
           {visibleTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = isTabActive(currentPath, tab.href);
@@ -100,18 +114,30 @@ export function BottomTabNav({ permissionKeys, storeType }: BottomTabNavProps) {
                   type="button"
                   onClick={() => navigateToTab(tab.href)}
                   aria-current={isActive ? "page" : undefined}
-                  className={`relative flex min-h-[52px] w-full min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-2 py-2.5 text-[11px] transition-all duration-150 ease-out lg:min-h-14 lg:px-3 lg:py-3 lg:text-xs ${
+                  className={`group relative flex min-h-[58px] w-full min-w-0 touch-manipulation flex-col items-center justify-center gap-1 rounded-xl px-1.5 py-2 text-[11px] transition-all duration-200 ease-out active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/60 focus-visible:ring-offset-1 ${
                     isActive
-                      ? "text-blue-700"
-                      : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+                      ? "text-slate-900"
+                      : "text-slate-500 hover:bg-slate-50/80 hover:text-slate-800"
                   }`}
                 >
-                  <Icon
-                    className={`h-4 w-4 transition-transform duration-150 lg:h-[18px] lg:w-[18px] ${
-                      isActive ? "scale-105" : "scale-100"
+                  <span
+                    className={`flex h-9 w-9 items-center justify-center rounded-full transition-all duration-200 ${
+                      isActive
+                        ? "bg-blue-600 text-white shadow-[0_8px_16px_rgba(37,99,235,0.34)]"
+                        : "text-slate-500 group-hover:text-slate-700"
                     }`}
-                  />
-                  <span className="max-w-full truncate font-medium leading-none">
+                  >
+                    <Icon
+                      className={`h-5 w-5 transition-transform duration-200 ${
+                        isActive ? "scale-105" : "scale-100"
+                      }`}
+                    />
+                  </span>
+                  <span
+                    className={`max-w-full truncate leading-none ${
+                      isActive ? "font-semibold text-slate-900" : "font-medium text-slate-500"
+                    }`}
+                  >
                     <span className="sm:hidden">{getCompactLabel(tab.label, tab.href)}</span>
                     <span className="hidden sm:inline">{tab.label}</span>
                   </span>

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { sql } from "drizzle-orm";
 import {
+  foreignKey,
   index,
   integer,
   primaryKey,
@@ -44,6 +45,7 @@ export const connectionStatusEnum = [
   "CONNECTED",
   "ERROR",
 ] as const;
+export const unitScopeEnum = ["SYSTEM", "STORE"] as const;
 
 export const users = sqliteTable(
   "users",
@@ -52,6 +54,11 @@ export const users = sqliteTable(
     email: text("email").notNull(),
     name: text("name").notNull(),
     passwordHash: text("password_hash").notNull(),
+    createdBy: text("created_by"),
+    mustChangePassword: integer("must_change_password", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    passwordUpdatedAt: text("password_updated_at"),
     systemRole: text("system_role", {
       enum: ["USER", "SUPERADMIN", "SYSTEM_ADMIN"],
     })
@@ -65,7 +72,16 @@ export const users = sqliteTable(
     createdAt: text("created_at").notNull().default(createdAtDefault),
   },
   (table) => ({
+    usersCreatedByFk: foreignKey({
+      columns: [table.createdBy],
+      foreignColumns: [table.id],
+      name: "users_created_by_fk",
+    }).onDelete("set null"),
     usersEmailUnique: uniqueIndex("users_email_unique").on(table.email),
+    usersCreatedByIdx: index("users_created_by_idx").on(table.createdBy),
+    usersMustChangePasswordIdx: index("users_must_change_password_idx").on(
+      table.mustChangePassword,
+    ),
     usersCreatedAtIdx: index("users_created_at_idx").on(table.createdAt),
   }),
 );
@@ -207,12 +223,14 @@ export const storeMembers = sqliteTable(
       .notNull()
       .references(() => roles.id, { onDelete: "restrict" }),
     status: text("status", { enum: memberStatusEnum }).notNull().default("ACTIVE"),
+    addedBy: text("added_by").references(() => users.id, { onDelete: "set null" }),
     createdAt: text("created_at").notNull().default(createdAtDefault),
   },
   (table) => ({
     pk: primaryKey({ columns: [table.storeId, table.userId] }),
     storeMembersStoreIdIdx: index("store_members_store_id_idx").on(table.storeId),
     storeMembersRoleIdIdx: index("store_members_role_id_idx").on(table.roleId),
+    storeMembersAddedByIdx: index("store_members_added_by_idx").on(table.addedBy),
     storeMembersCreatedAtIdx: index("store_members_created_at_idx").on(
       table.createdAt,
     ),
@@ -241,9 +259,17 @@ export const units = sqliteTable(
     id: id(),
     code: text("code").notNull(),
     nameTh: text("name_th").notNull(),
+    scope: text("scope", { enum: unitScopeEnum }).notNull().default("SYSTEM"),
+    storeId: text("store_id").references(() => stores.id, { onDelete: "cascade" }),
   },
   (table) => ({
-    unitsCodeUnique: uniqueIndex("units_code_unique").on(table.code),
+    unitsStoreIdIdx: index("units_store_id_idx").on(table.storeId),
+    unitsSystemCodeUnique: uniqueIndex("units_system_code_unique")
+      .on(table.code)
+      .where(sql`${table.scope} = 'SYSTEM'`),
+    unitsStoreCodeUnique: uniqueIndex("units_store_code_unique")
+      .on(table.storeId, table.code)
+      .where(sql`${table.scope} = 'STORE'`),
   }),
 );
 
