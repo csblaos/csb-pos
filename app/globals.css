@@ -28,6 +28,15 @@
   }
 }
 
+/* iOS Safari zooms focused inputs below 16px; keep mobile form controls at 16px. */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
 @media (display-mode: standalone) {
   :root {
     --bottom-tab-nav-height: 5.15rem;

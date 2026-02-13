@@ -2,7 +2,7 @@
 
 import { ChevronRight, Copy, KeyRound, Loader2, Mail, Plus, Smartphone, UserRound, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 
 import { Button } from "@/components/ui/button";
@@ -126,6 +126,24 @@ export function UsersManagement({
   const rolesById = useMemo(() => new Map(roles.map((role) => [role.id, role])), [roles]);
   const membersById = useMemo(() => new Map(members.map((member) => [member.userId, member])), [members]);
   const editingMember = editingMemberId ? membersById.get(editingMemberId) ?? null : null;
+  const isEditModalOpen = Boolean(editingMember);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return undefined;
+    }
+
+    if (!isCreateModalOpen && !isEditModalOpen) {
+      return undefined;
+    }
+
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, [isCreateModalOpen, isEditModalOpen]);
 
   const openCreateModal = () => {
     if (!canCreate) {
@@ -483,29 +501,31 @@ export function UsersManagement({
           disabled={loadingKey === "create-user" || loadingKey === "add-existing-user"}
         />
         <div
-          className={`absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-2xl transition-all duration-300 ease-out sm:inset-auto sm:left-1/2 sm:top-1/2 sm:w-full sm:max-w-md sm:rounded-2xl ${
+          className={`absolute inset-x-0 bottom-0 max-h-[calc(100dvh-0.5rem)] overflow-y-auto overscroll-contain rounded-t-3xl border border-slate-200 bg-white shadow-2xl transition-all duration-300 ease-out sm:inset-auto sm:left-1/2 sm:top-1/2 sm:max-h-[min(720px,calc(100dvh-2rem))] sm:w-full sm:max-w-md sm:rounded-2xl ${
             isCreateModalOpen
               ? "translate-y-0 opacity-100 sm:-translate-x-1/2 sm:-translate-y-1/2"
               : "translate-y-full opacity-0 sm:-translate-x-1/2 sm:-translate-y-[42%]"
           }`}
         >
-          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-            <div>
-              <p className="text-sm font-semibold text-slate-900">เพิ่มสมาชิกในร้าน</p>
-              <p className="mt-0.5 text-xs text-slate-500">สร้างบัญชีใหม่หรือเพิ่มผู้ใช้เดิมเข้าร้าน</p>
+          <div className="sticky top-0 z-10 border-b border-slate-100 bg-white px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">เพิ่มสมาชิกในร้าน</p>
+                <p className="mt-0.5 text-xs text-slate-500">สร้างบัญชีใหม่หรือเพิ่มผู้ใช้เดิมเข้าร้าน</p>
+              </div>
+              <button
+                type="button"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600"
+                onClick={closeCreateModal}
+                disabled={loadingKey === "create-user" || loadingKey === "add-existing-user"}
+                aria-label="ปิด"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
-            <button
-              type="button"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600"
-              onClick={closeCreateModal}
-              disabled={loadingKey === "create-user" || loadingKey === "add-existing-user"}
-              aria-label="ปิด"
-            >
-              <X className="h-4 w-4" />
-            </button>
           </div>
 
-          <div className="overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-4 sm:pb-4">
+          <div className="px-4 py-4">
             {canLinkExisting ? (
               <div className="mb-4 grid grid-cols-2 rounded-xl border border-slate-200 bg-slate-50 p-1">
                 <button
@@ -624,14 +644,15 @@ export function UsersManagement({
                 </div>
               </div>
             )}
+          </div>
 
+          <div className="sticky bottom-0 z-10 border-t border-slate-100 bg-white px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 sm:pb-4">
             {createErrorMessage ? (
-              <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+              <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
                 {createErrorMessage}
               </p>
             ) : null}
-
-            <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className={`${createErrorMessage ? "mt-3 " : ""}grid grid-cols-2 gap-2`}>
               <Button type="button" variant="outline" className="h-10 rounded-xl" onClick={closeCreateModal} disabled={loadingKey !== null}>
                 ยกเลิก
               </Button>
@@ -663,190 +684,195 @@ export function UsersManagement({
           onClick={closeEditModal}
         />
         <div
-          className={`absolute inset-x-0 bottom-0 mx-auto w-full max-w-2xl rounded-t-3xl border border-slate-200 bg-white p-5 shadow-2xl transition duration-200 sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-[min(720px,calc(100%-2rem))] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl ${editingMember ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0"}`}
+          className={`absolute inset-x-0 bottom-0 mx-auto w-full max-h-[calc(100dvh-0.5rem)] overflow-y-auto overscroll-contain rounded-t-3xl border border-slate-200 bg-white shadow-2xl transition duration-200 sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:max-h-[min(760px,calc(100dvh-2rem))] sm:w-[min(720px,calc(100%-2rem))] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl ${editingMember ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0"}`}
         >
           {editingMember ? (
             <>
-              <div className="mb-4 flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h3 className="truncate text-base font-semibold text-slate-900">{editingMember.name}</h3>
-                  <p className="mt-0.5 truncate text-xs text-slate-500">{editingMember.email}</p>
+              <div className="sticky top-0 z-10 border-b border-slate-100 bg-white px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-base font-semibold text-slate-900">{editingMember.name}</h3>
+                    <p className="mt-0.5 truncate text-xs text-slate-500">{editingMember.email}</p>
+                  </div>
+                  <Button type="button" variant="ghost" size="sm" className="h-8 rounded-lg px-2.5" onClick={closeEditModal}>
+                    ปิด
+                  </Button>
                 </div>
-                <Button type="button" variant="ghost" size="sm" className="h-8 rounded-lg px-2.5" onClick={closeEditModal}>
-                  ปิด
-                </Button>
               </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <article className="space-y-1.5 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs text-slate-500">บทบาท</p>
-                  <select
-                    value={editRoleId}
-                    onChange={(event) => setEditRoleId(event.target.value)}
-                    className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none ring-primary focus:ring-2"
-                    disabled={!canUpdate || loadingKey !== null}
-                  >
-                    {roles.map((role) => (
-                      <option key={role.id} value={role.id}>
-                        {role.name}
-                      </option>
-                    ))}
-                  </select>
-                </article>
-
-                <article className="space-y-1.5 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs text-slate-500">สถานะ</p>
-                  <div className="grid grid-cols-3 gap-1">
-                    {statusOptions.map((status) => (
-                      <button
-                        key={status.value}
-                        type="button"
-                        onClick={() => setEditStatus(status.value)}
-                        disabled={!canUpdate || loadingKey !== null}
-                        className={`h-9 rounded-lg text-xs font-medium transition ${
-                          editStatus === status.value
-                            ? "bg-white text-slate-900 shadow-sm"
-                            : "text-slate-500 hover:bg-white"
-                        }`}
-                      >
-                        {status.label}
-                      </button>
-                    ))}
-                  </div>
-                </article>
-
-                <article className="space-y-1.5 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:col-span-2">
-                  <p className="text-xs text-slate-500">จำกัดอุปกรณ์เข้าสู่ระบบ</p>
-                  <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
-                    <input
-                      type="number"
-                      min={1}
-                      max={10}
-                      value={editSessionLimit}
-                      onChange={(event) => setEditSessionLimit(event.target.value)}
-                      placeholder="ว่าง = ค่าเริ่มต้นระบบ"
+              <div className="px-4 py-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <article className="space-y-1.5 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">บทบาท</p>
+                    <select
+                      value={editRoleId}
+                      onChange={(event) => setEditRoleId(event.target.value)}
                       className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none ring-primary focus:ring-2"
                       disabled={!canUpdate || loadingKey !== null}
-                    />
-                    <span className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-500">
-                      ปัจจุบัน: {editingMember.sessionLimit ?? defaultSessionLimit}
-                    </span>
-                  </div>
+                    >
+                      {roles.map((role) => (
+                        <option key={role.id} value={role.id}>
+                          {role.name}
+                        </option>
+                      ))}
+                    </select>
+                  </article>
+
+                  <article className="space-y-1.5 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">สถานะ</p>
+                    <div className="grid grid-cols-3 gap-1">
+                      {statusOptions.map((status) => (
+                        <button
+                          key={status.value}
+                          type="button"
+                          onClick={() => setEditStatus(status.value)}
+                          disabled={!canUpdate || loadingKey !== null}
+                          className={`h-9 rounded-lg text-xs font-medium transition ${
+                            editStatus === status.value
+                              ? "bg-white text-slate-900 shadow-sm"
+                              : "text-slate-500 hover:bg-white"
+                          }`}
+                        >
+                          {status.label}
+                        </button>
+                      ))}
+                    </div>
+                  </article>
+
+                  <article className="space-y-1.5 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:col-span-2">
+                    <p className="text-xs text-slate-500">จำกัดอุปกรณ์เข้าสู่ระบบ</p>
+                    <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                      <input
+                        type="number"
+                        min={1}
+                        max={10}
+                        value={editSessionLimit}
+                        onChange={(event) => setEditSessionLimit(event.target.value)}
+                        placeholder="ว่าง = ค่าเริ่มต้นระบบ"
+                        className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none ring-primary focus:ring-2"
+                        disabled={!canUpdate || loadingKey !== null}
+                      />
+                      <span className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-500">
+                        ปัจจุบัน: {editingMember.sessionLimit ?? defaultSessionLimit}
+                      </span>
+                    </div>
+                  </article>
+                </div>
+
+                <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  <p className="inline-flex items-center gap-1.5">
+                    <Mail className="h-3.5 w-3.5" />
+                    สิทธิ์ระบบ: {editingMember.systemRole}
+                  </p>
+                  <p className="mt-1 inline-flex items-center gap-1.5">
+                    <UserRound className="h-3.5 w-3.5" />
+                    สถานะปัจจุบัน: {statusLabel[editingMember.status]}
+                  </p>
+                  <p className="mt-1">
+                    สร้างบัญชีโดย: {editingMember.createdByName ?? (editingMember.createdByUserId ? "ไม่ทราบชื่อ" : "ระบบ")}
+                  </p>
+                  <p className="mt-1">
+                    เพิ่มเข้าร้านโดย: {editingMember.addedByName ?? (editingMember.addedByUserId ? "ไม่ทราบชื่อ" : "ระบบ")}
+                  </p>
+                  <p className="mt-1">
+                    สถานะรหัสผ่าน: {editingMember.mustChangePassword ? "ต้องเปลี่ยนรหัสก่อนเข้าใช้งาน" : "ปกติ"}
+                  </p>
+                </div>
+
+                <article className="mt-3 space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+                  <p className="text-xs font-medium text-slate-700">รีเซ็ตรหัสผ่านชั่วคราว</p>
+                  <p className="text-xs text-slate-500">
+                    ระบบจะสร้างรหัสแบบใช้ครั้งเดียว และบังคับให้ผู้ใช้เปลี่ยนรหัสใหม่เมื่อเข้าสู่ระบบครั้งถัดไป
+                  </p>
+
+                  {temporaryPassword ? (
+                    <div className="space-y-2 rounded-xl border border-emerald-200 bg-emerald-50 p-2">
+                      <p className="text-xs text-emerald-700">รหัสชั่วคราวใหม่</p>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 rounded-lg border border-emerald-200 bg-white px-2 py-1 text-sm font-semibold text-emerald-700">
+                          {temporaryPassword}
+                        </code>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-8 rounded-lg px-2.5 text-xs"
+                          onClick={copyTemporaryPassword}
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                          คัดลอก
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {!temporaryPassword && isResetPasswordConfirmOpen ? (
+                    <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-2">
+                      <p className="text-xs text-amber-700">ยืนยันรีเซ็ตรหัสผ่านของสมาชิกคนนี้ใช่หรือไม่?</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9 rounded-lg text-xs"
+                          onClick={() => setIsResetPasswordConfirmOpen(false)}
+                          disabled={loadingKey === "reset-password"}
+                        >
+                          ยกเลิก
+                        </Button>
+                        <Button
+                          type="button"
+                          className="h-9 rounded-lg text-xs"
+                          onClick={resetMemberPassword}
+                          disabled={!canUpdate || loadingKey === "reset-password"}
+                        >
+                          {loadingKey === "reset-password" ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              กำลังรีเซ็ต...
+                            </>
+                          ) : (
+                            "ยืนยันรีเซ็ต"
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {!temporaryPassword && !isResetPasswordConfirmOpen ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 rounded-lg text-xs"
+                      onClick={() => setIsResetPasswordConfirmOpen(true)}
+                      disabled={!canUpdate || loadingKey !== null}
+                    >
+                      <KeyRound className="h-3.5 w-3.5" />
+                      รีเซ็ตรหัสผ่านชั่วคราว
+                    </Button>
+                  ) : null}
                 </article>
               </div>
 
-              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                <p className="inline-flex items-center gap-1.5">
-                  <Mail className="h-3.5 w-3.5" />
-                  สิทธิ์ระบบ: {editingMember.systemRole}
-                </p>
-                <p className="mt-1 inline-flex items-center gap-1.5">
-                  <UserRound className="h-3.5 w-3.5" />
-                  สถานะปัจจุบัน: {statusLabel[editingMember.status]}
-                </p>
-                <p className="mt-1">
-                  สร้างบัญชีโดย: {editingMember.createdByName ?? (editingMember.createdByUserId ? "ไม่ทราบชื่อ" : "ระบบ")}
-                </p>
-                <p className="mt-1">
-                  เพิ่มเข้าร้านโดย: {editingMember.addedByName ?? (editingMember.addedByUserId ? "ไม่ทราบชื่อ" : "ระบบ")}
-                </p>
-                <p className="mt-1">
-                  สถานะรหัสผ่าน: {editingMember.mustChangePassword ? "ต้องเปลี่ยนรหัสก่อนเข้าใช้งาน" : "ปกติ"}
-                </p>
-              </div>
-
-              <article className="mt-3 space-y-2 rounded-xl border border-slate-200 bg-white p-3">
-                <p className="text-xs font-medium text-slate-700">รีเซ็ตรหัสผ่านชั่วคราว</p>
-                <p className="text-xs text-slate-500">
-                  ระบบจะสร้างรหัสแบบใช้ครั้งเดียว และบังคับให้ผู้ใช้เปลี่ยนรหัสใหม่เมื่อเข้าสู่ระบบครั้งถัดไป
-                </p>
-
-                {temporaryPassword ? (
-                  <div className="space-y-2 rounded-xl border border-emerald-200 bg-emerald-50 p-2">
-                    <p className="text-xs text-emerald-700">รหัสชั่วคราวใหม่</p>
-                    <div className="flex items-center gap-2">
-                      <code className="flex-1 rounded-lg border border-emerald-200 bg-white px-2 py-1 text-sm font-semibold text-emerald-700">
-                        {temporaryPassword}
-                      </code>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-8 rounded-lg px-2.5 text-xs"
-                        onClick={copyTemporaryPassword}
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                        คัดลอก
-                      </Button>
-                    </div>
-                  </div>
+              <div className="sticky bottom-0 z-10 border-t border-slate-100 bg-white px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-3 sm:pb-4">
+                {editErrorMessage ? (
+                  <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                    {editErrorMessage}
+                  </p>
                 ) : null}
-
-                {!temporaryPassword && isResetPasswordConfirmOpen ? (
-                  <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-2">
-                    <p className="text-xs text-amber-700">ยืนยันรีเซ็ตรหัสผ่านของสมาชิกคนนี้ใช่หรือไม่?</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-9 rounded-lg text-xs"
-                        onClick={() => setIsResetPasswordConfirmOpen(false)}
-                        disabled={loadingKey === "reset-password"}
-                      >
-                        ยกเลิก
-                      </Button>
-                      <Button
-                        type="button"
-                        className="h-9 rounded-lg text-xs"
-                        onClick={resetMemberPassword}
-                        disabled={!canUpdate || loadingKey === "reset-password"}
-                      >
-                        {loadingKey === "reset-password" ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            กำลังรีเซ็ต...
-                          </>
-                        ) : (
-                          "ยืนยันรีเซ็ต"
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
-
-                {!temporaryPassword && !isResetPasswordConfirmOpen ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-9 rounded-lg text-xs"
-                    onClick={() => setIsResetPasswordConfirmOpen(true)}
-                    disabled={!canUpdate || loadingKey !== null}
-                  >
-                    <KeyRound className="h-3.5 w-3.5" />
-                    รีเซ็ตรหัสผ่านชั่วคราว
+                <div className={`${editErrorMessage ? "mt-3 " : ""}grid grid-cols-2 gap-2`}>
+                  <Button type="button" variant="outline" className="h-10 rounded-xl" onClick={closeEditModal} disabled={loadingKey !== null}>
+                    ยกเลิก
                   </Button>
-                ) : null}
-              </article>
-
-              {editErrorMessage ? (
-                <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                  {editErrorMessage}
-                </p>
-              ) : null}
-
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <Button type="button" variant="outline" className="h-10 rounded-xl" onClick={closeEditModal} disabled={loadingKey !== null}>
-                  ยกเลิก
-                </Button>
-                <Button type="button" className="h-10 rounded-xl" onClick={saveMemberChanges} disabled={!canUpdate || loadingKey !== null}>
-                  {loadingKey === "save-member" ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      กำลังบันทึก...
-                    </>
-                  ) : (
-                    "บันทึกการเปลี่ยนแปลง"
-                  )}
-                </Button>
+                  <Button type="button" className="h-10 rounded-xl" onClick={saveMemberChanges} disabled={!canUpdate || loadingKey !== null}>
+                    {loadingKey === "save-member" ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        กำลังบันทึก...
+                      </>
+                    ) : (
+                      "บันทึกการเปลี่ยนแปลง"
+                    )}
+                  </Button>
+                </div>
               </div>
             </>
           ) : null}

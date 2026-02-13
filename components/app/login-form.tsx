@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { Button } from "@/components/ui/button";
-import { setClientAuthToken } from "@/lib/auth/client-token";
+import { clearClientAuthToken, setClientAuthToken } from "@/lib/auth/client-token";
 
 const loginSchema = z.object({
   email: z.string().email("กรอกอีเมลให้ถูกต้อง"),
@@ -17,6 +17,9 @@ const loginSchema = z.object({
 type LoginInput = z.infer<typeof loginSchema>;
 
 type LoginResponse = {
+  ok?: boolean;
+  blocked?: boolean;
+  accountStatus?: "INVITED" | "SUSPENDED" | "NO_ACTIVE_STORE";
   next?: string;
   token?: string;
   message?: string;
@@ -80,6 +83,8 @@ export function LoginForm() {
   const completeLogin = (data: LoginResponse | null) => {
     if (data?.token) {
       setClientAuthToken(data.token);
+    } else {
+      clearClientAuthToken();
     }
 
     window.location.assign(data?.next ?? "/dashboard");

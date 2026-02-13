@@ -16,6 +16,20 @@ const loginSchema = z.object({
   newPassword: z.string().min(8).max(128).optional(),
 });
 
+type BlockedAccountStatus = "INVITED" | "SUSPENDED" | "NO_ACTIVE_STORE";
+
+const toAccountStatusRoute = (status: BlockedAccountStatus) =>
+  `/account-status?status=${status}`;
+
+const blockedLoginResponse = (status: BlockedAccountStatus, message: string) =>
+  NextResponse.json({
+    ok: true,
+    blocked: true,
+    accountStatus: status,
+    message,
+    next: toAccountStatusRoute(status),
+  });
+
 export async function POST(request: Request) {
   const payload = loginSchema.safeParse(await request.json());
   if (!payload.success) {
@@ -75,22 +89,32 @@ export async function POST(request: Request) {
   }
 
   const membershipFlags = await getUserMembershipFlags(user.id);
+  const canAccessOnboarding = user.systemRole === "SUPERADMIN";
+  const canAccessSystemAdmin = user.systemRole === "SYSTEM_ADMIN";
+
   if (membershipFlags.hasSuspendedMembership && !membershipFlags.hasActiveMembership) {
-    return NextResponse.json(
-      { message: "บัญชีของคุณถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ" },
-      { status: 403 },
+    return blockedLoginResponse(
+      "SUSPENDED",
+      "บัญชีของคุณอยู่สถานะ SUSPENDED (ถูกระงับการใช้งาน) กรุณาติดต่อแอดมินร้าน",
     );
   }
 
-  const canAccessOnboarding = user.systemRole === "SUPERADMIN";
-  const canAccessSystemAdmin = user.systemRole === "SYSTEM_ADMIN";
+  if (
+    membershipFlags.hasInvitedMembership &&
+    !membershipFlags.hasActiveMembership &&
+    !canAccessOnboarding &&
+    !canAccessSystemAdmin
+  ) {
+    return blockedLoginResponse(
+      "INVITED",
+      "บัญชีของคุณอยู่สถานะ INVITED (รอเปิดใช้งาน) กรุณาติดต่อแอดมินร้าน",
+    );
+  }
+
   if (!membershipFlags.hasActiveMembership && !canAccessOnboarding && !canAccessSystemAdmin) {
-    return NextResponse.json(
-      {
-        message:
-          "บัญชีนี้ยังไม่มีร้านที่เปิดใช้งาน และไม่มีสิทธิ์สร้างร้านใหม่ กรุณาติดต่อ SUPERADMIN",
-      },
-      { status: 403 },
+    return blockedLoginResponse(
+      "NO_ACTIVE_STORE",
+      "บัญชีนี้ยังไม่มีสิทธิ์เข้าใช้งานระบบ กรุณาติดต่อแอดมินร้าน",
     );
   }
 

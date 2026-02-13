@@ -25,6 +25,7 @@ export type ActiveMembership = {
 
 export type UserMembershipFlags = {
   hasActiveMembership: boolean;
+  hasInvitedMembership: boolean;
   hasSuspendedMembership: boolean;
 };
 
@@ -100,6 +101,7 @@ export async function getUserMembershipFlags(userId: string): Promise<UserMember
 
   return {
     hasActiveMembership: rows.some((row) => row.status === "ACTIVE"),
+    hasInvitedMembership: rows.some((row) => row.status === "INVITED"),
     hasSuspendedMembership: rows.some((row) => row.status === "SUSPENDED"),
   };
 }
