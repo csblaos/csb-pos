@@ -4,8 +4,18 @@ import { z } from "zod";
 
 import { generateTemporaryPassword, hashPassword } from "@/lib/auth/password";
 import { enforceUserSessionLimitNow, invalidateUserSessions } from "@/lib/auth/session";
+import {
+  ensureMainBranchExists,
+  getMemberBranchAccess,
+  replaceMemberBranchAccess,
+} from "@/lib/branches/access";
 import { db } from "@/lib/db/client";
-import { roles, storeMembers, users } from "@/lib/db/schema";
+import {
+  roles,
+  storeBranches,
+  storeMembers,
+  users,
+} from "@/lib/db/schema";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 
 const updateUserSchema = z.discriminatedUnion("action", [
@@ -24,6 +34,11 @@ const updateUserSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("reset_password"),
   }),
+  z.object({
+    action: z.literal("set_branch_access"),
+    mode: z.enum(["ALL", "SELECTED"]),
+    branchIds: z.array(z.string().min(1)).optional(),
+  }),
 ]);
 
 const activeOwnerCount = async (storeId: string) => {
@@ -41,6 +56,51 @@ const activeOwnerCount = async (storeId: string) => {
 
   return Number(row?.count ?? 0);
 };
+
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ userId: string }> },
+) {
+  try {
+    const { storeId } = await enforcePermission("members.view");
+    const { userId } = await context.params;
+    await ensureMainBranchExists(storeId);
+
+    const [membership] = await db
+      .select({ userId: storeMembers.userId })
+      .from(storeMembers)
+      .where(and(eq(storeMembers.storeId, storeId), eq(storeMembers.userId, userId)))
+      .limit(1);
+
+    if (!membership) {
+      return NextResponse.json({ message: "ไม่พบสมาชิกในร้าน" }, { status: 404 });
+    }
+
+    const [branches, branchAccess] = await Promise.all([
+      db
+        .select({ id: storeBranches.id })
+        .from(storeBranches)
+        .where(eq(storeBranches.storeId, storeId)),
+      getMemberBranchAccess(userId, storeId),
+    ]);
+
+    const validBranchIdSet = new Set(branches.map((branch) => branch.id));
+    const branchIds =
+      branchAccess.mode === "SELECTED"
+        ? branchAccess.branchIds.filter((branchId) => validBranchIdSet.has(branchId))
+        : [];
+
+    return NextResponse.json({
+      ok: true,
+      branchAccess: {
+        mode: branchAccess.mode,
+        branchIds,
+      },
+    });
+  } catch (error) {
+    return toRBACErrorResponse(error);
+  }
+}
 
 export async function PATCH(
   request: Request,
@@ -144,6 +204,33 @@ export async function PATCH(
         .where(eq(users.id, userId));
 
       await enforceUserSessionLimitNow(userId);
+    }
+
+    if (payload.data.action === "set_branch_access") {
+      try {
+        await replaceMemberBranchAccess({
+          userId,
+          storeId,
+          mode: payload.data.mode,
+          branchIds: payload.data.branchIds ?? [],
+        });
+      } catch (error) {
+        if (error instanceof Error && error.message === "REQUIRE_BRANCH_SELECTION") {
+          return NextResponse.json(
+            { message: "กรุณาเลือกอย่างน้อย 1 สาขา" },
+            { status: 400 },
+          );
+        }
+        if (error instanceof Error && error.message === "INVALID_BRANCH_SELECTION") {
+          return NextResponse.json(
+            { message: "พบสาขาที่เลือกไม่ถูกต้อง" },
+            { status: 400 },
+          );
+        }
+        throw error;
+      }
+
+      await invalidateUserSessions(userId);
     }
 
     if (payload.data.action === "reset_password") {

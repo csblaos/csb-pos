@@ -11,6 +11,9 @@ export const sessionSchema = z.object({
   activeStoreId: z.string().nullable(),
   activeStoreName: z.string().nullable(),
   activeStoreType: sessionStoreTypeSchema.nullable().default(null),
+  activeBranchId: z.string().nullable(),
+  activeBranchName: z.string().nullable(),
+  activeBranchCode: z.string().nullable(),
   activeRoleId: z.string().nullable(),
   activeRoleName: z.string().nullable(),
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { getStorefrontTabs } from "@/components/storefront/nav/registry";
@@ -14,8 +14,13 @@ type BottomTabNavProps = {
 const hasPermission = (permissionKeys: string[], key: string) =>
   permissionKeys.includes("*") || permissionKeys.includes(key);
 
-const isTabActive = (pathname: string, href: string) =>
+const isPathInTab = (pathname: string, href: string) =>
   pathname === href || pathname.startsWith(`${href}/`);
+
+const getActiveTabHref = (pathname: string, hrefs: string[]) => {
+  const sortedHrefs = [...hrefs].sort((a, b) => b.length - a.length);
+  return sortedHrefs.find((href) => isPathInTab(pathname, href)) ?? null;
+};
 
 const getCompactLabel = (label: string, href: string) => {
   if (href === "/orders") {
@@ -57,6 +62,10 @@ export function BottomTabNav({ permissionKeys, storeType }: BottomTabNavProps) {
   const tabs = getStorefrontTabs(storeType);
   const visibleTabs = tabs.filter((tab) => hasPermission(permissionKeys, tab.permission));
   const currentPath = optimisticPath ?? pathname;
+  const activeTabHref = useMemo(
+    () => getActiveTabHref(currentPath, visibleTabs.map((tab) => tab.href)),
+    [currentPath, visibleTabs],
+  );
 
   useEffect(() => {
     visibleTabs.forEach((tab) => {
@@ -69,7 +78,7 @@ export function BottomTabNav({ permissionKeys, storeType }: BottomTabNavProps) {
   }, [pathname]);
 
   const navigateToTab = (href: string) => {
-    if (isTabActive(pathname, href)) {
+    if (getActiveTabHref(pathname, visibleTabs.map((tab) => tab.href)) === href) {
       if (pathname !== href) {
         setOptimisticPath(href);
         startTransition(() => {
@@ -106,7 +115,7 @@ export function BottomTabNav({ permissionKeys, storeType }: BottomTabNavProps) {
         <ul className={`mx-auto grid w-full gap-1.5 px-1.5 py-1.5 ${getGridColumnsClass(visibleTabs.length)}`}>
           {visibleTabs.map((tab) => {
             const Icon = tab.icon;
-            const isActive = isTabActive(currentPath, tab.href);
+            const isActive = activeTabHref === tab.href;
 
             return (
               <li key={tab.href} className="min-w-0">

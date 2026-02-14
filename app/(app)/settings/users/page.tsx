@@ -6,8 +6,9 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { UsersManagement } from "@/components/app/users-management";
+import { ensureMainBranchExists } from "@/lib/branches/access";
 import { db } from "@/lib/db/client";
-import { roles, storeMembers, users } from "@/lib/db/schema";
+import { roles, storeBranches, storeMembers, users } from "@/lib/db/schema";
 import { getSession } from "@/lib/auth/session";
 import { getUserSystemRole } from "@/lib/auth/system-admin";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
@@ -54,8 +55,9 @@ async function UsersManagementContent({
 }) {
   const userCreators = alias(users, "user_creators");
   const memberAdders = alias(users, "member_adders");
+  await ensureMainBranchExists(storeId);
 
-  const [members, roleOptions, globalSessionPolicy] = await Promise.all([
+  const [members, roleOptions, branches, globalSessionPolicy] = await Promise.all([
     db
       .select({
         userId: users.id,
@@ -85,6 +87,11 @@ async function UsersManagementContent({
       .from(roles)
       .where(eq(roles.storeId, storeId))
       .orderBy(asc(roles.name)),
+    db
+      .select({ id: storeBranches.id, name: storeBranches.name, code: storeBranches.code })
+      .from(storeBranches)
+      .where(eq(storeBranches.storeId, storeId))
+      .orderBy(asc(storeBranches.createdAt), asc(storeBranches.name)),
     getGlobalSessionPolicy(),
   ]);
 
@@ -92,6 +99,7 @@ async function UsersManagementContent({
     <UsersManagement
       members={members}
       roles={roleOptions}
+      branches={branches}
       canCreate={canCreate}
       canUpdate={canUpdate}
       canLinkExisting={canLinkExisting}

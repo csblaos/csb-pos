@@ -5,7 +5,7 @@ import { alias } from "drizzle-orm/sqlite-core";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { hashPassword } from "@/lib/auth/password";
+import { generateTemporaryPassword, hashPassword } from "@/lib/auth/password";
 import { db } from "@/lib/db/client";
 import { roles, storeMembers, users } from "@/lib/db/schema";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
@@ -14,14 +14,17 @@ const createNewStoreUserSchema = z.object({
   action: z.literal("create_new"),
   name: z.string().trim().min(2).max(120),
   email: z.string().email(),
-  password: z.string().min(8).max(128),
+  password: z.string().min(8).max(128).optional(),
   roleId: z.string().min(1),
 });
 
 const addExistingStoreUserSchema = z.object({
   action: z.literal("add_existing"),
-  email: z.string().email(),
   roleId: z.string().min(1),
+  userId: z.string().min(1).optional(),
+  email: z.string().email().optional(),
+}).refine((data) => Boolean(data.userId || data.email), {
+  message: "ต้องระบุ userId หรือ email สำหรับเพิ่มผู้ใช้เดิม",
 });
 
 const legacyCreateStoreUserSchema = z.object({
@@ -259,8 +262,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "ไม่พบบทบาทที่เลือก" }, { status: 404 });
     }
 
-    const normalizedEmail = payload.data.email.trim().toLowerCase();
-
     if (payload.data.action === "add_existing") {
       const actorSystemRole = await getUserSystemRole(session.userId);
       if (actorSystemRole !== "SUPERADMIN") {
@@ -270,14 +271,25 @@ export async function POST(request: Request) {
         );
       }
 
-      const [existingUser] = await db
-        .select({
-          id: users.id,
-          systemRole: users.systemRole,
-        })
-        .from(users)
-        .where(eq(users.email, normalizedEmail))
-        .limit(1);
+      const existingUserLookup = payload.data.userId
+        ? await db
+            .select({
+              id: users.id,
+              systemRole: users.systemRole,
+            })
+            .from(users)
+            .where(eq(users.id, payload.data.userId))
+            .limit(1)
+        : await db
+            .select({
+              id: users.id,
+              systemRole: users.systemRole,
+            })
+            .from(users)
+            .where(eq(users.email, payload.data.email!.trim().toLowerCase()))
+            .limit(1);
+
+      const [existingUser] = existingUserLookup;
 
       if (!existingUser) {
         return NextResponse.json(
@@ -329,6 +341,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, members });
     }
 
+    const normalizedEmail = payload.data.email.trim().toLowerCase();
+
     const [existingUser] = await db
       .select({ id: users.id })
       .from(users)
@@ -346,7 +360,8 @@ export async function POST(request: Request) {
     }
 
     const userId = randomUUID();
-    const passwordHash = await hashPassword(payload.data.password);
+    const temporaryPassword = payload.data.password ?? generateTemporaryPassword(10);
+    const passwordHash = await hashPassword(temporaryPassword);
 
     await db.insert(users).values({
       id: userId,
@@ -367,7 +382,7 @@ export async function POST(request: Request) {
     });
 
     const members = await listUsers(storeId);
-    return NextResponse.json({ ok: true, members });
+    return NextResponse.json({ ok: true, members, temporaryPassword });
   } catch (error) {
     return toRBACErrorResponse(error);
   }

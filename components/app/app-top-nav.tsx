@@ -9,10 +9,20 @@ import { MenuBackButton } from "@/components/ui/menu-back-button";
 type AppTopNavProps = {
   activeStoreName: string;
   activeStoreLogoUrl: string | null;
+  activeBranchName: string | null;
   shellTitle: string;
 };
 
-const navRoots = ["/dashboard", "/orders", "/stock", "/products", "/settings", "/stores", "/reports"];
+const navRoots = [
+  "/dashboard",
+  "/orders",
+  "/stock",
+  "/products",
+  "/settings/stores",
+  "/settings",
+  "/stores",
+  "/reports",
+];
 
 const isInRoot = (pathname: string, root: string) =>
   pathname === root || pathname.startsWith(`${root}/`);
@@ -47,7 +57,12 @@ function getStoreInitial(storeName: string) {
   return normalizedName.slice(0, 1).toUpperCase();
 }
 
-export function AppTopNav({ activeStoreName, activeStoreLogoUrl, shellTitle }: AppTopNavProps) {
+export function AppTopNav({
+  activeStoreName,
+  activeStoreLogoUrl,
+  activeBranchName,
+  shellTitle,
+}: AppTopNavProps) {
   const pathname = usePathname();
 
   const activeRoot = useMemo(() => {
@@ -95,14 +110,17 @@ export function AppTopNav({ activeStoreName, activeStoreLogoUrl, shellTitle }: A
               <p className="truncate text-xs font-semibold leading-tight text-slate-900">
                 {activeStoreName}
               </p>
-              <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{shellTitle}</p>
+              <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                {shellTitle}
+                {activeBranchName ? ` · ${activeBranchName}` : ""}
+              </p>
             </div>
           </div>
         ) : null}
       </div>
       <div className="shrink-0">
         <Link
-          href="/stores"
+          href="/settings/stores"
           className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 active:scale-[0.98]"
         >
           <StoreSwitchIcon className="h-3.5 w-3.5" />

@@ -57,6 +57,7 @@ export default async function AppLayout({
         <AppTopNav
           activeStoreName={activeStoreName}
           activeStoreLogoUrl={activeStoreProfile?.logoUrl ?? null}
+          activeBranchName={session.activeBranchName}
           shellTitle={layoutPreset.shellTitle}
         />
         {layoutPreset.modeNoteText ? (

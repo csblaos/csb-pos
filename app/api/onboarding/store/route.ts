@@ -316,6 +316,9 @@ export async function POST(request: Request) {
       name: "สาขาหลัก",
       code: "MAIN",
       address: null,
+      sourceBranchId: null,
+      sharingMode: "MAIN",
+      sharingConfig: null,
     });
 
     await tx.insert(fbConnections).values({

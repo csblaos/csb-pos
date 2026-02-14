@@ -126,9 +126,6 @@ export default async function SettingsRolesPage() {
   return (
     <section className="space-y-5">
       <header className="space-y-1 px-1">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-          ตั้งค่าบทบาท
-        </p>
         <h1 className="text-[28px] font-semibold tracking-tight text-slate-900">บทบาทและสิทธิ์</h1>
         <p className="text-sm text-slate-500">กำหนดสิทธิ์ใช้งานของแต่ละบทบาทในร้าน</p>
       </header>

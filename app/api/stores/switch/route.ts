@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { createSessionCookie, getSession, SessionStoreUnavailableError } from "@/lib/auth/session";
-import { findActiveMembershipByStore } from "@/lib/auth/session-db";
+import { buildSessionForUser, findActiveMembershipByStore } from "@/lib/auth/session-db";
 import { getUserPermissions } from "@/lib/rbac/access";
 import { getStorefrontEntryRoute } from "@/lib/storefront/routing";
 
@@ -29,19 +29,20 @@ export async function POST(request: Request) {
     );
   }
 
+  const refreshedSession = await buildSessionForUser(
+    {
+      id: session.userId,
+      email: session.email,
+      name: session.displayName,
+    },
+    {
+      preferredStoreId: membership.storeId,
+    },
+  );
+
   let sessionCookie;
   try {
-    sessionCookie = await createSessionCookie({
-      userId: session.userId,
-      email: session.email,
-      displayName: session.displayName,
-      hasStoreMembership: true,
-      activeStoreId: membership.storeId,
-      activeStoreName: membership.storeName,
-      activeStoreType: membership.storeType,
-      activeRoleId: membership.roleId,
-      activeRoleName: membership.roleName,
-    });
+    sessionCookie = await createSessionCookie(refreshedSession);
   } catch (error) {
     if (error instanceof SessionStoreUnavailableError) {
       return NextResponse.json(
@@ -63,6 +64,7 @@ export async function POST(request: Request) {
     token: sessionCookie.value,
     next: nextRoute,
     activeStoreName: membership.storeName,
+    activeBranchName: refreshedSession.activeBranchName,
   });
   response.cookies.set(sessionCookie.name, sessionCookie.value, sessionCookie.options);
 

@@ -3,7 +3,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { type TouchEvent, useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { useForm } from "react-hook-form";
 
@@ -33,6 +33,27 @@ export function UnitsManagement({ units, canCreate, canUpdate, canDelete }: Unit
   const [isEditSheetOpen, setIsEditSheetOpen] = useState(false);
   const [editingUnit, setEditingUnit] = useState<UnitOption | null>(null);
   const [deleteDialogUnit, setDeleteDialogUnit] = useState<UnitOption | null>(null);
+  const [isDesktopViewport, setIsDesktopViewport] = useState(false);
+
+  const [isCreateSheetDragging, setIsCreateSheetDragging] = useState(false);
+  const [createSheetDragY, setCreateSheetDragY] = useState(0);
+  const createSheetStartYRef = useRef<number | null>(null);
+  const createSheetCanDragRef = useRef(false);
+
+  const [isEditSheetDragging, setIsEditSheetDragging] = useState(false);
+  const [editSheetDragY, setEditSheetDragY] = useState(0);
+  const editSheetStartYRef = useRef<number | null>(null);
+  const editSheetCanDragRef = useRef(false);
+
+  const sheetScrollYRef = useRef(0);
+  const bodyStyleRef = useRef<{
+    position: string;
+    top: string;
+    left: string;
+    right: string;
+    width: string;
+    overflow: string;
+  } | null>(null);
 
   const createForm = useForm<CreateUnitFormInput, unknown, CreateUnitInput>({
     resolver: zodResolver(createUnitSchema),
@@ -55,10 +76,171 @@ export function UnitsManagement({ units, canCreate, canUpdate, canDelete }: Unit
     setDeleteErrorMessage(null);
   };
 
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(min-width: 640px)");
+    const applyViewportState = () => {
+      setIsDesktopViewport(mediaQuery.matches);
+    };
+
+    applyViewportState();
+    mediaQuery.addEventListener("change", applyViewportState);
+    return () => {
+      mediaQuery.removeEventListener("change", applyViewportState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isCreateSheetOpen && !isEditSheetOpen) {
+      return;
+    }
+
+    const body = document.body;
+    sheetScrollYRef.current = window.scrollY;
+    bodyStyleRef.current = {
+      position: body.style.position,
+      top: body.style.top,
+      left: body.style.left,
+      right: body.style.right,
+      width: body.style.width,
+      overflow: body.style.overflow,
+    };
+
+    body.style.position = "fixed";
+    body.style.top = `-${sheetScrollYRef.current}px`;
+    body.style.left = "0";
+    body.style.right = "0";
+    body.style.width = "100%";
+    body.style.overflow = "hidden";
+
+    return () => {
+      const previousBodyStyle = bodyStyleRef.current;
+      if (previousBodyStyle) {
+        body.style.position = previousBodyStyle.position;
+        body.style.top = previousBodyStyle.top;
+        body.style.left = previousBodyStyle.left;
+        body.style.right = previousBodyStyle.right;
+        body.style.width = previousBodyStyle.width;
+        body.style.overflow = previousBodyStyle.overflow;
+      }
+      window.scrollTo(0, sheetScrollYRef.current);
+    };
+  }, [isCreateSheetOpen, isEditSheetOpen]);
+
+  const resetCreateSheetDrag = () => {
+    setCreateSheetDragY(0);
+    setIsCreateSheetDragging(false);
+    createSheetStartYRef.current = null;
+    createSheetCanDragRef.current = false;
+  };
+
+  const resetEditSheetDrag = () => {
+    setEditSheetDragY(0);
+    setIsEditSheetDragging(false);
+    editSheetStartYRef.current = null;
+    editSheetCanDragRef.current = false;
+  };
+
+  const handleCreateSheetTouchStart = (event: TouchEvent<HTMLDivElement>) => {
+    if (!isCreateSheetOpen || createForm.formState.isSubmitting || isDesktopViewport) {
+      return;
+    }
+
+    createSheetCanDragRef.current = true;
+    createSheetStartYRef.current = event.touches[0]?.clientY ?? null;
+    setCreateSheetDragY(0);
+    setIsCreateSheetDragging(false);
+  };
+
+  const handleCreateSheetTouchMove = (event: TouchEvent<HTMLDivElement>) => {
+    if (isDesktopViewport || !createSheetCanDragRef.current || createSheetStartYRef.current === null) {
+      return;
+    }
+
+    const currentY = event.touches[0]?.clientY;
+    if (typeof currentY !== "number") {
+      return;
+    }
+
+    const deltaY = Math.max(0, currentY - createSheetStartYRef.current);
+    if (deltaY <= 0) {
+      return;
+    }
+
+    setIsCreateSheetDragging(true);
+    setCreateSheetDragY(deltaY);
+    event.preventDefault();
+  };
+
+  const handleCreateSheetTouchEnd = () => {
+    if (isDesktopViewport) {
+      return;
+    }
+
+    if (!createSheetCanDragRef.current && createSheetStartYRef.current === null) {
+      return;
+    }
+
+    if (createSheetDragY > 120) {
+      closeCreateSheet();
+      return;
+    }
+
+    resetCreateSheetDrag();
+  };
+
+  const handleEditSheetTouchStart = (event: TouchEvent<HTMLDivElement>) => {
+    if (!isEditSheetOpen || updateForm.formState.isSubmitting || isDesktopViewport) {
+      return;
+    }
+
+    editSheetCanDragRef.current = true;
+    editSheetStartYRef.current = event.touches[0]?.clientY ?? null;
+    setEditSheetDragY(0);
+    setIsEditSheetDragging(false);
+  };
+
+  const handleEditSheetTouchMove = (event: TouchEvent<HTMLDivElement>) => {
+    if (isDesktopViewport || !editSheetCanDragRef.current || editSheetStartYRef.current === null) {
+      return;
+    }
+
+    const currentY = event.touches[0]?.clientY;
+    if (typeof currentY !== "number") {
+      return;
+    }
+
+    const deltaY = Math.max(0, currentY - editSheetStartYRef.current);
+    if (deltaY <= 0) {
+      return;
+    }
+
+    setIsEditSheetDragging(true);
+    setEditSheetDragY(deltaY);
+    event.preventDefault();
+  };
+
+  const handleEditSheetTouchEnd = () => {
+    if (isDesktopViewport) {
+      return;
+    }
+
+    if (!editSheetCanDragRef.current && editSheetStartYRef.current === null) {
+      return;
+    }
+
+    if (editSheetDragY > 120) {
+      closeEditSheet();
+      return;
+    }
+
+    resetEditSheetDrag();
+  };
+
   const closeCreateSheet = () => {
     if (createForm.formState.isSubmitting) {
       return;
     }
+    resetCreateSheetDrag();
     setIsCreateSheetOpen(false);
   };
 
@@ -68,6 +250,7 @@ export function UnitsManagement({ units, canCreate, canUpdate, canDelete }: Unit
     }
 
     resetFeedback();
+    resetEditSheetDrag();
     setEditingUnit(unit);
     updateForm.reset({
       code: unit.code,
@@ -81,6 +264,7 @@ export function UnitsManagement({ units, canCreate, canUpdate, canDelete }: Unit
       return;
     }
 
+    resetEditSheetDrag();
     setIsEditSheetOpen(false);
     setEditingUnit(null);
   };
@@ -175,6 +359,7 @@ export function UnitsManagement({ units, canCreate, canUpdate, canDelete }: Unit
 
       createForm.reset({ code: "", nameTh: "" });
       toast.success("เพิ่มหน่วยสินค้าเรียบร้อย");
+      resetCreateSheetDrag();
       setIsCreateSheetOpen(false);
       router.refresh();
     } catch {
@@ -347,6 +532,17 @@ export function UnitsManagement({ units, canCreate, canUpdate, canDelete }: Unit
     </form>
   );
 
+  const createSheetBackdropOpacity = isCreateSheetOpen
+    ? Math.max(0, 1 - Math.min(createSheetDragY / 220, 1) * 0.55)
+    : 0;
+  const editSheetBackdropOpacity = isEditSheetOpen
+    ? Math.max(0, 1 - Math.min(editSheetDragY / 220, 1) * 0.55)
+    : 0;
+  const createSheetInlineStyle =
+    isCreateSheetOpen && !isDesktopViewport ? { transform: `translateY(${createSheetDragY}px)` } : undefined;
+  const editSheetInlineStyle =
+    isEditSheetOpen && !isDesktopViewport ? { transform: `translateY(${editSheetDragY}px)` } : undefined;
+
   return (
     <section className="space-y-5">
       <div className="space-y-2">
@@ -360,6 +556,7 @@ export function UnitsManagement({ units, canCreate, canUpdate, canDelete }: Unit
             className="h-11 w-full rounded-xl sm:w-auto sm:px-5"
             onClick={() => {
               resetFeedback();
+              resetCreateSheetDrag();
               setIsCreateSheetOpen(true);
             }}
             disabled={!canCreate}
@@ -454,19 +651,34 @@ export function UnitsManagement({ units, canCreate, canUpdate, canDelete }: Unit
         <button
           type="button"
           aria-label="ปิดหน้าต่างเพิ่มหน่วย"
-          className={`absolute inset-0 bg-slate-900/40 transition-opacity duration-200 ${
+          className={`absolute inset-0 bg-slate-900/40 backdrop-blur-[1px] transition-opacity duration-200 ${
             isCreateSheetOpen ? "opacity-100" : "opacity-0"
           }`}
+          style={{ opacity: createSheetBackdropOpacity }}
           onClick={closeCreateSheet}
           disabled={createForm.formState.isSubmitting}
         />
         <div
-          className={`absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-2xl transition-all duration-300 ease-out sm:inset-auto sm:left-1/2 sm:top-1/2 sm:w-full sm:max-w-md sm:rounded-2xl ${
+          className={`absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-2xl sm:inset-auto sm:left-1/2 sm:top-1/2 sm:w-full sm:max-w-md sm:rounded-2xl ${
+            isCreateSheetDragging && !isDesktopViewport
+              ? "transition-none"
+              : "transition-all duration-300 ease-out"
+          } ${
             isCreateSheetOpen
               ? "translate-y-0 opacity-100 sm:-translate-x-1/2 sm:-translate-y-1/2"
               : "translate-y-full opacity-0 sm:-translate-x-1/2 sm:-translate-y-[42%]"
           }`}
+          style={createSheetInlineStyle}
         >
+          <div
+            className="flex touch-none justify-center pt-2 sm:hidden"
+            onTouchStart={handleCreateSheetTouchStart}
+            onTouchMove={handleCreateSheetTouchMove}
+            onTouchEnd={handleCreateSheetTouchEnd}
+            onTouchCancel={handleCreateSheetTouchEnd}
+          >
+            <span className="h-1.5 w-12 rounded-full bg-slate-300" />
+          </div>
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
             <div>
               <p className="text-sm font-semibold text-slate-900">เพิ่มหน่วยสินค้า</p>
@@ -496,19 +708,34 @@ export function UnitsManagement({ units, canCreate, canUpdate, canDelete }: Unit
         <button
           type="button"
           aria-label="ปิดหน้าต่างแก้ไขหน่วย"
-          className={`absolute inset-0 bg-slate-900/40 transition-opacity duration-200 ${
+          className={`absolute inset-0 bg-slate-900/40 backdrop-blur-[1px] transition-opacity duration-200 ${
             isEditSheetOpen ? "opacity-100" : "opacity-0"
           }`}
+          style={{ opacity: editSheetBackdropOpacity }}
           onClick={() => closeEditSheet()}
           disabled={updateForm.formState.isSubmitting}
         />
         <div
-          className={`absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-2xl transition-all duration-300 ease-out sm:inset-auto sm:left-1/2 sm:top-1/2 sm:w-full sm:max-w-md sm:rounded-2xl ${
+          className={`absolute inset-x-0 bottom-0 max-h-[88dvh] overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-2xl sm:inset-auto sm:left-1/2 sm:top-1/2 sm:w-full sm:max-w-md sm:rounded-2xl ${
+            isEditSheetDragging && !isDesktopViewport
+              ? "transition-none"
+              : "transition-all duration-300 ease-out"
+          } ${
             isEditSheetOpen
               ? "translate-y-0 opacity-100 sm:-translate-x-1/2 sm:-translate-y-1/2"
               : "translate-y-full opacity-0 sm:-translate-x-1/2 sm:-translate-y-[42%]"
           }`}
+          style={editSheetInlineStyle}
         >
+          <div
+            className="flex touch-none justify-center pt-2 sm:hidden"
+            onTouchStart={handleEditSheetTouchStart}
+            onTouchMove={handleEditSheetTouchMove}
+            onTouchEnd={handleEditSheetTouchEnd}
+            onTouchCancel={handleEditSheetTouchEnd}
+          >
+            <span className="h-1.5 w-12 rounded-full bg-slate-300" />
+          </div>
           <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
             <div>
               <p className="text-sm font-semibold text-slate-900">แก้ไขหน่วยสินค้า</p>

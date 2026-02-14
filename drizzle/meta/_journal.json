@@ -113,6 +113,27 @@
       "when": 1771466400000,
       "tag": "0015_tidy_user_password_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1771552800000,
+      "tag": "0016_branch_sharing_profile",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1771639200000,
+      "tag": "0017_branch_main_backfill",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1771725600000,
+      "tag": "0018_store_member_branches",
+      "breakpoints": true
     }
   ]
 }

@@ -270,7 +270,79 @@ async function ensureSchemaCompatForLatestAuthChanges() {
   await client.execute(
     "create unique index if not exists `store_branches_store_code_unique` on `store_branches` (`store_id`,`code`)",
   );
+  if (!(await columnExists("store_branches", "source_branch_id"))) {
+    await client.execute(
+      "alter table `store_branches` add `source_branch_id` text references `store_branches`(`id`) on delete set null",
+    );
+    console.info("[db:repair] added column store_branches.source_branch_id");
+  }
+
+  if (!(await columnExists("store_branches", "sharing_mode"))) {
+    await client.execute("alter table `store_branches` add `sharing_mode` text");
+    console.info("[db:repair] added column store_branches.sharing_mode");
+  }
+
+  if (!(await columnExists("store_branches", "sharing_config"))) {
+    await client.execute("alter table `store_branches` add `sharing_config` text");
+    console.info("[db:repair] added column store_branches.sharing_config");
+  }
+
+  await client.execute(
+    "create index if not exists `store_branches_source_branch_id_idx` on `store_branches` (`source_branch_id`)",
+  );
   console.info("[db:repair] ensured store_branches indexes");
+
+  await client.execute(`
+    insert into \`store_branches\`
+      (\`id\`, \`store_id\`, \`name\`, \`code\`, \`address\`, \`source_branch_id\`, \`sharing_mode\`, \`sharing_config\`, \`created_at\`)
+    select
+      lower(
+        hex(randomblob(4)) || '-' ||
+        hex(randomblob(2)) || '-' ||
+        '4' || substr(hex(randomblob(2)), 2) || '-' ||
+        substr('89ab', abs(random()) % 4 + 1, 1) || substr(hex(randomblob(2)), 2) || '-' ||
+        hex(randomblob(6))
+      ) as \`id\`,
+      s.\`id\`,
+      'สาขาหลัก',
+      'MAIN',
+      null,
+      null,
+      'MAIN',
+      null,
+      CURRENT_TIMESTAMP
+    from \`stores\` s
+    left join \`store_branches\` b
+      on b.\`store_id\` = s.\`id\`
+      and b.\`code\` = 'MAIN'
+    where b.\`id\` is null
+  `);
+  console.info("[db:repair] ensured MAIN branch for all stores");
+
+  await client.execute(`
+    update \`store_branches\`
+    set \`sharing_mode\` = case
+      when \`code\` = 'MAIN' then 'MAIN'
+      else 'BALANCED'
+    end
+    where \`sharing_mode\` is null or \`sharing_mode\` = ''
+  `);
+  console.info("[db:repair] normalized store_branches.sharing_mode");
+
+  await client.execute(`
+    update \`store_branches\`
+    set \`source_branch_id\` = (
+      select mb.\`id\`
+      from \`store_branches\` mb
+      where mb.\`store_id\` = \`store_branches\`.\`store_id\`
+        and mb.\`code\` = 'MAIN'
+      limit 1
+    )
+    where \`code\` <> 'MAIN'
+      and \`source_branch_id\` is null
+      and \`sharing_mode\` in ('BALANCED', 'FULL_SYNC')
+  `);
+  console.info("[db:repair] normalized store_branches.source_branch_id");
 
   if (!(await columnExists("store_members", "added_by"))) {
     await client.execute("alter table `store_members` add `added_by` text");
@@ -281,6 +353,23 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     "create index if not exists `store_members_added_by_idx` on `store_members` (`added_by`)",
   );
   console.info("[db:repair] ensured store_members.added_by index");
+
+  await client.execute(`
+    create table if not exists \`store_member_branches\` (
+      \`store_id\` text not null references \`stores\`(\`id\`) on delete cascade,
+      \`user_id\` text not null references \`users\`(\`id\`) on delete cascade,
+      \`branch_id\` text not null references \`store_branches\`(\`id\`) on delete cascade,
+      \`created_at\` text not null default (CURRENT_TIMESTAMP),
+      primary key (\`store_id\`, \`user_id\`, \`branch_id\`)
+    )
+  `);
+  await client.execute(
+    "create index if not exists `store_member_branches_store_user_idx` on `store_member_branches` (`store_id`, `user_id`)",
+  );
+  await client.execute(
+    "create index if not exists `store_member_branches_branch_idx` on `store_member_branches` (`branch_id`)",
+  );
+  console.info("[db:repair] ensured store_member_branches table and indexes");
 }
 
 async function ensureMigrationTable() {

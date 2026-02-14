@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db/client";
 import { roles, storeMembers, stores } from "@/lib/db/schema";
+import { ensureMainBranchExists, listAccessibleBranchesForMember } from "@/lib/branches/access";
 import {
   type AppSession,
   clearSessionCookie,
@@ -108,13 +109,34 @@ export async function getUserMembershipFlags(userId: string): Promise<UserMember
 
 export async function buildSessionForUser(
   user: SessionUser,
-  options?: { preferredStoreId?: string | null },
+  options?: { preferredStoreId?: string | null; preferredBranchId?: string | null },
 ): Promise<AppSession> {
   const preferredStoreId = options?.preferredStoreId?.trim();
+  const preferredBranchId = options?.preferredBranchId?.trim();
   const membership = preferredStoreId
     ? (await findActiveMembershipByStore(user.id, preferredStoreId)) ??
       (await findPrimaryMembership(user.id))
     : await findPrimaryMembership(user.id);
+
+  let activeBranchId: string | null = null;
+  let activeBranchName: string | null = null;
+  let activeBranchCode: string | null = null;
+
+  if (membership) {
+    await ensureMainBranchExists(membership.storeId);
+    const accessibleBranches = await listAccessibleBranchesForMember(user.id, membership.storeId);
+    const targetBranch =
+      (preferredBranchId
+        ? accessibleBranches.find((branch) => branch.id === preferredBranchId)
+        : null) ??
+      accessibleBranches.find((branch) => branch.code === "MAIN") ??
+      accessibleBranches[0] ??
+      null;
+
+    activeBranchId = targetBranch?.id ?? null;
+    activeBranchName = targetBranch?.name ?? null;
+    activeBranchCode = targetBranch?.code ?? null;
+  }
 
   return {
     userId: user.id,
@@ -124,6 +146,9 @@ export async function buildSessionForUser(
     activeStoreId: membership?.storeId ?? null,
     activeStoreName: membership?.storeName ?? null,
     activeStoreType: membership?.storeType ?? null,
+    activeBranchId,
+    activeBranchName,
+    activeBranchCode,
     activeRoleId: membership?.roleId ?? null,
     activeRoleName: membership?.roleName ?? null,
   };

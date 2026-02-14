@@ -167,7 +167,7 @@ export default async function SettingsPage() {
     },
     {
       id: "switch-store",
-      href: "/stores",
+      href: "/settings/stores",
       title: "เลือกร้าน / เปลี่ยนร้าน",
       description: isSuperadmin ? "สลับร้านหรือสร้างร้านใหม่" : "สลับร้านที่กำลังใช้งาน",
       icon: Settings2,
@@ -193,7 +193,7 @@ export default async function SettingsPage() {
       id: "account-permissions",
       href: "/settings/permissions",
       title: "สิทธิ์ของบัญชี",
-      description: `ใช้งานได้ ${grantedCapabilitiesCount} จาก ${userCapabilities.length} รายการ`,
+      description: `ใช้งานได้ ${grantedCapabilitiesCount} รายการ`,
       icon: CheckCircle2,
       visible: true,
     },

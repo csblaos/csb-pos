@@ -46,6 +46,13 @@ export const connectionStatusEnum = [
   "ERROR",
 ] as const;
 export const unitScopeEnum = ["SYSTEM", "STORE"] as const;
+export const memberBranchAccessModeEnum = ["ALL", "SELECTED"] as const;
+export const branchSharingModeEnum = [
+  "MAIN",
+  "BALANCED",
+  "FULL_SYNC",
+  "INDEPENDENT",
+] as const;
 
 export const users = sqliteTable(
   "users",
@@ -152,10 +159,21 @@ export const storeBranches = sqliteTable(
     name: text("name").notNull(),
     code: text("code"),
     address: text("address"),
+    sourceBranchId: text("source_branch_id"),
+    sharingMode: text("sharing_mode", { enum: branchSharingModeEnum }),
+    sharingConfig: text("sharing_config"),
     createdAt: text("created_at").notNull().default(createdAtDefault),
   },
   (table) => ({
+    storeBranchesSourceBranchFk: foreignKey({
+      columns: [table.sourceBranchId],
+      foreignColumns: [table.id],
+      name: "store_branches_source_branch_fk",
+    }).onDelete("set null"),
     storeBranchesStoreIdIdx: index("store_branches_store_id_idx").on(table.storeId),
+    storeBranchesSourceBranchIdIdx: index("store_branches_source_branch_id_idx").on(
+      table.sourceBranchId,
+    ),
     storeBranchesStoreCreatedAtIdx: index("store_branches_store_created_at_idx").on(
       table.storeId,
       table.createdAt,
@@ -233,6 +251,32 @@ export const storeMembers = sqliteTable(
     storeMembersAddedByIdx: index("store_members_added_by_idx").on(table.addedBy),
     storeMembersCreatedAtIdx: index("store_members_created_at_idx").on(
       table.createdAt,
+    ),
+  }),
+);
+
+export const storeMemberBranches = sqliteTable(
+  "store_member_branches",
+  {
+    storeId: text("store_id")
+      .notNull()
+      .references(() => stores.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    branchId: text("branch_id")
+      .notNull()
+      .references(() => storeBranches.id, { onDelete: "cascade" }),
+    createdAt: text("created_at").notNull().default(createdAtDefault),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.storeId, table.userId, table.branchId] }),
+    storeMemberBranchesStoreUserIdx: index("store_member_branches_store_user_idx").on(
+      table.storeId,
+      table.userId,
+    ),
+    storeMemberBranchesBranchIdx: index("store_member_branches_branch_idx").on(
+      table.branchId,
     ),
   }),
 );

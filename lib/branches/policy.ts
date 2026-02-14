@@ -281,6 +281,9 @@ export async function listBranchesByStore(storeId: string) {
       name: storeBranches.name,
       code: storeBranches.code,
       address: storeBranches.address,
+      sourceBranchId: storeBranches.sourceBranchId,
+      sharingMode: storeBranches.sharingMode,
+      sharingConfig: storeBranches.sharingConfig,
       createdAt: storeBranches.createdAt,
     })
     .from(storeBranches)

@@ -62,9 +62,7 @@ export default async function SettingsPermissionsPage() {
         </p>
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="px-4 py-3">
-            <p className="text-sm font-medium text-slate-900">
-              ใช้งานได้ {grantedCapabilitiesCount} จาก {userCapabilities.length} รายการ
-            </p>
+            <p className="text-sm font-medium text-slate-900">ใช้งานได้ {grantedCapabilitiesCount} รายการ</p>
             <p className="mt-0.5 text-xs text-slate-500">อ้างอิงตามบทบาทในร้านที่กำลังใช้งาน</p>
           </div>
         </div>
