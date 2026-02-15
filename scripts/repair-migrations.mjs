@@ -53,6 +53,88 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     console.info("[db:repair] added column orders.tracking_no");
   }
 
+  if (!(await columnExists("orders", "payment_currency"))) {
+    await client.execute(
+      "alter table `orders` add `payment_currency` text not null default 'LAK'",
+    );
+    console.info("[db:repair] added column orders.payment_currency");
+  }
+
+  if (!(await columnExists("orders", "payment_method"))) {
+    await client.execute(
+      "alter table `orders` add `payment_method` text not null default 'CASH'",
+    );
+    console.info("[db:repair] added column orders.payment_method");
+  }
+
+  if (!(await columnExists("orders", "payment_account_id"))) {
+    await client.execute("alter table `orders` add `payment_account_id` text");
+    console.info("[db:repair] added column orders.payment_account_id");
+  }
+
+  if (!(await columnExists("orders", "payment_slip_url"))) {
+    await client.execute("alter table `orders` add `payment_slip_url` text");
+    console.info("[db:repair] added column orders.payment_slip_url");
+  }
+
+  if (!(await columnExists("orders", "payment_proof_submitted_at"))) {
+    await client.execute("alter table `orders` add `payment_proof_submitted_at` text");
+    console.info("[db:repair] added column orders.payment_proof_submitted_at");
+  }
+
+  await client.execute(`
+    update \`orders\`
+    set \`payment_currency\` = case
+      when \`store_id\` in (select \`id\` from \`stores\`) then (
+        select
+          case
+            when \`stores\`.\`currency\` in ('LAK', 'THB', 'USD') then \`stores\`.\`currency\`
+            else 'LAK'
+          end
+        from \`stores\`
+        where \`stores\`.\`id\` = \`orders\`.\`store_id\`
+        limit 1
+      )
+      else 'LAK'
+    end
+    where \`payment_currency\` is null or trim(\`payment_currency\`) = ''
+  `);
+  console.info("[db:repair] backfilled orders.payment_currency from stores.currency");
+
+  await client.execute(`
+    update \`orders\`
+    set \`payment_currency\` = case
+      when \`store_id\` in (select \`id\` from \`stores\`) then (
+        select
+          case
+            when \`stores\`.\`currency\` in ('LAK', 'THB', 'USD') then \`stores\`.\`currency\`
+            else 'LAK'
+          end
+        from \`stores\`
+        where \`stores\`.\`id\` = \`orders\`.\`store_id\`
+        limit 1
+      )
+      else 'LAK'
+    end
+    where \`payment_currency\` not in ('LAK', 'THB', 'USD')
+  `);
+  console.info("[db:repair] normalized orders.payment_currency");
+
+  await client.execute(`
+    update \`orders\`
+    set \`payment_method\` = 'LAO_QR'
+    where \`payment_method\` = 'PROMPTPAY'
+  `);
+
+  await client.execute(`
+    update \`orders\`
+    set \`payment_method\` = 'CASH'
+    where \`payment_method\` is null
+      or trim(\`payment_method\`) = ''
+      or \`payment_method\` not in ('CASH', 'LAO_QR')
+  `);
+  console.info("[db:repair] normalized orders.payment_method");
+
   await client.execute(
     "create index if not exists `orders_store_created_at_idx` on `orders` (`store_id`,`created_at`)",
   );
@@ -62,7 +144,10 @@ async function ensureSchemaCompatForLatestAuthChanges() {
   await client.execute(
     "create index if not exists `orders_store_status_paid_at_idx` on `orders` (`store_id`,`status`,`paid_at`)",
   );
-  console.info("[db:repair] ensured 3 orders indexes from migration 0002");
+  await client.execute(
+    "create index if not exists `orders_store_payment_method_idx` on `orders` (`store_id`,`payment_method`)",
+  );
+  console.info("[db:repair] ensured orders indexes from migration 0002 and payment flow");
 
   if (!(await columnExists("users", "session_limit"))) {
     await client.execute("alter table `users` add `session_limit` integer");
@@ -151,6 +236,56 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     console.info("[db:repair] added column stores.phone_number");
   }
 
+  if (!(await columnExists("stores", "supported_currencies"))) {
+    await client.execute(
+      "alter table `stores` add `supported_currencies` text not null default '[\"LAK\"]'",
+    );
+    console.info("[db:repair] added column stores.supported_currencies");
+  }
+
+  if (!(await columnExists("stores", "vat_mode"))) {
+    await client.execute(
+      "alter table `stores` add `vat_mode` text not null default 'EXCLUSIVE'",
+    );
+    console.info("[db:repair] added column stores.vat_mode");
+  }
+
+  await client.execute(`
+    update \`stores\`
+    set \`currency\` = 'LAK'
+    where \`currency\` is null
+      or trim(\`currency\`) = ''
+      or \`currency\` not in ('LAK', 'THB', 'USD')
+  `);
+  console.info("[db:repair] normalized stores.currency");
+
+  await client.execute(`
+    update \`stores\`
+    set \`supported_currencies\` = case
+      when \`currency\` in ('LAK', 'THB', 'USD') then '[\"' || \`currency\` || '\"]'
+      else '[\"LAK\"]'
+    end
+    where \`supported_currencies\` is null or trim(\`supported_currencies\`) = ''
+  `);
+  console.info("[db:repair] backfilled stores.supported_currencies");
+
+  await client.execute(`
+    update \`stores\`
+    set \`supported_currencies\` = '[\"' || \`currency\` || '\"]'
+    where \`currency\` in ('LAK', 'THB', 'USD')
+      and \`supported_currencies\` not like '%"' || \`currency\` || '"%'
+  `);
+  console.info("[db:repair] normalized stores.supported_currencies");
+
+  await client.execute(`
+    update \`stores\`
+    set \`vat_mode\` = 'EXCLUSIVE'
+    where \`vat_mode\` is null
+      or trim(\`vat_mode\`) = ''
+      or \`vat_mode\` not in ('EXCLUSIVE', 'INCLUSIVE')
+  `);
+  console.info("[db:repair] normalized stores.vat_mode");
+
   await client.execute(`
     create table if not exists \`system_config\` (
       \`id\` text primary key not null default 'global',
@@ -176,6 +311,20 @@ async function ensureSchemaCompatForLatestAuthChanges() {
       "alter table `system_config` add `default_session_limit` integer not null default 1",
     );
     console.info("[db:repair] added column system_config.default_session_limit");
+  }
+
+  if (!(await columnExists("system_config", "payment_max_accounts_per_store"))) {
+    await client.execute(
+      "alter table `system_config` add `payment_max_accounts_per_store` integer not null default 5",
+    );
+    console.info("[db:repair] added column system_config.payment_max_accounts_per_store");
+  }
+
+  if (!(await columnExists("system_config", "payment_require_slip_for_lao_qr"))) {
+    await client.execute(
+      "alter table `system_config` add `payment_require_slip_for_lao_qr` integer not null default 1",
+    );
+    console.info("[db:repair] added column system_config.payment_require_slip_for_lao_qr");
   }
 
   if (!(await columnExists("system_config", "store_logo_max_size_mb"))) {
@@ -204,6 +353,11 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     set
       \`default_max_branches_per_store\` = 1,
       \`default_session_limit\` = coalesce(\`default_session_limit\`, 1),
+      \`payment_max_accounts_per_store\` = case
+        when \`payment_max_accounts_per_store\` is null or \`payment_max_accounts_per_store\` < 1 then 5
+        else \`payment_max_accounts_per_store\`
+      end,
+      \`payment_require_slip_for_lao_qr\` = coalesce(\`payment_require_slip_for_lao_qr\`, 1),
       \`store_logo_max_size_mb\` = coalesce(\`store_logo_max_size_mb\`, 5),
       \`store_logo_auto_resize\` = coalesce(\`store_logo_auto_resize\`, 1),
       \`store_logo_resize_max_width\` = coalesce(\`store_logo_resize_max_width\`, 1280),
@@ -211,7 +365,7 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     where \`id\` = 'global'
   `);
   console.info(
-    "[db:repair] normalized system_config(global) default_max_branches_per_store=1 default_session_limit=1 store_logo_max_size_mb=5 store_logo_auto_resize=1 store_logo_resize_max_width=1280",
+    "[db:repair] normalized system_config(global) default_max_branches_per_store=1 default_session_limit=1 payment_max_accounts_per_store>=1 payment_require_slip_for_lao_qr=1 store_logo_max_size_mb=5 store_logo_auto_resize=1 store_logo_resize_max_width=1280",
   );
 
   await client.execute(`
@@ -370,6 +524,58 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     "create index if not exists `store_member_branches_branch_idx` on `store_member_branches` (`branch_id`)",
   );
   console.info("[db:repair] ensured store_member_branches table and indexes");
+
+  await client.execute(`
+    create table if not exists \`store_payment_accounts\` (
+      \`id\` text primary key not null,
+      \`store_id\` text not null references \`stores\`(\`id\`) on delete cascade,
+      \`display_name\` text not null,
+      \`account_type\` text not null,
+      \`bank_name\` text,
+      \`account_name\` text not null,
+      \`account_number\` text,
+      \`qr_image_url\` text,
+      \`promptpay_id\` text,
+      \`is_default\` integer not null default 0,
+      \`is_active\` integer not null default 1,
+      \`created_at\` text not null default (CURRENT_TIMESTAMP),
+      \`updated_at\` text not null default (CURRENT_TIMESTAMP)
+    )
+  `);
+  await client.execute(
+    "create index if not exists `store_payment_accounts_store_id_idx` on `store_payment_accounts` (`store_id`)",
+  );
+  await client.execute(
+    "create index if not exists `store_payment_accounts_store_active_idx` on `store_payment_accounts` (`store_id`, `is_active`)",
+  );
+  await client.execute(
+    "create unique index if not exists `store_payment_accounts_store_default_unique` on `store_payment_accounts` (`store_id`) where `is_default` = 1 and `is_active` = 1",
+  );
+  if (!(await columnExists("store_payment_accounts", "qr_image_url"))) {
+    await client.execute("alter table `store_payment_accounts` add `qr_image_url` text");
+    console.info("[db:repair] added column store_payment_accounts.qr_image_url");
+  }
+  await client.execute(`
+    update \`store_payment_accounts\`
+    set \`account_type\` = 'LAO_QR'
+    where \`account_type\` = 'PROMPTPAY'
+  `);
+  await client.execute(`
+    update \`store_payment_accounts\`
+    set \`account_type\` = 'BANK'
+    where \`account_type\` is null
+      or trim(\`account_type\`) = ''
+      or \`account_type\` not in ('BANK', 'LAO_QR')
+  `);
+  await client.execute(`
+    update \`store_payment_accounts\`
+    set \`qr_image_url\` = \`promptpay_id\`
+    where (\`qr_image_url\` is null or trim(\`qr_image_url\`) = '')
+      and \`account_type\` = 'LAO_QR'
+      and \`promptpay_id\` is not null
+      and trim(\`promptpay_id\`) <> ''
+  `);
+  console.info("[db:repair] ensured store_payment_accounts table and indexes");
 }
 
 async function ensureMigrationTable() {

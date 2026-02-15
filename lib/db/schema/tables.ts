@@ -20,6 +20,9 @@ export const storeTypeEnum = [
   "CAFE",
   "OTHER",
 ] as const;
+export const storeCurrencyEnum = ["LAK", "THB", "USD"] as const;
+export const storeVatModeEnum = ["EXCLUSIVE", "INCLUSIVE"] as const;
+export const paymentAccountTypeEnum = ["BANK", "LAO_QR"] as const;
 export const memberStatusEnum = ["ACTIVE", "INVITED", "SUSPENDED"] as const;
 export const movementTypeEnum = [
   "IN",
@@ -31,6 +34,7 @@ export const movementTypeEnum = [
 ] as const;
 export const movementRefTypeEnum = ["ORDER", "MANUAL", "RETURN"] as const;
 export const orderChannelEnum = ["WALK_IN", "FACEBOOK", "WHATSAPP"] as const;
+export const orderPaymentMethodEnum = ["CASH", "LAO_QR"] as const;
 export const orderStatusEnum = [
   "DRAFT",
   "PENDING_PAYMENT",
@@ -105,11 +109,15 @@ export const stores = sqliteTable(
     storeType: text("store_type", { enum: storeTypeEnum })
       .notNull()
       .default("ONLINE_RETAIL"),
-    currency: text("currency").notNull().default("LAK"),
+    currency: text("currency", { enum: storeCurrencyEnum }).notNull().default("LAK"),
+    supportedCurrencies: text("supported_currencies").notNull().default("[\"LAK\"]"),
     vatEnabled: integer("vat_enabled", { mode: "boolean" })
       .notNull()
       .default(false),
     vatRate: integer("vat_rate").notNull().default(700),
+    vatMode: text("vat_mode", { enum: storeVatModeEnum })
+      .notNull()
+      .default("EXCLUSIVE"),
     maxBranchesOverride: integer("max_branches_override"),
     createdAt: text("created_at").notNull().default(createdAtDefault),
   },
@@ -125,6 +133,14 @@ export const systemConfig = sqliteTable("system_config", {
     .default(true),
   defaultMaxBranchesPerStore: integer("default_max_branches_per_store").default(1),
   defaultSessionLimit: integer("default_session_limit").notNull().default(1),
+  paymentMaxAccountsPerStore: integer("payment_max_accounts_per_store")
+    .notNull()
+    .default(5),
+  paymentRequireSlipForLaoQr: integer("payment_require_slip_for_lao_qr", {
+    mode: "boolean",
+  })
+    .notNull()
+    .default(true),
   storeLogoMaxSizeMb: integer("store_logo_max_size_mb").notNull().default(5),
   storeLogoAutoResize: integer("store_logo_auto_resize", { mode: "boolean" })
     .notNull()
@@ -186,6 +202,41 @@ export const storeBranches = sqliteTable(
       table.storeId,
       table.code,
     ),
+  }),
+);
+
+export const storePaymentAccounts = sqliteTable(
+  "store_payment_accounts",
+  {
+    id: id(),
+    storeId: text("store_id")
+      .notNull()
+      .references(() => stores.id, { onDelete: "cascade" }),
+    displayName: text("display_name").notNull(),
+    accountType: text("account_type", { enum: paymentAccountTypeEnum }).notNull(),
+    bankName: text("bank_name"),
+    accountName: text("account_name").notNull(),
+    accountNumber: text("account_number"),
+    qrImageUrl: text("qr_image_url"),
+    promptpayId: text("promptpay_id"),
+    isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    createdAt: text("created_at").notNull().default(createdAtDefault),
+    updatedAt: text("updated_at").notNull().default(createdAtDefault),
+  },
+  (table) => ({
+    storePaymentAccountsStoreIdIdx: index("store_payment_accounts_store_id_idx").on(
+      table.storeId,
+    ),
+    storePaymentAccountsStoreActiveIdx: index("store_payment_accounts_store_active_idx").on(
+      table.storeId,
+      table.isActive,
+    ),
+    storePaymentAccountsStoreDefaultUnique: uniqueIndex(
+      "store_payment_accounts_store_default_unique",
+    )
+      .on(table.storeId)
+      .where(sql`${table.isDefault} = 1 and ${table.isActive} = 1`),
   }),
 );
 
@@ -444,6 +495,17 @@ export const orders = sqliteTable(
     vatAmount: integer("vat_amount").notNull().default(0),
     shippingFeeCharged: integer("shipping_fee_charged").notNull().default(0),
     total: integer("total").notNull().default(0),
+    paymentCurrency: text("payment_currency", { enum: storeCurrencyEnum })
+      .notNull()
+      .default("LAK"),
+    paymentMethod: text("payment_method", { enum: orderPaymentMethodEnum })
+      .notNull()
+      .default("CASH"),
+    paymentAccountId: text("payment_account_id").references(() => storePaymentAccounts.id, {
+      onDelete: "set null",
+    }),
+    paymentSlipUrl: text("payment_slip_url"),
+    paymentProofSubmittedAt: text("payment_proof_submitted_at"),
     shippingCarrier: text("shipping_carrier"),
     trackingNo: text("tracking_no"),
     shippingCost: integer("shipping_cost").notNull().default(0),
@@ -469,6 +531,10 @@ export const orders = sqliteTable(
       table.storeId,
       table.status,
       table.paidAt,
+    ),
+    ordersStorePaymentMethodIdx: index("orders_store_payment_method_idx").on(
+      table.storeId,
+      table.paymentMethod,
     ),
     ordersStoreStatusChannelIdx: index("orders_store_status_channel_idx").on(
       table.storeId,

@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 
 import { getSession } from "@/lib/auth/session";
+import { currencyLabel, vatModeLabel } from "@/lib/finance/store-financial";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 import { getOrderDetail } from "@/lib/orders/queries";
 
@@ -77,7 +78,9 @@ export default async function PrintReceiptPage({
         </p>
         <p className="flex justify-between">
           <span>VAT</span>
-          <span>{order.vatAmount.toLocaleString("th-TH")}</span>
+          <span>
+            {order.vatAmount.toLocaleString("th-TH")} ({vatModeLabel(order.storeVatMode)})
+          </span>
         </p>
         <p className="flex justify-between">
           <span>ค่าส่ง</span>
@@ -86,6 +89,14 @@ export default async function PrintReceiptPage({
         <p className="flex justify-between font-semibold">
           <span>ยอดสุทธิ</span>
           <span>{order.total.toLocaleString("th-TH")} {order.storeCurrency}</span>
+        </p>
+        <p className="flex justify-between">
+          <span>สกุลชำระ</span>
+          <span>{currencyLabel(order.paymentCurrency)}</span>
+        </p>
+        <p className="flex justify-between">
+          <span>วิธีชำระ</span>
+          <span>{order.paymentMethod === "LAO_QR" ? "QR โอนเงิน" : "เงินสด"}</span>
         </p>
       </div>
 

@@ -14,6 +14,8 @@ type R2Config = {
 
 const MAX_LOGO_SIZE_BYTES = 5 * 1024 * 1024;
 const DEFAULT_RESIZE_MAX_WIDTH = 1280;
+const MAX_PAYMENT_QR_SIZE_BYTES = 4 * 1024 * 1024;
+const DEFAULT_PAYMENT_QR_RESIZE_MAX_WIDTH = 1024;
 const WEBP_QUALITY = 82;
 
 type StoreLogoUploadPolicy = {
@@ -21,6 +23,7 @@ type StoreLogoUploadPolicy = {
   autoResize: boolean;
   resizeMaxWidth: number;
 };
+type PaymentQrUploadPolicy = StoreLogoUploadPolicy;
 
 const extensionByContentType: Record<string, string> = {
   "image/jpeg": "jpg",
@@ -33,13 +36,13 @@ function trimTrailingSlash(value: string) {
   return value.replace(/\/+$/g, "");
 }
 
-function loadR2Config(): R2Config | null {
+function loadR2ConfigWithPrefix(prefix: string): R2Config | null {
   const accountId = process.env.R2_ACCOUNT_ID?.trim() ?? "";
   const accessKeyId = process.env.R2_ACCESS_KEY_ID?.trim() ?? "";
   const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY?.trim() ?? "";
   const bucket = process.env.R2_BUCKET?.trim() ?? "";
   const publicBaseUrlRaw = process.env.R2_PUBLIC_BASE_URL?.trim() ?? "";
-  const keyPrefix = process.env.R2_STORE_LOGO_PREFIX?.trim() || "store-logos";
+  const keyPrefix = prefix.trim();
 
   if (!accountId || !accessKeyId || !secretAccessKey || !bucket) {
     return null;
@@ -53,6 +56,17 @@ function loadR2Config(): R2Config | null {
     publicBaseUrl: publicBaseUrlRaw ? trimTrailingSlash(publicBaseUrlRaw) : null,
     keyPrefix,
   };
+}
+
+function loadR2Config() {
+  const logoPrefix = process.env.R2_STORE_LOGO_PREFIX?.trim() || "store-logos";
+  return loadR2ConfigWithPrefix(logoPrefix);
+}
+
+function loadPaymentQrR2Config() {
+  const paymentQrPrefix =
+    process.env.R2_PAYMENT_QR_PREFIX?.trim() || "store-payment-qrs";
+  return loadR2ConfigWithPrefix(paymentQrPrefix);
 }
 
 function createClient(config: R2Config) {
@@ -158,6 +172,10 @@ export function isR2Configured() {
   return loadR2Config() !== null;
 }
 
+export function isPaymentQrR2Configured() {
+  return loadPaymentQrR2Config() !== null;
+}
+
 export async function uploadStoreLogoToR2(params: {
   storeId: string;
   logoName: string;
@@ -236,6 +254,103 @@ export async function deleteStoreLogoFromR2(params: { logoUrl: string }) {
   }
 
   const objectKey = extractObjectKeyFromUrl(config, params.logoUrl);
+  if (!objectKey) {
+    return false;
+  }
+
+  const client = createClient(config);
+  await client.send(
+    new DeleteObjectCommand({
+      Bucket: config.bucket,
+      Key: objectKey,
+    }),
+  );
+
+  return true;
+}
+
+export async function uploadPaymentQrImageToR2(params: {
+  storeId: string;
+  accountLabel: string;
+  file: File;
+  policy?: Partial<PaymentQrUploadPolicy>;
+}) {
+  const config = loadPaymentQrR2Config();
+  if (!config) {
+    throw new Error("R2_NOT_CONFIGURED");
+  }
+
+  const uploadPolicy = sanitizeUploadPolicy({
+    maxSizeBytes: MAX_PAYMENT_QR_SIZE_BYTES,
+    autoResize: true,
+    resizeMaxWidth: DEFAULT_PAYMENT_QR_RESIZE_MAX_WIDTH,
+    ...params.policy,
+  });
+
+  if (!params.file.type.startsWith("image/")) {
+    throw new Error("UNSUPPORTED_FILE_TYPE");
+  }
+
+  if (params.file.size > uploadPolicy.maxSizeBytes) {
+    throw new Error("FILE_TOO_LARGE");
+  }
+
+  let extension = contentTypeToExtension(params.file.type);
+  let contentType = params.file.type || "application/octet-stream";
+  let body: Uint8Array = new Uint8Array(await params.file.arrayBuffer());
+
+  if (uploadPolicy.autoResize && params.file.type !== "image/svg+xml") {
+    try {
+      const resized = await sharp(body)
+        .rotate()
+        .resize({
+          width: uploadPolicy.resizeMaxWidth,
+          withoutEnlargement: true,
+          fit: "inside",
+        })
+        .webp({ quality: WEBP_QUALITY })
+        .toBuffer();
+
+      body = resized;
+      extension = "webp";
+      contentType = "image/webp";
+    } catch {
+      // fallback to original file when resize fails
+    }
+  }
+
+  if (body.byteLength > uploadPolicy.maxSizeBytes) {
+    throw new Error("FILE_TOO_LARGE");
+  }
+
+  const objectKey = `${config.keyPrefix}/${params.storeId}/${randomUUID()}.${extension}`;
+  const client = createClient(config);
+
+  await client.send(
+    new PutObjectCommand({
+      Bucket: config.bucket,
+      Key: objectKey,
+      Body: body,
+      ContentType: contentType,
+      Metadata: {
+        accountLabel: params.accountLabel,
+      },
+    }),
+  );
+
+  return {
+    objectKey,
+    url: buildObjectUrl(config, objectKey),
+  };
+}
+
+export async function deletePaymentQrImageFromR2(params: { qrImageUrl: string }) {
+  const config = loadPaymentQrR2Config();
+  if (!config) {
+    return false;
+  }
+
+  const objectKey = extractObjectKeyFromUrl(config, params.qrImageUrl);
   if (!objectKey) {
     return false;
   }

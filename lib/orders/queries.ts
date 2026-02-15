@@ -2,18 +2,22 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 
 import { db } from "@/lib/db/client";
+import { defaultStoreVatMode, parseStoreCurrency } from "@/lib/finance/store-financial";
 import {
   contacts,
   orderItems,
   orders,
   productUnits,
   products,
+  storePaymentAccounts,
   stores,
   units,
   users,
 } from "@/lib/db/schema";
 import { getInventoryBalancesByStore } from "@/lib/inventory/queries";
 import { timeDbQuery } from "@/lib/perf/server";
+import { getStoreFinancialConfig } from "@/lib/stores/financial";
+import { getGlobalPaymentPolicy } from "@/lib/system-config/policy";
 
 export const PAID_LIKE_STATUSES = ["PAID", "PACKED", "SHIPPED"] as const;
 
@@ -27,6 +31,8 @@ export type OrderListItem = {
   customerName: string | null;
   contactDisplayName: string | null;
   total: number;
+  paymentCurrency: "LAK" | "THB" | "USD";
+  paymentMethod: "CASH" | "LAO_QR";
   createdAt: string;
   paidAt: string | null;
   shippedAt: string | null;
@@ -64,6 +70,15 @@ export type OrderDetail = {
   vatAmount: number;
   shippingFeeCharged: number;
   total: number;
+  paymentCurrency: "LAK" | "THB" | "USD";
+  paymentMethod: "CASH" | "LAO_QR";
+  paymentAccountId: string | null;
+  paymentAccountDisplayName: string | null;
+  paymentAccountBankName: string | null;
+  paymentAccountNumber: string | null;
+  paymentAccountQrImageUrl: string | null;
+  paymentSlipUrl: string | null;
+  paymentProofSubmittedAt: string | null;
   shippingCarrier: string | null;
   trackingNo: string | null;
   shippingCost: number;
@@ -73,6 +88,8 @@ export type OrderDetail = {
   createdByName: string | null;
   createdAt: string;
   storeCurrency: string;
+  storeVatMode: "EXCLUSIVE" | "INCLUSIVE";
+  storeVatEnabled: boolean;
   items: OrderDetailItem[];
 };
 
@@ -104,10 +121,26 @@ export type OrderCatalogContact = {
   lastInboundAt: string | null;
 };
 
+export type OrderCatalogPaymentAccount = {
+  id: string;
+  displayName: string;
+  accountType: "BANK" | "LAO_QR";
+  bankName: string | null;
+  accountName: string;
+  accountNumber: string | null;
+  qrImageUrl: string | null;
+  isDefault: boolean;
+  isActive: boolean;
+};
+
 export type OrderCatalog = {
   storeCurrency: string;
+  supportedCurrencies: Array<"LAK" | "THB" | "USD">;
   vatEnabled: boolean;
   vatRate: number;
+  vatMode: "EXCLUSIVE" | "INCLUSIVE";
+  paymentAccounts: OrderCatalogPaymentAccount[];
+  requireSlipForLaoQr: boolean;
   products: OrderCatalogProduct[];
   contacts: OrderCatalogContact[];
 };
@@ -150,35 +183,90 @@ export async function listOrdersByTab(
     ? and(eq(orders.storeId, storeId), whereCondition)
     : eq(orders.storeId, storeId);
 
-  const [rows, countRows] = await Promise.all([
-    timeDbQuery("orders.list.rows", async () =>
-      db
-        .select({
-          id: orders.id,
-          orderNo: orders.orderNo,
-          channel: orders.channel,
-          status: orders.status,
-          customerName: orders.customerName,
-          contactDisplayName: contacts.displayName,
-          total: orders.total,
-          createdAt: orders.createdAt,
-          paidAt: orders.paidAt,
-          shippedAt: orders.shippedAt,
-        })
-        .from(orders)
-        .leftJoin(contacts, eq(orders.contactId, contacts.id))
-        .where(scopedWhere)
-        .orderBy(desc(orders.createdAt))
-        .limit(pageSize)
-        .offset(offset),
-    ),
-    timeDbQuery("orders.list.count", async () =>
-      db
-        .select({ value: sql<number>`count(*)` })
-        .from(orders)
-        .where(scopedWhere),
-    ),
-  ]);
+  let rows: OrderListItem[] = [];
+  let countRows: Array<{ value: number }> = [];
+
+  try {
+    [rows, countRows] = await Promise.all([
+      timeDbQuery("orders.list.rows", async () =>
+        db
+          .select({
+            id: orders.id,
+            orderNo: orders.orderNo,
+            channel: orders.channel,
+            status: orders.status,
+            customerName: orders.customerName,
+            contactDisplayName: contacts.displayName,
+            total: orders.total,
+            paymentCurrency: orders.paymentCurrency,
+            paymentMethod: orders.paymentMethod,
+            createdAt: orders.createdAt,
+            paidAt: orders.paidAt,
+            shippedAt: orders.shippedAt,
+          })
+          .from(orders)
+          .leftJoin(contacts, eq(orders.contactId, contacts.id))
+          .where(scopedWhere)
+          .orderBy(desc(orders.createdAt))
+          .limit(pageSize)
+          .offset(offset),
+      ),
+      timeDbQuery("orders.list.count", async () =>
+        db
+          .select({ value: sql<number>`count(*)` })
+          .from(orders)
+          .where(scopedWhere),
+      ),
+    ]);
+  } catch {
+    const [legacyRows, legacyCountRows] = await Promise.all([
+      timeDbQuery("orders.list.rows.legacy", async () =>
+        db
+          .select({
+            id: orders.id,
+            orderNo: orders.orderNo,
+            channel: orders.channel,
+            status: orders.status,
+            customerName: orders.customerName,
+            contactDisplayName: contacts.displayName,
+            total: orders.total,
+            createdAt: orders.createdAt,
+            paidAt: orders.paidAt,
+            shippedAt: orders.shippedAt,
+            storeCurrency: stores.currency,
+          })
+          .from(orders)
+          .innerJoin(stores, eq(orders.storeId, stores.id))
+          .leftJoin(contacts, eq(orders.contactId, contacts.id))
+          .where(scopedWhere)
+          .orderBy(desc(orders.createdAt))
+          .limit(pageSize)
+          .offset(offset),
+      ),
+      timeDbQuery("orders.list.count.legacy", async () =>
+        db
+          .select({ value: sql<number>`count(*)` })
+          .from(orders)
+          .where(scopedWhere),
+      ),
+    ]);
+
+    rows = legacyRows.map((row) => ({
+      id: row.id,
+      orderNo: row.orderNo,
+      channel: row.channel,
+      status: row.status,
+      customerName: row.customerName,
+      contactDisplayName: row.contactDisplayName,
+      total: row.total,
+      paymentCurrency: parseStoreCurrency(row.storeCurrency),
+      paymentMethod: "CASH",
+      createdAt: row.createdAt,
+      paidAt: row.paidAt,
+      shippedAt: row.shippedAt,
+    }));
+    countRows = legacyCountRows;
+  }
 
   const total = Number(countRows[0]?.value ?? 0);
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
@@ -213,40 +301,117 @@ export async function getOrderItemsForOrder(orderId: string) {
 }
 
 export async function getOrderDetail(storeId: string, orderId: string): Promise<OrderDetail | null> {
-  const [order] = await db
-    .select({
-      id: orders.id,
-      orderNo: orders.orderNo,
-      channel: orders.channel,
-      status: orders.status,
-      contactId: orders.contactId,
-      contactDisplayName: contacts.displayName,
-      contactPhone: contacts.phone,
-      contactLastInboundAt: contacts.lastInboundAt,
-      customerName: orders.customerName,
-      customerPhone: orders.customerPhone,
-      customerAddress: orders.customerAddress,
-      subtotal: orders.subtotal,
-      discount: orders.discount,
-      vatAmount: orders.vatAmount,
-      shippingFeeCharged: orders.shippingFeeCharged,
-      total: orders.total,
-      shippingCarrier: orders.shippingCarrier,
-      trackingNo: orders.trackingNo,
-      shippingCost: orders.shippingCost,
-      paidAt: orders.paidAt,
-      shippedAt: orders.shippedAt,
-      createdBy: orders.createdBy,
-      createdByName: users.name,
-      createdAt: orders.createdAt,
-      storeCurrency: stores.currency,
-    })
-    .from(orders)
-    .innerJoin(stores, eq(orders.storeId, stores.id))
-    .leftJoin(contacts, eq(orders.contactId, contacts.id))
-    .leftJoin(users, eq(orders.createdBy, users.id))
-    .where(and(eq(orders.storeId, storeId), eq(orders.id, orderId)))
-    .limit(1);
+  const paymentAccounts = alias(storePaymentAccounts, "payment_accounts");
+  let order:
+    | (Omit<OrderDetail, "items"> & {
+        contactDisplayName: string | null;
+        contactPhone: string | null;
+        contactLastInboundAt: string | null;
+        createdByName: string | null;
+      })
+    | null = null;
+
+  try {
+    [order] = await db
+      .select({
+        id: orders.id,
+        orderNo: orders.orderNo,
+        channel: orders.channel,
+        status: orders.status,
+        contactId: orders.contactId,
+        contactDisplayName: contacts.displayName,
+        contactPhone: contacts.phone,
+        contactLastInboundAt: contacts.lastInboundAt,
+        customerName: orders.customerName,
+        customerPhone: orders.customerPhone,
+        customerAddress: orders.customerAddress,
+        subtotal: orders.subtotal,
+        discount: orders.discount,
+        vatAmount: orders.vatAmount,
+        shippingFeeCharged: orders.shippingFeeCharged,
+        total: orders.total,
+        paymentCurrency: orders.paymentCurrency,
+        paymentMethod: orders.paymentMethod,
+        paymentAccountId: orders.paymentAccountId,
+        paymentAccountDisplayName: paymentAccounts.displayName,
+        paymentAccountBankName: paymentAccounts.bankName,
+        paymentAccountNumber: paymentAccounts.accountNumber,
+        paymentAccountQrImageUrl: paymentAccounts.qrImageUrl,
+        paymentSlipUrl: orders.paymentSlipUrl,
+        paymentProofSubmittedAt: orders.paymentProofSubmittedAt,
+        shippingCarrier: orders.shippingCarrier,
+        trackingNo: orders.trackingNo,
+        shippingCost: orders.shippingCost,
+        paidAt: orders.paidAt,
+        shippedAt: orders.shippedAt,
+        createdBy: orders.createdBy,
+        createdByName: users.name,
+        createdAt: orders.createdAt,
+        storeCurrency: stores.currency,
+        storeVatMode: stores.vatMode,
+        storeVatEnabled: stores.vatEnabled,
+      })
+      .from(orders)
+      .innerJoin(stores, eq(orders.storeId, stores.id))
+      .leftJoin(contacts, eq(orders.contactId, contacts.id))
+      .leftJoin(paymentAccounts, eq(orders.paymentAccountId, paymentAccounts.id))
+      .leftJoin(users, eq(orders.createdBy, users.id))
+      .where(and(eq(orders.storeId, storeId), eq(orders.id, orderId)))
+      .limit(1);
+  } catch {
+    [order] = await db
+      .select({
+        id: orders.id,
+        orderNo: orders.orderNo,
+        channel: orders.channel,
+        status: orders.status,
+        contactId: orders.contactId,
+        contactDisplayName: contacts.displayName,
+        contactPhone: contacts.phone,
+        contactLastInboundAt: contacts.lastInboundAt,
+        customerName: orders.customerName,
+        customerPhone: orders.customerPhone,
+        customerAddress: orders.customerAddress,
+        subtotal: orders.subtotal,
+        discount: orders.discount,
+        vatAmount: orders.vatAmount,
+        shippingFeeCharged: orders.shippingFeeCharged,
+        total: orders.total,
+        paymentCurrency: orders.paymentCurrency,
+        paymentMethod: sql<"CASH">`'CASH'`,
+        paymentAccountId: sql<string | null>`null`,
+        paymentAccountDisplayName: sql<string | null>`null`,
+        paymentAccountBankName: sql<string | null>`null`,
+        paymentAccountNumber: sql<string | null>`null`,
+        paymentAccountQrImageUrl: sql<string | null>`null`,
+        paymentSlipUrl: sql<string | null>`null`,
+        paymentProofSubmittedAt: sql<string | null>`null`,
+        shippingCarrier: orders.shippingCarrier,
+        trackingNo: orders.trackingNo,
+        shippingCost: orders.shippingCost,
+        paidAt: orders.paidAt,
+        shippedAt: orders.shippedAt,
+        createdBy: orders.createdBy,
+        createdByName: users.name,
+        createdAt: orders.createdAt,
+        storeCurrency: stores.currency,
+      })
+      .from(orders)
+      .innerJoin(stores, eq(orders.storeId, stores.id))
+      .leftJoin(contacts, eq(orders.contactId, contacts.id))
+      .leftJoin(users, eq(orders.createdBy, users.id))
+      .where(and(eq(orders.storeId, storeId), eq(orders.id, orderId)))
+      .limit(1)
+      .then((rows) =>
+        rows.map((row) => ({
+          ...row,
+          paymentCurrency: parseStoreCurrency(row.storeCurrency),
+          paymentMethod: "CASH" as const,
+          storeVatMode: defaultStoreVatMode,
+          storeVatEnabled: false,
+        })),
+      );
+  }
 
   if (!order) {
     return null;
@@ -281,19 +446,12 @@ export async function getOrderDetail(storeId: string, orderId: string): Promise<
 
 export async function getOrderCatalogForStore(storeId: string): Promise<OrderCatalog> {
   const baseUnits = alias(units, "base_units");
+  const [financial, globalPaymentPolicy] = await Promise.all([
+    getStoreFinancialConfig(storeId),
+    getGlobalPaymentPolicy(),
+  ]);
 
-  const [storeRows, productRows, conversionRows, contactRows, balances] = await Promise.all([
-    timeDbQuery("orders.catalog.storeConfig", async () =>
-      db
-        .select({
-          currency: stores.currency,
-          vatEnabled: stores.vatEnabled,
-          vatRate: stores.vatRate,
-        })
-        .from(stores)
-        .where(eq(stores.id, storeId))
-        .limit(1),
-    ),
+  const [productRows, conversionRows, contactRows, paymentAccountRows, balances] = await Promise.all([
     timeDbQuery("orders.catalog.products", async () =>
       db
         .select({
@@ -338,14 +496,36 @@ export async function getOrderCatalogForStore(storeId: string): Promise<OrderCat
         .where(eq(contacts.storeId, storeId))
         .orderBy(desc(contacts.lastInboundAt), asc(contacts.displayName)),
     ),
+    (async () => {
+      try {
+        return await timeDbQuery("orders.catalog.paymentAccounts", async () =>
+          db
+            .select({
+              id: storePaymentAccounts.id,
+              displayName: storePaymentAccounts.displayName,
+              accountType: storePaymentAccounts.accountType,
+              bankName: storePaymentAccounts.bankName,
+              accountName: storePaymentAccounts.accountName,
+              accountNumber: storePaymentAccounts.accountNumber,
+              qrImageUrl: storePaymentAccounts.qrImageUrl,
+              isDefault: storePaymentAccounts.isDefault,
+              isActive: storePaymentAccounts.isActive,
+            })
+            .from(storePaymentAccounts)
+            .where(
+              and(
+                eq(storePaymentAccounts.storeId, storeId),
+                eq(storePaymentAccounts.isActive, true),
+              ),
+            )
+            .orderBy(desc(storePaymentAccounts.isDefault), asc(storePaymentAccounts.createdAt)),
+        );
+      } catch {
+        return [];
+      }
+    })(),
     getInventoryBalancesByStore(storeId),
   ]);
-
-  const storeConfig = storeRows[0] ?? {
-    currency: "LAK",
-    vatEnabled: false,
-    vatRate: 0,
-  };
 
   const balanceMap = new Map(balances.map((item) => [item.productId, item]));
   const conversionMap = new Map<string, OrderCatalogProductUnit[]>();
@@ -390,9 +570,23 @@ export async function getOrderCatalogForStore(storeId: string): Promise<OrderCat
   });
 
   return {
-    storeCurrency: storeConfig.currency,
-    vatEnabled: Boolean(storeConfig.vatEnabled),
-    vatRate: storeConfig.vatRate,
+    storeCurrency: financial?.currency ?? "LAK",
+    supportedCurrencies: financial?.supportedCurrencies ?? ["LAK"],
+    vatEnabled: financial?.vatEnabled ?? false,
+    vatRate: financial?.vatRate ?? 0,
+    vatMode: financial?.vatMode ?? defaultStoreVatMode,
+    paymentAccounts: paymentAccountRows.map((row) => ({
+      id: row.id,
+      displayName: row.displayName,
+      accountType: String(row.accountType) === "LAO_QR" ? "LAO_QR" : "BANK",
+      bankName: row.bankName,
+      accountName: row.accountName,
+      accountNumber: row.accountNumber,
+      qrImageUrl: row.qrImageUrl,
+      isDefault: row.isDefault,
+      isActive: row.isActive,
+    })),
+    requireSlipForLaoQr: globalPaymentPolicy.requireSlipForLaoQr,
     products: productsPayload,
     contacts: contactRows,
   };

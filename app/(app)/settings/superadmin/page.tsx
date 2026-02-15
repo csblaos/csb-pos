@@ -211,6 +211,13 @@ async function SuperadminOverviewPanels({
           resize {snapshot.globalStoreLogoPolicy.autoResize ? "เปิด" : "ปิด"} / กว้างสุด{" "}
           {snapshot.globalStoreLogoPolicy.resizeMaxWidth.toLocaleString("th-TH")} px
         </p>
+        <p className="text-xs text-slate-500">
+          Payment accounts: สูงสุด{" "}
+          {snapshot.globalPaymentPolicy.maxAccountsPerStore.toLocaleString("th-TH")} บัญชี/ร้าน •{" "}
+          {snapshot.globalPaymentPolicy.requireSlipForLaoQr
+            ? "บังคับแนบสลิป QR"
+            : "ไม่บังคับแนบสลิป QR"}
+        </p>
       </article>
     </>
   );

@@ -4,8 +4,17 @@ import { z } from "zod";
 
 import { db } from "@/lib/db/client";
 import { stores } from "@/lib/db/schema";
+import {
+  parseStoreCurrency,
+  parseStoreVatMode,
+  parseSupportedCurrencies,
+  serializeSupportedCurrencies,
+  storeCurrencyValues,
+  storeVatModeValues,
+} from "@/lib/finance/store-financial";
 import { formatLaosAddress, getDistrictById, getProvinceById } from "@/lib/location/laos-address";
-import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
+import { RBACError, enforcePermission, hasPermission, toRBACErrorResponse } from "@/lib/rbac/access";
+import { getStoreFinancialConfig } from "@/lib/stores/financial";
 import { deleteStoreLogoFromR2, isR2Configured, uploadStoreLogoToR2 } from "@/lib/storage/r2";
 import { getGlobalStoreLogoPolicy } from "@/lib/system-config/policy";
 
@@ -16,10 +25,22 @@ const updateStoreJsonSchema = z
     name: z.string().trim().min(2).max(120).optional(),
     address: z.union([z.string(), z.null()]).optional(),
     phoneNumber: z.union([z.string(), z.null()]).optional(),
+    currency: z.enum(storeCurrencyValues).optional(),
+    supportedCurrencies: z.array(z.enum(storeCurrencyValues)).min(1).max(3).optional(),
+    vatEnabled: z.boolean().optional(),
+    vatRate: z.number().int().min(0).max(10000).optional(),
+    vatMode: z.enum(storeVatModeValues).optional(),
   })
   .refine(
     (payload) =>
-      payload.name !== undefined || payload.address !== undefined || payload.phoneNumber !== undefined,
+      payload.name !== undefined ||
+      payload.address !== undefined ||
+      payload.phoneNumber !== undefined ||
+      payload.currency !== undefined ||
+      payload.supportedCurrencies !== undefined ||
+      payload.vatEnabled !== undefined ||
+      payload.vatRate !== undefined ||
+      payload.vatMode !== undefined,
     {
       message: "ไม่มีข้อมูลสำหรับอัปเดต",
       path: ["address"],
@@ -244,10 +265,24 @@ async function patchByMultipartForm(storeId: string, request: Request) {
   });
 }
 
-async function patchByJsonBody(storeId: string, request: Request) {
+async function patchByJsonBody(storeId: string, request: Request, userId: string) {
   const payload = updateStoreJsonSchema.safeParse(await request.json());
   if (!payload.success) {
     return NextResponse.json({ message: "ข้อมูลร้านไม่ถูกต้อง" }, { status: 400 });
+  }
+
+  const requiresFinancialUpdate =
+    payload.data.currency !== undefined ||
+    payload.data.supportedCurrencies !== undefined ||
+    payload.data.vatEnabled !== undefined ||
+    payload.data.vatRate !== undefined ||
+    payload.data.vatMode !== undefined;
+
+  if (requiresFinancialUpdate) {
+    const canManageFinancial = await hasPermission({ userId }, storeId, "stores.update");
+    if (!canManageFinancial) {
+      throw new RBACError(403, "คุณไม่มีสิทธิ์อัปเดตการตั้งค่าการเงินของร้าน");
+    }
   }
 
   const updateValues: Partial<typeof stores.$inferInsert> = {};
@@ -264,6 +299,51 @@ async function patchByJsonBody(storeId: string, request: Request) {
     updateValues.address = normalizedAddress.length > 0 ? normalizedAddress : null;
   }
 
+  let targetStore:
+    | {
+        id: string;
+        name: string;
+        address: string | null;
+        phoneNumber: string | null;
+        logoName: string | null;
+        logoUrl: string | null;
+        currency: string;
+        supportedCurrencies: string;
+        vatEnabled: boolean;
+        vatRate: number;
+        vatMode: string;
+      }
+    | null = null;
+
+  try {
+    [targetStore] = await db
+      .select({
+        id: stores.id,
+        name: stores.name,
+        address: stores.address,
+        phoneNumber: stores.phoneNumber,
+        logoName: stores.logoName,
+        logoUrl: stores.logoUrl,
+        currency: stores.currency,
+        supportedCurrencies: stores.supportedCurrencies,
+        vatEnabled: stores.vatEnabled,
+        vatRate: stores.vatRate,
+        vatMode: stores.vatMode,
+      })
+      .from(stores)
+      .where(eq(stores.id, storeId))
+      .limit(1);
+  } catch {
+    return NextResponse.json(
+      { message: "ระบบยังไม่พร้อมสำหรับการตั้งค่า currency/VAT กรุณารันฐานข้อมูลล่าสุดก่อน" },
+      { status: 409 },
+    );
+  }
+
+  if (!targetStore) {
+    return NextResponse.json({ message: "ไม่พบข้อมูลร้านค้า" }, { status: 404 });
+  }
+
   if (payload.data.phoneNumber !== undefined) {
     const normalizedPhoneNumber = normalizeOptionalText(payload.data.phoneNumber);
     const phoneError = validatePhoneNumber(normalizedPhoneNumber);
@@ -273,21 +353,34 @@ async function patchByJsonBody(storeId: string, request: Request) {
     updateValues.phoneNumber = normalizedPhoneNumber;
   }
 
-  const [targetStore] = await db
-    .select({
-      id: stores.id,
-      name: stores.name,
-      address: stores.address,
-      phoneNumber: stores.phoneNumber,
-      logoName: stores.logoName,
-      logoUrl: stores.logoUrl,
-    })
-    .from(stores)
-    .where(eq(stores.id, storeId))
-    .limit(1);
+  const currentBaseCurrency = parseStoreCurrency(targetStore.currency);
+  const nextBaseCurrency =
+    payload.data.currency !== undefined
+      ? parseStoreCurrency(payload.data.currency, currentBaseCurrency)
+      : currentBaseCurrency;
+  const nextSupportedCurrencies = parseSupportedCurrencies(
+    payload.data.supportedCurrencies ?? targetStore.supportedCurrencies,
+    nextBaseCurrency,
+  );
 
-  if (!targetStore) {
-    return NextResponse.json({ message: "ไม่พบข้อมูลร้านค้า" }, { status: 404 });
+  if (
+    payload.data.currency !== undefined ||
+    payload.data.supportedCurrencies !== undefined
+  ) {
+    updateValues.currency = nextBaseCurrency;
+    updateValues.supportedCurrencies = serializeSupportedCurrencies(nextSupportedCurrencies);
+  }
+
+  if (payload.data.vatEnabled !== undefined) {
+    updateValues.vatEnabled = payload.data.vatEnabled;
+  }
+
+  if (payload.data.vatRate !== undefined) {
+    updateValues.vatRate = payload.data.vatRate;
+  }
+
+  if (payload.data.vatMode !== undefined) {
+    updateValues.vatMode = parseStoreVatMode(payload.data.vatMode);
   }
 
   await db.update(stores).set(updateValues).where(eq(stores.id, storeId));
@@ -300,6 +393,14 @@ async function patchByJsonBody(storeId: string, request: Request) {
       phoneNumber: updateValues.phoneNumber ?? targetStore.phoneNumber,
       logoName: targetStore.logoName,
       logoUrl: targetStore.logoUrl,
+      currency: updateValues.currency ?? currentBaseCurrency,
+      supportedCurrencies:
+        updateValues.supportedCurrencies !== undefined
+          ? nextSupportedCurrencies
+          : parseSupportedCurrencies(targetStore.supportedCurrencies, currentBaseCurrency),
+      vatEnabled: updateValues.vatEnabled ?? Boolean(targetStore.vatEnabled),
+      vatRate: updateValues.vatRate ?? targetStore.vatRate,
+      vatMode: updateValues.vatMode ?? parseStoreVatMode(targetStore.vatMode),
     },
   });
 }
@@ -307,6 +408,7 @@ async function patchByJsonBody(storeId: string, request: Request) {
 export async function GET() {
   try {
     const { storeId } = await enforcePermission("settings.view");
+    const financial = await getStoreFinancialConfig(storeId);
 
     const [store] = await db
       .select({
@@ -327,7 +429,14 @@ export async function GET() {
 
     return NextResponse.json({
       ok: true,
-      store,
+      store: {
+        ...store,
+        currency: financial?.currency ?? "LAK",
+        supportedCurrencies: financial?.supportedCurrencies ?? ["LAK"],
+        vatEnabled: financial?.vatEnabled ?? false,
+        vatRate: financial?.vatRate ?? 700,
+        vatMode: financial?.vatMode ?? "EXCLUSIVE",
+      },
     });
   } catch (error) {
     return toRBACErrorResponse(error);
@@ -336,14 +445,14 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   try {
-    const { storeId } = await enforcePermission("settings.update");
+    const { storeId, session } = await enforcePermission("settings.update");
     const contentType = request.headers.get("content-type") ?? "";
 
     if (contentType.includes("multipart/form-data")) {
       return patchByMultipartForm(storeId, request);
     }
 
-    return patchByJsonBody(storeId, request);
+    return patchByJsonBody(storeId, request, session.userId);
   } catch (error) {
     return toRBACErrorResponse(error);
   }

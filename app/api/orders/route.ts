@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db/client";
 import { orderItems, orders } from "@/lib/db/schema";
+import { parseStoreCurrency } from "@/lib/finance/store-financial";
+import { computeOrderTotals } from "@/lib/orders/totals";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { createOrderSchema } from "@/lib/orders/validation";
 import {
@@ -13,27 +15,6 @@ import {
 } from "@/lib/orders/queries";
 import { invalidateDashboardSummaryCache } from "@/server/services/dashboard.service";
 import { invalidateReportsOverviewCache } from "@/server/services/reports.service";
-
-const computeOrderTotals = (payload: {
-  subtotal: number;
-  discount: number;
-  vatEnabled: boolean;
-  vatRate: number;
-  shippingFeeCharged: number;
-}) => {
-  const discount = Math.min(payload.discount, payload.subtotal);
-  const taxable = Math.max(payload.subtotal - discount, 0);
-  const vatAmount = payload.vatEnabled
-    ? Math.round((taxable * payload.vatRate) / 10000)
-    : 0;
-  const total = taxable + vatAmount + payload.shippingFeeCharged;
-
-  return {
-    discount,
-    vatAmount,
-    total,
-  };
-};
 
 const invalidateOrderReadCaches = async (storeId: string) => {
   await Promise.all([
@@ -81,6 +62,9 @@ export async function POST(request: Request) {
 
     const productMap = new Map(catalog.products.map((item) => [item.productId, item]));
     const contactMap = new Map(catalog.contacts.map((item) => [item.id, item]));
+    const paymentAccountMap = new Map(
+      catalog.paymentAccounts.map((item) => [item.id, item]),
+    );
 
     const selectedContact = payload.contactId ? contactMap.get(payload.contactId) : null;
     if (payload.channel !== "WALK_IN" && payload.contactId && !selectedContact) {
@@ -117,11 +101,42 @@ export async function POST(request: Request) {
     }
 
     const subtotal = normalizedItems.reduce((sum, item) => sum + item.lineTotal, 0);
+    const selectedPaymentCurrency = parseStoreCurrency(
+      payload.paymentCurrency ?? catalog.storeCurrency,
+      parseStoreCurrency(catalog.storeCurrency),
+    );
+    const selectedPaymentMethod = payload.paymentMethod ?? "CASH";
+    if (!catalog.supportedCurrencies.includes(selectedPaymentCurrency)) {
+      return NextResponse.json(
+        { message: "ร้านนี้ยังไม่รองรับสกุลเงินที่เลือก" },
+        { status: 400 },
+      );
+    }
+    const selectedPaymentAccountId =
+      selectedPaymentMethod === "LAO_QR"
+        ? payload.paymentAccountId?.trim() || null
+        : null;
+    if (selectedPaymentMethod === "LAO_QR") {
+      if (!selectedPaymentAccountId) {
+        return NextResponse.json(
+          { message: "กรุณาเลือกบัญชี QR สำหรับออเดอร์นี้" },
+          { status: 400 },
+        );
+      }
+      if (!paymentAccountMap.has(selectedPaymentAccountId)) {
+        return NextResponse.json(
+          { message: "ไม่พบบัญชี QR ที่เลือกหรือบัญชีถูกปิดใช้งาน" },
+          { status: 400 },
+        );
+      }
+    }
+
     const totals = computeOrderTotals({
       subtotal,
       discount: payload.discount,
       vatEnabled: catalog.vatEnabled,
       vatRate: catalog.vatRate,
+      vatMode: catalog.vatMode,
       shippingFeeCharged: payload.shippingFeeCharged,
     });
 
@@ -159,6 +174,11 @@ export async function POST(request: Request) {
           vatAmount: totals.vatAmount,
           shippingFeeCharged: payload.shippingFeeCharged,
           total: totals.total,
+          paymentCurrency: selectedPaymentCurrency,
+          paymentMethod: selectedPaymentMethod,
+          paymentAccountId: selectedPaymentAccountId,
+          paymentSlipUrl: null,
+          paymentProofSubmittedAt: null,
           shippingCarrier: null,
           trackingNo: null,
           shippingCost: payload.shippingCost,

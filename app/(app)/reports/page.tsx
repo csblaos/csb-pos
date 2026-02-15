@@ -38,7 +38,7 @@ export default async function ReportsPage() {
     );
   }
 
-  const { salesSummary, topProducts, salesByChannel, grossProfit } =
+  const { storeCurrency, salesSummary, topProducts, salesByChannel, grossProfit } =
     await getReportsViewData({
       storeId: session.activeStoreId,
       topProductsLimit: 10,
@@ -55,20 +55,26 @@ export default async function ReportsPage() {
       <div className="grid grid-cols-2 gap-3">
         <article className="rounded-xl border bg-white p-4 shadow-sm">
           <p className="text-xs text-muted-foreground">ยอดขายวันนี้</p>
-          <p className="mt-1 text-xl font-semibold">{salesSummary.salesToday.toLocaleString("th-TH")}</p>
+          <p className="mt-1 text-xl font-semibold">
+            {salesSummary.salesToday.toLocaleString("th-TH")} {storeCurrency}
+          </p>
         </article>
         <article className="rounded-xl border bg-white p-4 shadow-sm">
           <p className="text-xs text-muted-foreground">ยอดขายเดือนนี้</p>
-          <p className="mt-1 text-xl font-semibold">{salesSummary.salesThisMonth.toLocaleString("th-TH")}</p>
+          <p className="mt-1 text-xl font-semibold">
+            {salesSummary.salesThisMonth.toLocaleString("th-TH")} {storeCurrency}
+          </p>
         </article>
       </div>
 
       <article className="space-y-2 rounded-xl border bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold">กำไรขั้นต้น</h2>
-        <p className="text-sm">รายรับ: {grossProfit.revenue.toLocaleString("th-TH")}</p>
-        <p className="text-sm">ต้นทุนสินค้า: {grossProfit.cogs.toLocaleString("th-TH")}</p>
-        <p className="text-sm">ต้นทุนค่าส่ง: {grossProfit.shippingCost.toLocaleString("th-TH")}</p>
-        <p className="text-sm font-semibold">กำไรขั้นต้น: {grossProfit.grossProfit.toLocaleString("th-TH")}</p>
+        <p className="text-sm">รายรับ: {grossProfit.revenue.toLocaleString("th-TH")} {storeCurrency}</p>
+        <p className="text-sm">ต้นทุนสินค้า: {grossProfit.cogs.toLocaleString("th-TH")} {storeCurrency}</p>
+        <p className="text-sm">ต้นทุนค่าส่ง: {grossProfit.shippingCost.toLocaleString("th-TH")} {storeCurrency}</p>
+        <p className="text-sm font-semibold">
+          กำไรขั้นต้น: {grossProfit.grossProfit.toLocaleString("th-TH")} {storeCurrency}
+        </p>
       </article>
 
       <article className="space-y-2 rounded-xl border bg-white p-4 shadow-sm">
@@ -79,7 +85,7 @@ export default async function ReportsPage() {
           ) : (
             salesByChannel.map((row) => (
               <p key={row.channel}>
-                {channelLabel[row.channel]}: {row.salesTotal.toLocaleString("th-TH")} ({row.orderCount.toLocaleString("th-TH")} ออเดอร์)
+                {channelLabel[row.channel]}: {row.salesTotal.toLocaleString("th-TH")} {storeCurrency} ({row.orderCount.toLocaleString("th-TH")} ออเดอร์)
               </p>
             ))
           )}
@@ -96,7 +102,7 @@ export default async function ReportsPage() {
               <div key={item.productId} className="rounded-lg border p-2 text-sm">
                 <p className="font-medium">{item.sku} - {item.name}</p>
                 <p className="text-xs text-muted-foreground">
-                  ขาย {item.qtyBaseSold.toLocaleString("th-TH")} หน่วยฐาน • รายได้ {item.revenue.toLocaleString("th-TH")} • ต้นทุน {item.cogs.toLocaleString("th-TH")}
+                  ขาย {item.qtyBaseSold.toLocaleString("th-TH")} หน่วยฐาน • รายได้ {item.revenue.toLocaleString("th-TH")} {storeCurrency} • ต้นทุน {item.cogs.toLocaleString("th-TH")} {storeCurrency}
                 </p>
               </div>
             ))

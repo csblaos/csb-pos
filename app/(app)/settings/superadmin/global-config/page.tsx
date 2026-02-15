@@ -3,12 +3,17 @@ import { and, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { ChevronRight, Gauge, Settings2, ShieldCheck, Store } from "lucide-react";
 import { redirect } from "next/navigation";
 
+import { SuperadminPaymentPolicyConfig } from "@/components/app/superadmin-payment-policy-config";
 import { getSession } from "@/lib/auth/session";
 import { listActiveMemberships } from "@/lib/auth/session-db";
 import { getGlobalBranchPolicy } from "@/lib/branches/policy";
 import { db } from "@/lib/db/client";
 import { storeMembers, stores, users } from "@/lib/db/schema";
-import { getGlobalSessionPolicy, getGlobalStoreLogoPolicy } from "@/lib/system-config/policy";
+import {
+  getGlobalPaymentPolicy,
+  getGlobalSessionPolicy,
+  getGlobalStoreLogoPolicy,
+} from "@/lib/system-config/policy";
 
 export default async function SettingsSuperadminGlobalConfigPage() {
   const session = await getSession();
@@ -26,6 +31,7 @@ export default async function SettingsSuperadminGlobalConfigPage() {
   const [
     globalBranchPolicy,
     globalSessionPolicy,
+    globalPaymentPolicy,
     globalStoreLogoPolicy,
     storeOverrideCountRows,
     superadminOverrideCountRows,
@@ -34,6 +40,7 @@ export default async function SettingsSuperadminGlobalConfigPage() {
   ] = await Promise.all([
     getGlobalBranchPolicy(),
     getGlobalSessionPolicy(),
+    getGlobalPaymentPolicy(),
     getGlobalStoreLogoPolicy(),
     db
       .select({ value: sql<number>`count(*)` })
@@ -170,6 +177,15 @@ export default async function SettingsSuperadminGlobalConfigPage() {
             </span>
           </li>
           <li className="px-4 py-3 text-sm text-slate-700">
+            Payment Account Policy:{" "}
+            <span className="font-medium">
+              สูงสุด {globalPaymentPolicy.maxAccountsPerStore.toLocaleString("th-TH")} บัญชี/ร้าน •{" "}
+              {globalPaymentPolicy.requireSlipForLaoQr
+                ? "บังคับแนบสลิป QR"
+                : "ไม่บังคับแนบสลิป QR"}
+            </span>
+          </li>
+          <li className="px-4 py-3 text-sm text-slate-700">
             Store Logo Upload:{" "}
             <span className="font-medium">
               สูงสุด {globalStoreLogoPolicy.maxSizeMb.toLocaleString("th-TH")} MB • Auto resize{" "}
@@ -179,6 +195,8 @@ export default async function SettingsSuperadminGlobalConfigPage() {
           </li>
         </ul>
       </article>
+
+      <SuperadminPaymentPolicyConfig initialConfig={globalPaymentPolicy} />
 
       <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-4 py-3">

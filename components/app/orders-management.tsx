@@ -14,12 +14,15 @@ import { zodResolver } from "@hookform/resolvers/zod";
 
 import { Button } from "@/components/ui/button";
 import { authFetch } from "@/lib/auth/client-token";
+import { currencyLabel, parseStoreCurrency, vatModeLabel } from "@/lib/finance/store-financial";
+import { resolveLaosBankDisplayName } from "@/lib/payments/laos-banks";
 import type {
   OrderCatalog,
   OrderListItem,
   OrderListTab,
   PaginatedOrderList,
 } from "@/lib/orders/queries";
+import { computeOrderTotals } from "@/lib/orders/totals";
 import {
   createOrderSchema,
   type CreateOrderFormInput,
@@ -75,6 +78,9 @@ const defaultValues = (catalog: OrderCatalog): CreateOrderFormInput => ({
   discount: 0,
   shippingFeeCharged: 0,
   shippingCost: 0,
+  paymentCurrency: catalog.storeCurrency as "LAK" | "THB" | "USD",
+  paymentMethod: "CASH",
+  paymentAccountId: "",
   items:
     catalog.products.length > 0
       ? [
@@ -115,6 +121,16 @@ export function OrdersManagement({
   const watchedItems = useMemo(() => watchedItemsRaw ?? [], [watchedItemsRaw]);
   const watchedDiscount = Number(form.watch("discount") ?? 0);
   const watchedShippingFeeCharged = Number(form.watch("shippingFeeCharged") ?? 0);
+  const watchedPaymentCurrency = form.watch("paymentCurrency") ?? catalog.storeCurrency;
+  const watchedPaymentMethod = form.watch("paymentMethod") ?? "CASH";
+  const selectedPaymentCurrency = parseStoreCurrency(
+    watchedPaymentCurrency,
+    parseStoreCurrency(catalog.storeCurrency),
+  );
+  const qrPaymentAccounts = useMemo(
+    () => catalog.paymentAccounts.filter((account) => account.accountType === "LAO_QR"),
+    [catalog.paymentAccounts],
+  );
 
   const productsById = useMemo(
     () => new Map(catalog.products.map((product) => [product.productId, product])),
@@ -145,10 +161,14 @@ export function OrdersManagement({
     }, 0);
   }, [productsById, watchedItems]);
 
-  const discount = Math.max(0, Math.min(watchedDiscount, subtotal));
-  const taxable = Math.max(subtotal - discount, 0);
-  const vatAmount = catalog.vatEnabled ? Math.round((taxable * catalog.vatRate) / 10000) : 0;
-  const total = taxable + vatAmount + Math.max(0, watchedShippingFeeCharged);
+  const totals = computeOrderTotals({
+    subtotal,
+    discount: watchedDiscount,
+    vatEnabled: catalog.vatEnabled,
+    vatRate: catalog.vatRate,
+    vatMode: catalog.vatMode,
+    shippingFeeCharged: Math.max(0, watchedShippingFeeCharged),
+  });
 
   const onChangeProduct = (index: number, productId: string) => {
     const product = productsById.get(productId);
@@ -210,7 +230,10 @@ export function OrdersManagement({
       {
         accessorKey: "total",
         header: "ยอดรวม",
-        cell: ({ row }) => `${row.original.total.toLocaleString("th-TH")} ${catalog.storeCurrency}`,
+        cell: ({ row }) =>
+          `${row.original.total.toLocaleString("th-TH")} ${catalog.storeCurrency} • จ่าย ${row.original.paymentCurrency} • ${
+            row.original.paymentMethod === "LAO_QR" ? "QR โอน" : "เงินสด"
+          }`,
       },
     ],
     [catalog.storeCurrency],
@@ -510,11 +533,100 @@ export function OrdersManagement({
               </div>
             </div>
 
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground" htmlFor="payment-method">
+                วิธีรับชำระ
+              </label>
+              <select
+                id="payment-method"
+                className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+                disabled={loading}
+                value={watchedPaymentMethod}
+                onChange={(event) => {
+                  const nextMethod = event.target.value === "LAO_QR" ? "LAO_QR" : "CASH";
+                  form.setValue("paymentMethod", nextMethod, { shouldValidate: true });
+                  if (nextMethod === "LAO_QR") {
+                    const defaultQrAccount = qrPaymentAccounts[0]?.id ?? "";
+                    form.setValue("paymentAccountId", defaultQrAccount, { shouldValidate: true });
+                  } else {
+                    form.setValue("paymentAccountId", "", { shouldValidate: true });
+                  }
+                }}
+              >
+                <option value="CASH">เงินสด</option>
+                <option value="LAO_QR">QR โอนเงิน (ลาว)</option>
+              </select>
+            </div>
+
+            {watchedPaymentMethod === "LAO_QR" ? (
+              <div className="space-y-2">
+                <label className="text-xs text-muted-foreground" htmlFor="payment-account">
+                  บัญชี QR ที่ใช้รับเงิน
+                </label>
+                <select
+                  id="payment-account"
+                  className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+                  disabled={loading}
+                  value={form.watch("paymentAccountId") ?? ""}
+                  onChange={(event) =>
+                    form.setValue("paymentAccountId", event.target.value, { shouldValidate: true })
+                  }
+                >
+                  <option value="">เลือกบัญชี QR</option>
+                  {qrPaymentAccounts.map((account) => (
+                  <option key={account.id} value={account.id}>
+                      {account.displayName} ({resolveLaosBankDisplayName(account.bankName)})
+                  </option>
+                ))}
+                </select>
+                <p className="text-xs text-red-600">
+                  {form.formState.errors.paymentAccountId?.message}
+                </p>
+                <p className="text-xs text-slate-500">
+                  {catalog.requireSlipForLaoQr
+                    ? "นโยบายร้าน: ต้องแนบสลิปก่อนยืนยันชำระ"
+                    : "นโยบายร้าน: ไม่บังคับแนบสลิป"}
+                </p>
+              </div>
+            ) : null}
+
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground" htmlFor="payment-currency">
+                สกุลที่รับชำระในออเดอร์นี้
+              </label>
+              <select
+                id="payment-currency"
+                className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+                disabled={loading}
+                {...form.register("paymentCurrency")}
+              >
+                {catalog.supportedCurrencies.map((currency) => (
+                  <option key={currency} value={currency}>
+                    {currencyLabel(currency)}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-500">
+                Base currency: {catalog.storeCurrency} • รองรับ {catalog.supportedCurrencies.join(", ")}
+              </p>
+            </div>
+
             <div className="rounded-lg bg-slate-50 p-3 text-sm">
               <p>ยอดสินค้า: {subtotal.toLocaleString("th-TH")} {catalog.storeCurrency}</p>
-              <p>ส่วนลด: {discount.toLocaleString("th-TH")} {catalog.storeCurrency}</p>
-              <p>VAT: {vatAmount.toLocaleString("th-TH")} {catalog.storeCurrency}</p>
-              <p className="font-semibold">ยอดรวม: {total.toLocaleString("th-TH")} {catalog.storeCurrency}</p>
+              <p>ส่วนลด: {totals.discount.toLocaleString("th-TH")} {catalog.storeCurrency}</p>
+              <p>
+                VAT ({vatModeLabel(catalog.vatMode)}): {totals.vatAmount.toLocaleString("th-TH")}{" "}
+                {catalog.storeCurrency}
+              </p>
+              <p className="font-semibold">
+                ยอดรวม: {totals.total.toLocaleString("th-TH")} {catalog.storeCurrency}
+              </p>
+              <p className="text-xs text-slate-500">
+                สกุลชำระที่เลือก: {currencyLabel(selectedPaymentCurrency)}
+              </p>
+              <p className="text-xs text-slate-500">
+                วิธีชำระ: {watchedPaymentMethod === "LAO_QR" ? "QR โอนเงิน" : "เงินสด"}
+              </p>
             </div>
 
             <Button type="submit" className="h-10 w-full" disabled={loading || !canCreate}>
@@ -545,7 +657,8 @@ export function OrdersManagement({
                         {order.customerName || order.contactDisplayName || "ลูกค้าทั่วไป"}
                       </h3>
                       <p className="text-xs text-muted-foreground">
-                        ช่องทาง {channelLabel[order.channel]}
+                        ช่องทาง {channelLabel[order.channel]} • จ่าย {order.paymentCurrency} •{" "}
+                        {order.paymentMethod === "LAO_QR" ? "QR โอน" : "เงินสด"}
                       </p>
                     </div>
                     <span className={`rounded-full px-2 py-1 text-xs ${statusClass[order.status]}`}>

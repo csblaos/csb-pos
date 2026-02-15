@@ -1,13 +1,17 @@
 import Link from "next/link";
 import { eq } from "drizzle-orm";
 import {
+  Bell,
   CheckCircle2,
   ChevronRight,
+  Lock,
   PlugZap,
   Settings2,
   Shield,
   Store,
+  UserRound,
   Users,
+  WalletCards,
   type LucideIcon,
 } from "lucide-react";
 
@@ -44,6 +48,7 @@ type SettingsLinkItem = {
   description: string;
   icon: LucideIcon;
   visible: boolean;
+  badgeText?: string;
 };
 
 function ChannelStatusPill({ status }: { status: ChannelStatus }) {
@@ -68,6 +73,7 @@ function SettingsLinkRow({
   title,
   description,
   icon: Icon,
+  badgeText,
 }: Omit<SettingsLinkItem, "id" | "visible">) {
   return (
     <Link
@@ -81,6 +87,11 @@ function SettingsLinkRow({
         <span className="block truncate text-sm font-medium text-slate-900">{title}</span>
         <span className="mt-0.5 block truncate text-xs text-slate-500">{description}</span>
       </span>
+      {badgeText ? (
+        <span className="inline-flex shrink-0 items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-blue-700">
+          {badgeText}
+        </span>
+      ) : null}
       <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
     </Link>
   );
@@ -156,7 +167,7 @@ export default async function SettingsPage() {
   const fbStatus: ChannelStatus = fbConnection?.status ?? "DISCONNECTED";
   const waStatus: ChannelStatus = waConnection?.status ?? "DISCONNECTED";
 
-  const settingsLinks: SettingsLinkItem[] = [
+  const managementLinks: SettingsLinkItem[] = [
     {
       id: "store-profile",
       href: "/settings/store",
@@ -174,12 +185,12 @@ export default async function SettingsPage() {
       visible: true,
     },
     {
-      id: "superadmin-stores",
-      href: "/settings/superadmin",
-      title: "Superadmin Center",
-      description: "จัดการร้าน สาขา และผู้ใช้ข้ามร้านในพื้นที่แยก",
-      icon: Shield,
-      visible: isSuperadmin,
+      id: "payment-accounts",
+      href: "/settings/store/payments",
+      title: "บัญชีรับเงิน",
+      description: "จัดการบัญชีธนาคารและ QR โอนเงินของร้าน",
+      icon: WalletCards,
+      visible: true,
     },
     {
       id: "users",
@@ -198,14 +209,6 @@ export default async function SettingsPage() {
       visible: canViewRoles,
     },
     {
-      id: "account-permissions",
-      href: "/settings/permissions",
-      title: "สิทธิ์ของบัญชี",
-      description: `ใช้งานได้ ${grantedCapabilitiesCount} รายการ`,
-      icon: CheckCircle2,
-      visible: true,
-    },
-    {
       id: "units",
       href: "/settings/units",
       title: "หน่วยสินค้า",
@@ -220,6 +223,53 @@ export default async function SettingsPage() {
       description: "ดูภาพรวมยอดขายและแนวโน้ม",
       icon: PlugZap,
       visible: canViewReports,
+    },
+  ];
+
+  const accountLinks: SettingsLinkItem[] = [
+    {
+      id: "account-profile",
+      href: "/settings/profile",
+      title: "โปรไฟล์บัญชี",
+      description: "แก้ไขชื่อผู้ใช้และตรวจสอบข้อมูลล็อกอิน",
+      icon: UserRound,
+      visible: true,
+    },
+    {
+      id: "account-permissions",
+      href: "/settings/permissions",
+      title: "สิทธิ์ของบัญชี",
+      description: `ใช้งานได้ ${grantedCapabilitiesCount} รายการ`,
+      icon: CheckCircle2,
+      visible: true,
+    },
+    {
+      id: "account-security",
+      href: "/settings/security",
+      title: "ความปลอดภัยบัญชี",
+      description: "จัดการความปลอดภัยและออกจากระบบ",
+      icon: Lock,
+      visible: true,
+    },
+    {
+      id: "account-notifications",
+      href: "/settings/notifications",
+      title: "การแจ้งเตือน",
+      description: "ตั้งค่าช่องทางและประเภทการแจ้งเตือน",
+      icon: Bell,
+      visible: true,
+    },
+  ];
+
+  const adminLinks: SettingsLinkItem[] = [
+    {
+      id: "superadmin-stores",
+      href: "/settings/superadmin",
+      title: "Superadmin Center",
+      description: "จัดการร้าน สาขา และผู้ใช้ข้ามร้านในพื้นที่แยก",
+      icon: Shield,
+      visible: isSuperadmin,
+      badgeText: "SUPERADMIN",
     },
   ];
 
@@ -291,7 +341,7 @@ export default async function SettingsPage() {
           </p>
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <ul className="divide-y divide-slate-100">
-              {settingsLinks
+              {managementLinks
                 .filter((item) => item.visible)
                 .map((item) => (
                   <li key={item.id}>
@@ -306,6 +356,54 @@ export default async function SettingsPage() {
             </ul>
           </div>
         </div>
+
+        <div className="space-y-2">
+          <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+            บัญชีของฉัน
+          </p>
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <ul className="divide-y divide-slate-100">
+              {accountLinks
+                .filter((item) => item.visible)
+                .map((item) => (
+                  <li key={item.id}>
+                    <SettingsLinkRow
+                      href={item.href}
+                      title={item.title}
+                      description={item.description}
+                      icon={item.icon}
+                      badgeText={item.badgeText}
+                    />
+                  </li>
+                ))}
+            </ul>
+          </div>
+        </div>
+
+        {adminLinks.some((item) => item.visible) ? (
+          <div className="space-y-2">
+            <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+              พื้นที่ผู้ดูแล
+            </p>
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <ul className="divide-y divide-slate-100">
+                {adminLinks
+                  .filter((item) => item.visible)
+                  .map((item) => (
+                    <li key={item.id}>
+                      <SettingsLinkRow
+                        href={item.href}
+                        title={item.title}
+                        description={item.description}
+                        icon={item.icon}
+                        badgeText={item.badgeText}
+                      />
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          </div>
+        ) : null}
 
         <div className="space-y-2">
           <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">

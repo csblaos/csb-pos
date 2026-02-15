@@ -1,6 +1,10 @@
 import "server-only";
 
+import { eq } from "drizzle-orm";
+
 import { redisDelete, redisGetJson, redisSetJson } from "@/lib/cache/redis";
+import { db } from "@/lib/db/client";
+import { stores } from "@/lib/db/schema";
 import {
   getGrossProfitSummary,
   getSalesByChannel,
@@ -20,6 +24,7 @@ const reportsOverviewCacheKey = (storeId: string, topProductsLimit: number) => {
 };
 
 export type ReportsViewData = {
+  storeCurrency: string;
   salesSummary: SalesSummary;
   topProducts: TopProductRow[];
   salesByChannel: SalesByChannelRow[];
@@ -49,14 +54,21 @@ export async function getReportsViewData(params: {
     }
   }
 
-  const [salesSummary, topProducts, salesByChannel, grossProfit] = await Promise.all([
+  const [salesSummary, topProducts, salesByChannel, grossProfit, storeRow] = await Promise.all([
     getSalesSummary(params.storeId),
     getTopProducts(params.storeId, topProductsLimit),
     getSalesByChannel(params.storeId),
     getGrossProfitSummary(params.storeId),
+    db
+      .select({ currency: stores.currency })
+      .from(stores)
+      .where(eq(stores.id, params.storeId))
+      .limit(1)
+      .then((rows) => rows[0] ?? null),
   ]);
 
   const response: ReportsViewData = {
+    storeCurrency: storeRow?.currency ?? "LAK",
     salesSummary,
     topProducts,
     salesByChannel,

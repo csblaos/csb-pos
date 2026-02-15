@@ -10,7 +10,11 @@ import {
 import { getGlobalBranchPolicy } from "@/lib/branches/policy";
 import { db } from "@/lib/db/client";
 import { fbConnections, orders, storeBranches, storeMembers, waConnections } from "@/lib/db/schema";
-import { getGlobalSessionPolicy, getGlobalStoreLogoPolicy } from "@/lib/system-config/policy";
+import {
+  getGlobalPaymentPolicy,
+  getGlobalSessionPolicy,
+  getGlobalStoreLogoPolicy,
+} from "@/lib/system-config/policy";
 
 const paidStatuses: Array<"PAID" | "PACKED" | "SHIPPED"> = ["PAID", "PACKED", "SHIPPED"];
 
@@ -33,6 +37,10 @@ export type SuperadminHomeSnapshot = {
     autoResize: boolean;
     resizeMaxWidth: number;
   };
+  globalPaymentPolicy: {
+    maxAccountsPerStore: number;
+    requireSlipForLaoQr: boolean;
+  };
 };
 
 async function getSuperadminHomeSnapshotUncached(
@@ -49,6 +57,7 @@ async function getSuperadminHomeSnapshotUncached(
     storePolicy,
     globalBranchPolicy,
     globalSessionPolicy,
+    globalPaymentPolicy,
     globalStoreLogoPolicy,
   ] = await Promise.all([
     db
@@ -97,6 +106,7 @@ async function getSuperadminHomeSnapshotUncached(
     getStoreCreationPolicy(userId),
     getGlobalBranchPolicy(),
     getGlobalSessionPolicy(),
+    getGlobalPaymentPolicy(),
     getGlobalStoreLogoPolicy(),
   ]);
 
@@ -170,6 +180,7 @@ async function getSuperadminHomeSnapshotUncached(
     globalBranchDefaultCanCreate: globalBranchPolicy.defaultCanCreateBranches,
     globalBranchDefaultMax: globalBranchPolicy.defaultMaxBranchesPerStore,
     globalStoreLogoPolicy,
+    globalPaymentPolicy,
   };
 }
 

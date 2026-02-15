@@ -21,6 +21,7 @@ import {
 } from "@/lib/orders/queries";
 import { updateOrderSchema } from "@/lib/orders/validation";
 import { getInventoryBalancesByStore } from "@/lib/inventory/queries";
+import { getGlobalPaymentPolicy } from "@/lib/system-config/policy";
 import { invalidateDashboardSummaryCache } from "@/server/services/dashboard.service";
 import { invalidateReportsOverviewCache } from "@/server/services/reports.service";
 import { invalidateStockOverviewCache } from "@/server/services/stock.service";
@@ -32,13 +33,18 @@ const ensureActionPermission = async (
   storeId: string,
   action:
     | "submit_for_payment"
+    | "submit_payment_slip"
     | "confirm_paid"
     | "mark_packed"
     | "mark_shipped"
     | "cancel"
     | "update_shipping",
 ) => {
-  if (action === "submit_for_payment" || action === "update_shipping") {
+  if (
+    action === "submit_for_payment" ||
+    action === "update_shipping" ||
+    action === "submit_payment_slip"
+  ) {
     const allowed = await hasPermission({ userId }, storeId, "orders.update");
     if (!allowed) {
       throw new RBACError(403, "ไม่มีสิทธิ์แก้ไขออเดอร์");
@@ -108,6 +114,7 @@ export async function GET(
     const message = buildOrderMessageTemplate({
       orderNo: order.orderNo,
       total: order.total,
+      currency: order.paymentCurrency,
       customerName: order.customerName ?? order.contactDisplayName,
     });
 
@@ -237,9 +244,40 @@ export async function PATCH(
       return NextResponse.json({ ok: true });
     }
 
+    if (payload.data.action === "submit_payment_slip") {
+      if (order.status !== "PENDING_PAYMENT") {
+        return NextResponse.json({ message: "ออเดอร์นี้ยังไม่อยู่ในสถานะรอชำระ" }, { status: 400 });
+      }
+
+      if (order.paymentMethod !== "LAO_QR") {
+        return NextResponse.json({ message: "ออเดอร์นี้ไม่ได้ชำระผ่าน QR" }, { status: 400 });
+      }
+
+      await db
+        .update(orders)
+        .set({
+          paymentSlipUrl: payload.data.paymentSlipUrl.trim(),
+          paymentProofSubmittedAt: nowIso(),
+        })
+        .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
+
+      await invalidateOrderCaches(storeId);
+      return NextResponse.json({ ok: true });
+    }
+
     if (payload.data.action === "confirm_paid") {
       if (order.status !== "PENDING_PAYMENT") {
         return NextResponse.json({ message: "ออเดอร์นี้ยังไม่พร้อมยืนยันชำระ" }, { status: 400 });
+      }
+
+      if (order.paymentMethod === "LAO_QR") {
+        const paymentPolicy = await getGlobalPaymentPolicy();
+        if (paymentPolicy.requireSlipForLaoQr && !order.paymentSlipUrl) {
+          return NextResponse.json(
+            { message: "ต้องแนบสลิปก่อนยืนยันชำระสำหรับออเดอร์ QR" },
+            { status: 400 },
+          );
+        }
       }
 
       if (orderItems.length > 0) {

@@ -32,6 +32,16 @@ import {
 import { ensurePermissionCatalog } from "@/lib/rbac/catalog";
 import { isR2Configured, uploadStoreLogoToR2 } from "@/lib/storage/r2";
 import { getGlobalStoreLogoPolicy } from "@/lib/system-config/policy";
+import {
+  defaultStoreVatMode,
+  parseSupportedCurrencies,
+  parseStoreCurrency,
+  parseStoreVatMode,
+  storeCurrencyValues,
+  storeVatModeValues,
+  type StoreCurrency,
+  type StoreVatMode,
+} from "@/lib/finance/store-financial";
 
 const storeTypeSchema = z.enum(["ONLINE_RETAIL", "RESTAURANT", "CAFE", "OTHER"]);
 
@@ -47,9 +57,11 @@ const createStoreJsonSchema = z.object({
     .max(20)
     .regex(/^[0-9+\-\s()]+$/)
     .optional(),
-  currency: z.enum(["LAK", "THB", "USD"]).optional(),
+  currency: z.enum(storeCurrencyValues).optional(),
+  supportedCurrencies: z.array(z.enum(storeCurrencyValues)).min(1).max(3).optional(),
   vatEnabled: z.boolean().optional(),
   vatRate: z.number().int().min(0).max(10000).optional(),
+  vatMode: z.enum(storeVatModeValues).optional(),
 });
 
 const createStoreMultipartSchema = z.object({
@@ -71,9 +83,11 @@ type CreateStoreInput = {
   logoName: string | null;
   address: string | null;
   phoneNumber: string | null;
-  currency: "LAK" | "THB" | "USD";
+  currency: StoreCurrency;
+  supportedCurrencies: StoreCurrency[];
   vatEnabled: boolean;
   vatRate: number;
+  vatMode: StoreVatMode;
   logoFile: File | null;
 };
 
@@ -136,8 +150,10 @@ async function parseCreateStoreInput(request: Request) {
         phoneNumber: payload.data.phoneNumber,
         // ค่าเริ่มต้นตาม requirement: ยังไม่ตั้งค่า currency/vat ใน onboarding
         currency: "LAK" as const,
+        supportedCurrencies: ["LAK"],
         vatEnabled: false,
         vatRate: 700,
+        vatMode: "EXCLUSIVE",
         logoFile,
       } satisfies CreateStoreInput,
     };
@@ -160,9 +176,14 @@ async function parseCreateStoreInput(request: Request) {
       logoName: normalizeOptionalText(payload.data.logoName),
       address: normalizeOptionalText(payload.data.address),
       phoneNumber: normalizeOptionalText(payload.data.phoneNumber),
-      currency: payload.data.currency ?? "LAK",
+      currency: parseStoreCurrency(payload.data.currency),
+      supportedCurrencies: parseSupportedCurrencies(
+        payload.data.supportedCurrencies,
+        parseStoreCurrency(payload.data.currency),
+      ),
       vatEnabled: payload.data.vatEnabled ?? false,
       vatRate: payload.data.vatRate ?? 700,
+      vatMode: parseStoreVatMode(payload.data.vatMode, defaultStoreVatMode),
       logoFile: null,
     } satisfies CreateStoreInput,
   };
@@ -272,8 +293,10 @@ export async function POST(request: Request) {
       phoneNumber: input.phoneNumber,
       storeType: payload.data.storeType,
       currency: input.currency,
+      supportedCurrencies: JSON.stringify(input.supportedCurrencies),
       vatEnabled: input.vatEnabled,
       vatRate: input.vatRate,
+      vatMode: input.vatMode,
     });
 
     await tx.insert(roles).values(

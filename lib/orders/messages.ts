@@ -16,14 +16,16 @@ export const isWithin24Hours = (lastInboundAt?: string | null) => {
 export const buildOrderMessageTemplate = (payload: {
   orderNo: string;
   total: number;
+  currency?: string;
   customerName?: string | null;
 }) => {
   const customerLabel = payload.customerName?.trim() || "ลูกค้า";
+  const currencyLabel = payload.currency?.trim() || "LAK";
 
   return [
     `เรียน ${customerLabel}`,
     `ออเดอร์เลขที่ ${payload.orderNo}`,
-    `ยอดชำระทั้งหมด ${payload.total.toLocaleString("th-TH")} บาท`,
+    `ยอดชำระทั้งหมด ${payload.total.toLocaleString("th-TH")} ${currencyLabel}`,
     "สามารถแจ้งชำระเงินกลับมาได้ที่แชทนี้",
     "ขอบคุณที่ใช้บริการค่ะ",
   ].join("\n");

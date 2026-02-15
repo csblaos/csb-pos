@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 export const orderChannelSchema = z.enum(["WALK_IN", "FACEBOOK", "WHATSAPP"]);
+export const orderPaymentCurrencySchema = z.enum(["LAK", "THB", "USD"]);
+export const orderPaymentMethodSchema = z.enum(["CASH", "LAO_QR"]);
 
 export const createOrderItemSchema = z.object({
   productId: z.string().min(1, "กรุณาเลือกสินค้า"),
@@ -30,6 +32,9 @@ export const createOrderSchema = z
       .number({ message: "กรอกต้นทุนค่าส่งให้ถูกต้อง" })
       .int("ต้นทุนค่าส่งต้องเป็นจำนวนเต็ม")
       .min(0, "ต้นทุนค่าส่งต้องไม่ติดลบ"),
+    paymentCurrency: orderPaymentCurrencySchema.optional(),
+    paymentMethod: orderPaymentMethodSchema.optional(),
+    paymentAccountId: z.string().trim().optional().or(z.literal("")),
     items: z.array(createOrderItemSchema).min(1, "กรุณาเพิ่มสินค้าอย่างน้อย 1 รายการ").max(100),
   })
   .superRefine((payload, ctx) => {
@@ -40,11 +45,23 @@ export const createOrderSchema = z
         message: "กรุณาเลือกลูกค้าจากช่องทางที่เลือก",
       });
     }
+
+    if (payload.paymentMethod === "LAO_QR" && !payload.paymentAccountId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["paymentAccountId"],
+        message: "กรุณาเลือกบัญชี QR สำหรับออเดอร์นี้",
+      });
+    }
   });
 
 export const updateOrderSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("submit_for_payment") }),
   z.object({ action: z.literal("confirm_paid") }),
+  z.object({
+    action: z.literal("submit_payment_slip"),
+    paymentSlipUrl: z.string().trim().url("ลิงก์สลิปไม่ถูกต้อง"),
+  }),
   z.object({ action: z.literal("mark_packed") }),
   z.object({ action: z.literal("mark_shipped") }),
   z.object({ action: z.literal("cancel") }),

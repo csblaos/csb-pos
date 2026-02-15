@@ -5,12 +5,13 @@ import { z } from "zod";
 import { enforceSystemAdminSession, toSystemAdminErrorResponse } from "@/lib/auth/system-admin";
 import { db } from "@/lib/db/client";
 import { stores } from "@/lib/db/schema";
+import { storeCurrencyValues } from "@/lib/finance/store-financial";
 
 const updateStoreConfigSchema = z
   .object({
     name: z.string().trim().min(2).max(120).optional(),
     storeType: z.enum(["ONLINE_RETAIL", "RESTAURANT", "CAFE", "OTHER"]).optional(),
-    currency: z.string().trim().min(2).max(12).optional(),
+    currency: z.enum(storeCurrencyValues).optional(),
     vatEnabled: z.boolean().optional(),
     vatRate: z.number().int().min(0).max(10000).optional(),
     maxBranchesOverride: z.number().int().min(0).max(500).nullable().optional(),

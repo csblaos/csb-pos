@@ -1,11 +1,14 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { currencyLabel, vatModeLabel } from "@/lib/finance/store-financial";
 import type { OrderDetail } from "@/lib/orders/queries";
+import { maskAccountValue } from "@/lib/payments/store-payment";
 
 type MessagingInfo = {
   within24h: boolean;
@@ -54,11 +57,14 @@ export function OrderDetailView({
   const [shippingCarrier, setShippingCarrier] = useState(order.shippingCarrier ?? "");
   const [trackingNo, setTrackingNo] = useState(order.trackingNo ?? "");
   const [shippingCost, setShippingCost] = useState(String(order.shippingCost));
+  const [paymentSlipUrl, setPaymentSlipUrl] = useState(order.paymentSlipUrl ?? "");
   const [messageText, setMessageText] = useState(messaging.template);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const canConfirmPaid = canMarkPaid && order.status === "PENDING_PAYMENT";
+  const canSubmitSlip =
+    canUpdate && order.status === "PENDING_PAYMENT" && order.paymentMethod === "LAO_QR";
   const canMarkPacked = canPack && order.status === "PAID";
   const canMarkShipped = canShip && order.status === "PACKED";
   const canOrderCancel =
@@ -202,11 +208,80 @@ export function OrderDetailView({
         <div className="rounded-lg bg-slate-50 p-3 text-sm">
           <p>ยอดสินค้า: {order.subtotal.toLocaleString("th-TH")} {order.storeCurrency}</p>
           <p>ส่วนลด: {order.discount.toLocaleString("th-TH")} {order.storeCurrency}</p>
-          <p>VAT: {order.vatAmount.toLocaleString("th-TH")} {order.storeCurrency}</p>
+          <p>
+            VAT ({vatModeLabel(order.storeVatMode)}): {order.vatAmount.toLocaleString("th-TH")}{" "}
+            {order.storeCurrency}
+          </p>
           <p>ค่าส่งที่เรียกเก็บ: {order.shippingFeeCharged.toLocaleString("th-TH")} {order.storeCurrency}</p>
           <p className="font-semibold">ยอดรวม: {order.total.toLocaleString("th-TH")} {order.storeCurrency}</p>
+          <p className="text-xs text-slate-500">
+            สกุลชำระที่เลือก: {currencyLabel(order.paymentCurrency)}
+          </p>
+          <p className="text-xs text-slate-500">
+            วิธีชำระ: {order.paymentMethod === "LAO_QR" ? "QR โอนเงิน" : "เงินสด"}
+          </p>
+          {order.paymentAccountDisplayName ? (
+            <p className="text-xs text-slate-500">
+              บัญชีรับเงิน: {order.paymentAccountDisplayName} • {order.paymentAccountBankName ?? "-"} •{" "}
+              {maskAccountValue(order.paymentAccountNumber)}
+            </p>
+          ) : null}
+          {order.paymentMethod === "LAO_QR" ? (
+            <p className="text-xs text-slate-500">
+              สถานะสลิป: {order.paymentSlipUrl ? "แนบแล้ว (รอตรวจสอบ)" : "ยังไม่แนบ"}
+            </p>
+          ) : null}
         </div>
       </article>
+
+      {order.paymentMethod === "LAO_QR" ? (
+        <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
+          <h2 className="text-sm font-semibold">ชำระด้วย QR โอนเงิน</h2>
+          {order.paymentAccountQrImageUrl ? (
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50 p-2">
+              <Image
+                src={order.paymentAccountQrImageUrl}
+                alt="QR payment"
+                width={208}
+                height={208}
+                className="mx-auto h-52 w-52 rounded-lg object-contain"
+                unoptimized
+              />
+            </div>
+          ) : (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              ยังไม่พบรูป QR ของบัญชีรับเงินนี้ กรุณาอัปเดตที่ตั้งค่าร้าน
+            </p>
+          )}
+
+          <div className="space-y-2">
+            <label className="text-xs text-muted-foreground" htmlFor="payment-slip-url">
+              ลิงก์สลิปการโอน (สำหรับรอตรวจสอบ)
+            </label>
+            <input
+              id="payment-slip-url"
+              className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+              value={paymentSlipUrl}
+              onChange={(event) => setPaymentSlipUrl(event.target.value)}
+              disabled={!canSubmitSlip || loadingKey !== null}
+              placeholder="https://..."
+            />
+            <Button
+              className="h-10 w-full"
+              onClick={() =>
+                runPatchAction(
+                  { action: "submit_payment_slip", paymentSlipUrl },
+                  "submit-slip",
+                  "แนบสลิปแล้ว รอตรวจสอบการชำระ",
+                )
+              }
+              disabled={!canSubmitSlip || loadingKey !== null}
+            >
+              {loadingKey === "submit-slip" ? "กำลังบันทึก..." : "แนบสลิป / ส่งรอตรวจสอบ"}
+            </Button>
+          </div>
+        </article>
+      ) : null}
 
       <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold">การจัดส่ง</h2>
@@ -258,69 +333,71 @@ export function OrderDetailView({
         </Button>
       </article>
 
-      <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
-        <h2 className="text-sm font-semibold">การส่งข้อความ</h2>
+      {order.paymentMethod === "LAO_QR" ? (
+        <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
+          <h2 className="text-sm font-semibold">การส่งข้อความ</h2>
 
-        <Button className="h-10 w-full" onClick={sendQr} disabled={loadingKey !== null}>
-          {loadingKey === "send-qr"
-            ? "กำลังส่ง..."
-            : messaging.within24h
-              ? "Send QR (ส่งอัตโนมัติ)"
-              : "Send QR"}
-        </Button>
+          <Button className="h-10 w-full" onClick={sendQr} disabled={loadingKey !== null}>
+            {loadingKey === "send-qr"
+              ? "กำลังส่ง..."
+              : messaging.within24h
+                ? "Send QR (ส่งอัตโนมัติ)"
+                : "Send QR"}
+          </Button>
 
-        {!messaging.within24h ? (
-          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
-            ลูกค้าเกิน 24 ชั่วโมง ต้องส่งแบบแมนนวล
-          </div>
-        ) : (
-          <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-800">
-            ลูกค้าอยู่ในช่วง 24 ชั่วโมง สามารถส่งอัตโนมัติได้
-          </div>
-        )}
-
-        {!messaging.within24h ? (
-          <>
-            <textarea
-              value={messageText}
-              onChange={(event) => setMessageText(event.target.value)}
-              className="min-h-24 w-full rounded-md border px-3 py-2 text-sm outline-none ring-primary focus:ring-2"
-            />
-
-            <div className="grid grid-cols-3 gap-2">
-              <Button type="button" className="h-9" onClick={copyMessage}>
-                คัดลอกข้อความ
-              </Button>
-
-              <a
-                href={messaging.waDeepLink ?? "#"}
-                target="_blank"
-                rel="noreferrer"
-                className={`flex h-9 items-center justify-center rounded-md border text-xs font-medium ${
-                  messaging.waDeepLink
-                    ? "border-green-400 text-green-700"
-                    : "pointer-events-none border-slate-200 text-slate-400"
-                }`}
-              >
-                เปิด WhatsApp
-              </a>
-
-              <a
-                href={messaging.facebookInboxUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="flex h-9 items-center justify-center rounded-md border border-blue-400 text-xs font-medium text-blue-700"
-              >
-                เปิด Facebook
-              </a>
+          {!messaging.within24h ? (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+              ลูกค้าเกิน 24 ชั่วโมง ต้องส่งแบบแมนนวล
             </div>
-          </>
-        ) : (
-          <p className="text-xs text-muted-foreground">
-            ระบบจะใช้ข้อความอัตโนมัติพร้อมเลขออเดอร์และยอดชำระ
-          </p>
-        )}
-      </article>
+          ) : (
+            <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-800">
+              ลูกค้าอยู่ในช่วง 24 ชั่วโมง สามารถส่งอัตโนมัติได้
+            </div>
+          )}
+
+          {!messaging.within24h ? (
+            <>
+              <textarea
+                value={messageText}
+                onChange={(event) => setMessageText(event.target.value)}
+                className="min-h-24 w-full rounded-md border px-3 py-2 text-sm outline-none ring-primary focus:ring-2"
+              />
+
+              <div className="grid grid-cols-3 gap-2">
+                <Button type="button" className="h-9" onClick={copyMessage}>
+                  คัดลอกข้อความ
+                </Button>
+
+                <a
+                  href={messaging.waDeepLink ?? "#"}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`flex h-9 items-center justify-center rounded-md border text-xs font-medium ${
+                    messaging.waDeepLink
+                      ? "border-green-400 text-green-700"
+                      : "pointer-events-none border-slate-200 text-slate-400"
+                  }`}
+                >
+                  เปิด WhatsApp
+                </a>
+
+                <a
+                  href={messaging.facebookInboxUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex h-9 items-center justify-center rounded-md border border-blue-400 text-xs font-medium text-blue-700"
+                >
+                  เปิด Facebook
+                </a>
+              </div>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              ระบบจะใช้ข้อความอัตโนมัติพร้อมเลขออเดอร์และยอดชำระ
+            </p>
+          )}
+        </article>
+      ) : null}
 
       <article className="grid grid-cols-2 gap-2 rounded-xl border bg-white p-4 shadow-sm">
         <Button
@@ -328,7 +405,7 @@ export function OrderDetailView({
           onClick={() => runPatchAction({ action: "confirm_paid" }, "confirm-paid", "ยืนยันชำระแล้ว")}
           disabled={!canConfirmPaid || loadingKey !== null}
         >
-          {loadingKey === "confirm-paid" ? "กำลังบันทึก..." : "Confirm Paid"}
+          {loadingKey === "confirm-paid" ? "กำลังบันทึก..." : "ยืนยันรับชำระ"}
         </Button>
 
         <Button

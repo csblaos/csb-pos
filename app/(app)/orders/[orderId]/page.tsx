@@ -54,6 +54,7 @@ export default async function OrderDetailPage({
   const message = buildOrderMessageTemplate({
     orderNo: order.orderNo,
     total: order.total,
+    currency: order.paymentCurrency,
     customerName: order.customerName ?? order.contactDisplayName,
   });
 

@@ -7,6 +7,8 @@ import { systemConfig } from "@/lib/db/schema";
 
 const GLOBAL_CONFIG_ID = "global";
 const DEFAULT_SESSION_LIMIT = 1;
+const DEFAULT_PAYMENT_MAX_ACCOUNTS_PER_STORE = 5;
+const DEFAULT_PAYMENT_REQUIRE_SLIP_FOR_LAO_QR = true;
 const DEFAULT_STORE_LOGO_MAX_SIZE_MB = 5;
 const DEFAULT_STORE_LOGO_AUTO_RESIZE = true;
 const DEFAULT_STORE_LOGO_RESIZE_MAX_WIDTH = 1280;
@@ -36,6 +38,11 @@ export type GlobalStoreLogoPolicy = {
   maxSizeMb: number;
   autoResize: boolean;
   resizeMaxWidth: number;
+};
+
+export type GlobalPaymentPolicy = {
+  maxAccountsPerStore: number;
+  requireSlipForLaoQr: boolean;
 };
 
 export async function getGlobalSessionPolicy(): Promise<GlobalSessionPolicy> {
@@ -81,6 +88,34 @@ export async function getGlobalStoreLogoPolicy(): Promise<GlobalStoreLogoPolicy>
       maxSizeMb: DEFAULT_STORE_LOGO_MAX_SIZE_MB,
       autoResize: DEFAULT_STORE_LOGO_AUTO_RESIZE,
       resizeMaxWidth: DEFAULT_STORE_LOGO_RESIZE_MAX_WIDTH,
+    };
+  }
+}
+
+export async function getGlobalPaymentPolicy(): Promise<GlobalPaymentPolicy> {
+  try {
+    const [row] = await db
+      .select({
+        maxAccountsPerStore: systemConfig.paymentMaxAccountsPerStore,
+        requireSlipForLaoQr: systemConfig.paymentRequireSlipForLaoQr,
+      })
+      .from(systemConfig)
+      .where(eq(systemConfig.id, GLOBAL_CONFIG_ID))
+      .limit(1);
+
+    return {
+      maxAccountsPerStore:
+        toIntInRangeOrNull(row?.maxAccountsPerStore, 1, 20) ??
+        DEFAULT_PAYMENT_MAX_ACCOUNTS_PER_STORE,
+      requireSlipForLaoQr:
+        typeof row?.requireSlipForLaoQr === "boolean"
+          ? row.requireSlipForLaoQr
+          : DEFAULT_PAYMENT_REQUIRE_SLIP_FOR_LAO_QR,
+    };
+  } catch {
+    return {
+      maxAccountsPerStore: DEFAULT_PAYMENT_MAX_ACCOUNTS_PER_STORE,
+      requireSlipForLaoQr: DEFAULT_PAYMENT_REQUIRE_SLIP_FOR_LAO_QR,
     };
   }
 }
@@ -135,6 +170,36 @@ export async function upsertGlobalStoreLogoPolicy(input: GlobalStoreLogoPolicy) 
         storeLogoMaxSizeMb: maxSizeMb,
         storeLogoAutoResize: autoResize,
         storeLogoResizeMaxWidth: resizeMaxWidth,
+        updatedAt: sql`(CURRENT_TIMESTAMP)`,
+      },
+    });
+}
+
+export async function upsertGlobalPaymentPolicy(input: GlobalPaymentPolicy) {
+  const maxAccountsPerStore =
+    toIntInRangeOrNull(input.maxAccountsPerStore, 1, 20) ??
+    DEFAULT_PAYMENT_MAX_ACCOUNTS_PER_STORE;
+  const requireSlipForLaoQr =
+    typeof input.requireSlipForLaoQr === "boolean"
+      ? input.requireSlipForLaoQr
+      : DEFAULT_PAYMENT_REQUIRE_SLIP_FOR_LAO_QR;
+
+  await db
+    .insert(systemConfig)
+    .values({
+      id: GLOBAL_CONFIG_ID,
+      defaultCanCreateBranches: true,
+      defaultMaxBranchesPerStore: 1,
+      defaultSessionLimit: 1,
+      paymentMaxAccountsPerStore: maxAccountsPerStore,
+      paymentRequireSlipForLaoQr: requireSlipForLaoQr,
+      updatedAt: sql`(CURRENT_TIMESTAMP)`,
+    })
+    .onConflictDoUpdate({
+      target: systemConfig.id,
+      set: {
+        paymentMaxAccountsPerStore: maxAccountsPerStore,
+        paymentRequireSlipForLaoQr: requireSlipForLaoQr,
         updatedAt: sql`(CURRENT_TIMESTAMP)`,
       },
     });

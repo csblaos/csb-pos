@@ -22,9 +22,17 @@ export async function POST(
       return NextResponse.json({ message: "ไม่พบออเดอร์" }, { status: 404 });
     }
 
+    if (order.paymentMethod !== "LAO_QR") {
+      return NextResponse.json(
+        { message: "ออเดอร์นี้ไม่ได้เลือกชำระผ่าน QR" },
+        { status: 400 },
+      );
+    }
+
     const message = buildOrderMessageTemplate({
       orderNo: order.orderNo,
       total: order.total,
+      currency: order.paymentCurrency,
       customerName: order.customerName ?? order.contactDisplayName,
     });
 
@@ -51,6 +59,7 @@ export async function POST(
       mode: "MANUAL",
       message: "ลูกค้าเกิน 24 ชั่วโมง ต้องส่งแบบแมนนวล",
       template: message,
+      qrImageUrl: order.paymentAccountQrImageUrl,
       waDeepLink: order.contactPhone
         ? buildWhatsappDeepLink(order.contactPhone, message)
         : null,
