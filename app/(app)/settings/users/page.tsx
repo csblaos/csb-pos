@@ -146,6 +146,21 @@ export default async function SettingsUsersPage() {
         <p className="text-sm text-slate-500">จัดการสมาชิก, บทบาท และสถานะผู้ใช้งานในร้าน</p>
       </header>
 
+      {systemRole === "SUPERADMIN" ? (
+        <div className="overflow-hidden rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3">
+          <p className="text-sm font-medium text-blue-800">ต้องการจัดการผู้ใช้หลายร้าน?</p>
+          <p className="mt-0.5 text-xs text-blue-700">
+            ใช้หน้า Superadmin เพื่อสลับร้านและจัดการผู้ใช้ข้ามร้านได้เร็วขึ้น
+          </p>
+          <Link
+            href="/settings/superadmin/users"
+            className="mt-2 inline-flex items-center text-xs font-semibold text-blue-800 hover:underline"
+          >
+            ไปหน้า Superadmin: จัดการผู้ใช้
+          </Link>
+        </div>
+      ) : null}
+
       <div className="space-y-2">
         <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
           จัดการสมาชิก

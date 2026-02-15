@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
-import { usePathname } from "next/navigation";
+import { useEffect, useMemo } from "react";
+import { usePathname, useRouter } from "next/navigation";
 
 import { MenuBackButton } from "@/components/ui/menu-back-button";
 
@@ -18,7 +18,6 @@ const navRoots = [
   "/orders",
   "/stock",
   "/products",
-  "/settings/stores",
   "/settings",
   "/stores",
   "/reports",
@@ -64,6 +63,7 @@ export function AppTopNav({
   shellTitle,
 }: AppTopNavProps) {
   const pathname = usePathname();
+  const router = useRouter();
 
   const activeRoot = useMemo(() => {
     const sortedRoots = [...navRoots].sort((a, b) => b.length - a.length);
@@ -74,12 +74,28 @@ export function AppTopNav({
   const showStoreIdentity = !showBackButton;
   const storeInitial = getStoreInitial(activeStoreName);
   const backHref = useMemo(() => {
+    if (pathname.startsWith("/settings/superadmin/")) {
+      return "/settings/superadmin";
+    }
+
+    if (pathname === "/settings/stores") {
+      return "/settings";
+    }
+
     if (pathname.startsWith("/settings/roles/")) {
       return "/settings/roles";
     }
 
     return undefined;
   }, [pathname]);
+
+  useEffect(() => {
+    if (!pathname.startsWith("/settings/superadmin/")) {
+      return;
+    }
+
+    router.prefetch("/settings/superadmin");
+  }, [pathname, router]);
 
   return (
     <div className="flex items-center justify-between gap-3">

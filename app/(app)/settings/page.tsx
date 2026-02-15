@@ -169,9 +169,17 @@ export default async function SettingsPage() {
       id: "switch-store",
       href: "/settings/stores",
       title: "เลือกร้าน / เปลี่ยนร้าน",
-      description: isSuperadmin ? "สลับร้านหรือสร้างร้านใหม่" : "สลับร้านที่กำลังใช้งาน",
+      description: "สลับร้าน/สาขาในร้านที่กำลังเลือก",
       icon: Settings2,
       visible: true,
+    },
+    {
+      id: "superadmin-stores",
+      href: "/settings/superadmin",
+      title: "Superadmin Center",
+      description: "จัดการร้าน สาขา และผู้ใช้ข้ามร้านในพื้นที่แยก",
+      icon: Shield,
+      visible: isSuperadmin,
     },
     {
       id: "users",
