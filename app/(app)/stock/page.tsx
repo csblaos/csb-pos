@@ -17,12 +17,39 @@ import {
 } from "@/server/services/stock.service";
 import { getPurchaseOrderListPage } from "@/server/services/purchase.service";
 
-const StockLedger = dynamic(
-  () => import("@/components/app/stock-ledger").then((module) => module.StockLedger),
+const StockRecordingForm = dynamic(
+  () =>
+    import("@/components/app/stock-recording-form").then((module) => module.StockRecordingForm),
   {
     loading: () => (
       <div className="rounded-xl border bg-white p-4 text-sm text-muted-foreground">
-        กำลังโหลดหน้าสต็อก...
+        กำลังโหลด...
+      </div>
+    ),
+  },
+);
+
+const StockInventoryView = dynamic(
+  () =>
+    import("@/components/app/stock-inventory-view").then((module) => module.StockInventoryView),
+  {
+    loading: () => (
+      <div className="rounded-xl border bg-white p-4 text-sm text-muted-foreground">
+        กำลังโหลด...
+      </div>
+    ),
+  },
+);
+
+const StockMovementHistory = dynamic(
+  () =>
+    import("@/components/app/stock-movement-history").then(
+      (module) => module.StockMovementHistory,
+    ),
+  {
+    loading: () => (
+      <div className="rounded-xl border bg-white p-4 text-sm text-muted-foreground">
+        กำลังโหลด...
       </div>
     ),
   },
@@ -108,14 +135,19 @@ export default async function StockPage({
         ]),
       );
 
-    const hasMoreProducts = stockProductRows.length > PRODUCT_PAGE_SIZE;
     const initialProducts = stockProductRows.slice(0, PRODUCT_PAGE_SIZE);
     const hasMorePO = purchaseOrderRows.length > PO_PAGE_SIZE;
     const initialPOs = purchaseOrderRows.slice(0, PO_PAGE_SIZE);
 
     const storeCurrency = parseStoreCurrency(storeRow?.currency);
     const params = await searchParams;
-    const initialTab = params?.tab === "purchase" ? "purchase" : "stock";
+    const initialTab = params?.tab === "purchase" 
+      ? "purchase" 
+      : params?.tab === "inventory"
+        ? "inventory"
+        : params?.tab === "history"
+          ? "history"
+          : "recording";
 
     return (
       <section className="space-y-4">
@@ -128,17 +160,16 @@ export default async function StockPage({
 
         <StockTabs
           initialTab={initialTab}
-          stockTab={
-            <StockLedger
-              products={initialProducts}
-              recentMovements={movements}
+          recordingTab={
+            <StockRecordingForm
+              initialProducts={initialProducts}
               canCreate={canPostMovement}
               canAdjust={canAdjust}
               canInbound={canInbound}
-              productPageSize={PRODUCT_PAGE_SIZE}
-              initialHasMoreProducts={hasMoreProducts}
             />
           }
+          inventoryTab={<StockInventoryView products={initialProducts} />}
+          historyTab={<StockMovementHistory movements={movements} />}
           purchaseTab={
             <PurchaseOrderList
               purchaseOrders={initialPOs}
