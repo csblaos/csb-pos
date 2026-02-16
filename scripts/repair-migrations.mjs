@@ -198,6 +198,38 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     console.info("[db:repair] added column users.password_updated_at");
   }
 
+  if (!(await columnExists("stores", "out_stock_threshold"))) {
+    await client.execute(
+      "alter table `stores` add `out_stock_threshold` integer not null default 0",
+    );
+    console.info("[db:repair] added column stores.out_stock_threshold");
+  }
+
+  if (!(await columnExists("stores", "low_stock_threshold"))) {
+    await client.execute(
+      "alter table `stores` add `low_stock_threshold` integer not null default 10",
+    );
+    console.info("[db:repair] added column stores.low_stock_threshold");
+  }
+
+  await client.execute(
+    "update `stores` set `out_stock_threshold` = 0 where `out_stock_threshold` is null",
+  );
+  await client.execute(
+    "update `stores` set `low_stock_threshold` = 10 where `low_stock_threshold` is null",
+  );
+  console.info("[db:repair] backfilled stores stock thresholds");
+
+  if (!(await columnExists("products", "out_stock_threshold"))) {
+    await client.execute("alter table `products` add `out_stock_threshold` integer");
+    console.info("[db:repair] added column products.out_stock_threshold");
+  }
+
+  if (!(await columnExists("products", "low_stock_threshold"))) {
+    await client.execute("alter table `products` add `low_stock_threshold` integer");
+    console.info("[db:repair] added column products.low_stock_threshold");
+  }
+
   await client.execute(
     "update `users` set `password_updated_at` = coalesce(`created_at`, CURRENT_TIMESTAMP) where `password_updated_at` is null",
   );

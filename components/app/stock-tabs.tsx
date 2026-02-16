@@ -13,10 +13,10 @@ type StockTabsProps = {
 };
 
 const tabs = [
-  { id: "recording", label: "บันทึกสต็อก", labelMobile: "บันทึก", icon: Edit },
   { id: "inventory", label: "ดูสต็อก", labelMobile: "สต็อก", icon: Package },
-  { id: "history", label: "ประวัติ", labelMobile: "ประวัติ", icon: FileText },
   { id: "purchase", label: "สั่งซื้อ", labelMobile: "PO", icon: ShoppingCart },
+  { id: "recording", label: "บันทึกสต็อก", labelMobile: "บันทึก", icon: Edit },
+  { id: "history", label: "ประวัติ", labelMobile: "ประวัติ", icon: FileText },
 ] as const;
 
 type TabId = (typeof tabs)[number]["id"];
@@ -26,7 +26,7 @@ export function StockTabs({
   inventoryTab,
   historyTab,
   purchaseTab,
-  initialTab = "recording",
+  initialTab = "inventory",
 }: StockTabsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();

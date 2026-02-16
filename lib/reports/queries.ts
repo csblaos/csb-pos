@@ -3,7 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { redisGetJson, redisSetJson } from "@/lib/cache/redis";
 import { db } from "@/lib/db/client";
 import { orderItems, orders, products } from "@/lib/db/schema";
-import { getLowStockProducts } from "@/lib/inventory/queries";
+import { getLowStockProducts, getStoreStockThresholds } from "@/lib/inventory/queries";
 import { timeAsync, timeDbQuery } from "@/lib/perf/server";
 
 const paidStatuses = ["PAID", "PACKED", "SHIPPED"] as const;
@@ -88,7 +88,9 @@ async function fetchDashboardMetrics(storeId: string): Promise<DashboardMetrics>
         .from(orders)
         .where(and(eq(orders.storeId, storeId), eq(orders.status, "PENDING_PAYMENT"))),
     ),
-    getLowStockProducts(storeId, 10),
+    getStoreStockThresholds(storeId).then((thresholds) =>
+      getLowStockProducts(storeId, thresholds),
+    ),
   ]);
 
   return {

@@ -1,5 +1,10 @@
 import { z } from "zod";
 
+const optionalNonNegativeInt = z.preprocess(
+  (value) => (value === "" || value === null || value === undefined ? undefined : value),
+  z.coerce.number().int("ต้องเป็นจำนวนเต็ม").min(0, "ต้องไม่ติดลบ").optional(),
+);
+
 export const productConversionSchema = z.object({
   unitId: z.string().min(1, "กรุณาเลือกหน่วย"),
   multiplierToBase: z.coerce
@@ -23,10 +28,24 @@ export const productUpsertSchema = z
       .int("ต้นทุนต้องเป็นจำนวนเต็ม")
       .min(0, "ต้นทุนต้องไม่ติดลบ")
       .default(0),
+    outStockThreshold: optionalNonNegativeInt,
+    lowStockThreshold: optionalNonNegativeInt,
     categoryId: z.string().trim().optional().or(z.literal("")),
     conversions: z.array(productConversionSchema).max(20).default([]),
   })
   .superRefine((data, ctx) => {
+    if (
+      data.outStockThreshold !== undefined &&
+      data.lowStockThreshold !== undefined &&
+      data.lowStockThreshold < data.outStockThreshold
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["lowStockThreshold"],
+        message: "ค่าสต็อกต่ำต้องมากกว่าหรือเท่ากับค่าสต็อกหมด",
+      });
+    }
+
     const unitIds = new Set<string>();
 
     data.conversions.forEach((conversion, index) => {
@@ -95,6 +114,10 @@ export const normalizeProductPayload = (payload: ProductUpsertInput) => ({
   baseUnitId: payload.baseUnitId,
   priceBase: payload.priceBase,
   costBase: payload.costBase,
+  outStockThreshold:
+    payload.outStockThreshold !== undefined ? payload.outStockThreshold : null,
+  lowStockThreshold:
+    payload.lowStockThreshold !== undefined ? payload.lowStockThreshold : null,
   categoryId: payload.categoryId?.trim() ? payload.categoryId.trim() : null,
   conversions: payload.conversions,
 });

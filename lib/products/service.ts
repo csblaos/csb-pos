@@ -32,6 +32,8 @@ export type ProductListItem = {
   baseUnitNameTh: string;
   priceBase: number;
   costBase: number;
+  outStockThreshold: number | null;
+  lowStockThreshold: number | null;
   active: boolean;
   createdAt: string;
   conversions: ProductConversionView[];
@@ -82,6 +84,8 @@ export async function listStoreProducts(
       baseUnitNameTh: baseUnits.nameTh,
       priceBase: products.priceBase,
       costBase: products.costBase,
+        outStockThreshold: products.outStockThreshold,
+        lowStockThreshold: products.lowStockThreshold,
       active: products.active,
       createdAt: products.createdAt,
       conversionUnitId: conversionUnits.id,
@@ -126,6 +130,8 @@ export async function listStoreProducts(
         baseUnitNameTh: row.baseUnitNameTh,
         priceBase: row.priceBase,
         costBase: row.costBase,
+        outStockThreshold: row.outStockThreshold ?? null,
+        lowStockThreshold: row.lowStockThreshold ?? null,
         active: Boolean(row.active),
         createdAt: row.createdAt,
         conversions: [],
@@ -173,13 +179,22 @@ export async function listCategories(storeId: string): Promise<CategoryItem[]> {
       id: productCategories.id,
       name: productCategories.name,
       sortOrder: productCategories.sortOrder,
-      productCount: sql<number>`(
-        SELECT COUNT(*) FROM ${products}
-        WHERE ${products.categoryId} = ${productCategories.id}
-      )`,
+      productCount: sql<number>`count(${products.id})`,
     })
     .from(productCategories)
+    .leftJoin(
+      products,
+      and(
+        eq(products.categoryId, productCategories.id),
+        eq(products.storeId, storeId),
+      ),
+    )
     .where(eq(productCategories.storeId, storeId))
+    .groupBy(
+      productCategories.id,
+      productCategories.name,
+      productCategories.sortOrder,
+    )
     .orderBy(asc(productCategories.sortOrder), asc(productCategories.name));
 
   return rows;

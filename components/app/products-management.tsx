@@ -54,6 +54,8 @@ type ProductsManagementProps = {
   units: UnitOption[];
   categories: CategoryItem[];
   currency: StoreCurrency;
+  storeOutStockThreshold: number;
+  storeLowStockThreshold: number;
   canCreate: boolean;
   canUpdate: boolean;
   canArchive: boolean;
@@ -80,6 +82,8 @@ const defaultValues = (baseUnitId: string): ProductUpsertFormInput => ({
   baseUnitId,
   priceBase: 0,
   costBase: 0,
+  outStockThreshold: "",
+  lowStockThreshold: "",
   categoryId: "",
   conversions: [],
 });
@@ -92,6 +96,8 @@ export function ProductsManagement({
   units,
   categories: initialCategories,
   currency,
+  storeOutStockThreshold,
+  storeLowStockThreshold,
   canCreate,
   canUpdate,
   canArchive,
@@ -135,6 +141,22 @@ export function ProductsManagement({
   const [costDraft, setCostDraft] = useState(0);
   const detailContentRef = useRef<HTMLDivElement>(null);
   const [detailContentHeight, setDetailContentHeight] = useState<number | null>(null);
+
+  const getEffectiveStockThresholds = (product: ProductListItem) => {
+    const outThreshold = product.outStockThreshold ?? storeOutStockThreshold;
+    const lowThreshold = Math.max(
+      product.lowStockThreshold ?? storeLowStockThreshold,
+      outThreshold,
+    );
+    const hasOverride =
+      product.outStockThreshold !== null || product.lowStockThreshold !== null;
+
+    return {
+      outThreshold,
+      lowThreshold,
+      badgeLabel: hasOverride ? "กำหนดเฉพาะสินค้า" : "ใช้ค่าร้าน",
+    };
+  };
 
   /* ── Units lookup ── */
   const unitById = useMemo(() => new Map(units.map((u) => [u.id, u])), [units]);
@@ -263,6 +285,8 @@ export function ProductsManagement({
       baseUnitId: product.baseUnitId,
       priceBase: product.priceBase,
       costBase: product.costBase,
+      outStockThreshold: product.outStockThreshold ?? "",
+      lowStockThreshold: product.lowStockThreshold ?? "",
       categoryId: product.categoryId ?? "",
       conversions: product.conversions.map((c) => ({
         unitId: c.unitId,
@@ -299,6 +323,8 @@ export function ProductsManagement({
       baseUnitId: product.baseUnitId,
       priceBase: product.priceBase,
       costBase: product.costBase,
+      outStockThreshold: product.outStockThreshold ?? "",
+      lowStockThreshold: product.lowStockThreshold ?? "",
       categoryId: product.categoryId ?? "",
       conversions: product.conversions.map((c) => ({
         unitId: c.unitId,
@@ -348,6 +374,8 @@ export function ProductsManagement({
                 baseUnitNameTh: selBaseUnit?.nameTh ?? item.baseUnitNameTh,
                 priceBase: values.priceBase,
                 costBase: values.costBase,
+                outStockThreshold: values.outStockThreshold ?? null,
+                lowStockThreshold: values.lowStockThreshold ?? null,
                 categoryId: values.categoryId?.trim() || null,
                 categoryName:
                   categories.find((c) => c.id === values.categoryId)?.name ??
@@ -1093,6 +1121,65 @@ export function ProductsManagement({
             </div>
           </div>
 
+          {/* Stock threshold overrides */}
+          <div className="space-y-2 rounded-lg border border-slate-200 p-3">
+            <p className="text-xs font-medium text-slate-700">
+              ตั้งค่าแจ้งเตือนสต็อก (Override)
+            </p>
+            <p className="text-[11px] text-muted-foreground">
+              เว้นว่างเพื่อใช้ค่าตั้งต้นของร้าน: หมด ≤ {fmtNumber(storeOutStockThreshold)},
+              ต่ำ ≤ {fmtNumber(storeLowStockThreshold)}
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label
+                  className="text-xs font-medium text-slate-700"
+                  htmlFor="pf-out-threshold"
+                >
+                  สต็อกหมด (≤)
+                </label>
+                <input
+                  id="pf-out-threshold"
+                  type="number"
+                  min={0}
+                  step={1}
+                  className="h-10 w-full rounded-lg border px-3 text-sm outline-none ring-blue-500 focus:ring-2"
+                  disabled={loadingKey !== null}
+                  placeholder={`${storeOutStockThreshold}`}
+                  {...form.register("outStockThreshold")}
+                />
+                {form.formState.errors.outStockThreshold && (
+                  <p className="text-xs text-red-600">
+                    {form.formState.errors.outStockThreshold.message}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-1">
+                <label
+                  className="text-xs font-medium text-slate-700"
+                  htmlFor="pf-low-threshold"
+                >
+                  สต็อกต่ำ (≤)
+                </label>
+                <input
+                  id="pf-low-threshold"
+                  type="number"
+                  min={0}
+                  step={1}
+                  className="h-10 w-full rounded-lg border px-3 text-sm outline-none ring-blue-500 focus:ring-2"
+                  disabled={loadingKey !== null}
+                  placeholder={`${storeLowStockThreshold}`}
+                  {...form.register("lowStockThreshold")}
+                />
+                {form.formState.errors.lowStockThreshold && (
+                  <p className="text-xs text-red-600">
+                    {form.formState.errors.lowStockThreshold.message}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Conversions */}
           <div className="space-y-2 rounded-lg border border-slate-200 p-3">
             <div className="flex items-center justify-between">
@@ -1353,6 +1440,36 @@ export function ProductsManagement({
                       label="สถานะ"
                       value={detailProduct.active ? "ใช้งาน" : "ปิดใช้งาน"}
                     />
+
+                    {(() => {
+                      const thresholds = getEffectiveStockThresholds(detailProduct);
+                      return (
+                        <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-medium text-slate-700">
+                              เกณฑ์แจ้งเตือนสต็อก
+                            </p>
+                            <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                              {thresholds.badgeLabel}
+                            </span>
+                          </div>
+                          <div className="mt-2 space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-slate-500">สต็อกหมด (≤)</span>
+                              <span className="font-semibold text-slate-900">
+                                {thresholds.outThreshold.toLocaleString("th-TH")}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="text-slate-500">สต็อกต่ำ (≤)</span>
+                              <span className="font-semibold text-slate-900">
+                                {thresholds.lowThreshold.toLocaleString("th-TH")}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     <div className="flex gap-2 pt-2">
                       {canUpdate && (

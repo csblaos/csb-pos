@@ -5,7 +5,11 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/server/db/client";
 import { timeDb } from "@/server/perf/perf";
 import { orders } from "@/lib/db/schema";
-import { getLowStockProducts, type LowStockItem } from "@/lib/inventory/queries";
+import {
+  getLowStockProducts,
+  type LowStockItem,
+  type StoreStockThresholds,
+} from "@/lib/inventory/queries";
 
 const paidStatuses = ["PAID", "PACKED", "SHIPPED"] as const;
 
@@ -63,9 +67,9 @@ export async function getPendingPaymentCount(storeId: string) {
 
 export async function getLowStockItemsByStore(
   storeId: string,
-  thresholdBase: number,
+  thresholds: StoreStockThresholds,
 ): Promise<LowStockItem[]> {
   return timeDb("dashboard.repo.lowStockItems", async () =>
-    getLowStockProducts(storeId, thresholdBase),
+    getLowStockProducts(storeId, thresholds),
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpDown, Package, ScanBarcode, Search, X } from "lucide-react";
 import toast from "react-hot-toast";
 import { Button } from "@/components/ui/button";
@@ -9,12 +9,18 @@ import type { StockProductOption } from "@/lib/inventory/queries";
 
 type StockInventoryViewProps = {
   products: StockProductOption[];
+  storeOutStockThreshold: number;
+  storeLowStockThreshold: number;
 };
 
 type FilterOption = "all" | "low" | "out";
 type SortOption = "name" | "sku" | "stock-low" | "stock-high";
 
-export function StockInventoryView({ products }: StockInventoryViewProps) {
+export function StockInventoryView({
+  products,
+  storeOutStockThreshold,
+  storeLowStockThreshold,
+}: StockInventoryViewProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [filter, setFilter] = useState<FilterOption>("all");
   const [sortBy, setSortBy] = useState<SortOption>("name");
@@ -28,14 +34,30 @@ export function StockInventoryView({ products }: StockInventoryViewProps) {
     setHasSeenScannerPermission(seen);
   }, []);
 
+  const resolveThresholds = useCallback((product: StockProductOption) => {
+    const outThreshold = product.outStockThreshold ?? storeOutStockThreshold;
+    const lowThreshold = Math.max(
+      product.lowStockThreshold ?? storeLowStockThreshold,
+      outThreshold,
+    );
+
+    return { outThreshold, lowThreshold };
+  }, [storeOutStockThreshold, storeLowStockThreshold]);
+
   const filteredAndSortedProducts = useMemo(() => {
     let items = [...products];
 
     // Filter
     if (filter === "low") {
-      items = items.filter((p) => p.available > 0 && p.available < 10);
+      items = items.filter((p) => {
+        const { outThreshold, lowThreshold } = resolveThresholds(p);
+        return p.available > outThreshold && p.available <= lowThreshold;
+      });
     } else if (filter === "out") {
-      items = items.filter((p) => p.available <= 0);
+      items = items.filter((p) => {
+        const { outThreshold } = resolveThresholds(p);
+        return p.available <= outThreshold;
+      });
     }
 
     // Search
@@ -63,15 +85,26 @@ export function StockInventoryView({ products }: StockInventoryViewProps) {
     });
 
     return items;
-  }, [products, filter, searchQuery, sortBy]);
+  }, [products, filter, searchQuery, sortBy, resolveThresholds]);
 
   const stats = useMemo(() => {
-    const low = products.filter((p) => p.available > 0 && p.available < 10).length;
-    const out = products.filter((p) => p.available <= 0).length;
-    const good = products.filter((p) => p.available >= 10).length;
+    let low = 0;
+    let out = 0;
+    let good = 0;
+
+    products.forEach((product) => {
+      const { outThreshold, lowThreshold } = resolveThresholds(product);
+      if (product.available <= outThreshold) {
+        out += 1;
+      } else if (product.available <= lowThreshold) {
+        low += 1;
+      } else {
+        good += 1;
+      }
+    });
 
     return { low, out, good };
-  }, [products]);
+  }, [products, resolveThresholds]);
 
   const handleBarcodeResult = (barcode: string) => {
     setShowScanner(false);
@@ -214,14 +247,23 @@ export function StockInventoryView({ products }: StockInventoryViewProps) {
             <p className="mt-2 text-sm text-slate-600">ไม่พบสินค้า</p>
           </article>
         ) : (
-          filteredAndSortedProducts.map((product) => (
-            <article
-              key={product.productId}
-              id={`product-${product.productId}`}
-              className="rounded-xl border bg-white p-4 shadow-sm transition-all"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1">
+          filteredAndSortedProducts.map((product) => {
+            const { outThreshold, lowThreshold } = resolveThresholds(product);
+            const stockStatus =
+              product.available <= outThreshold
+                ? "out"
+                : product.available <= lowThreshold
+                  ? "low"
+                  : "good";
+
+            return (
+              <article
+                key={product.productId}
+                id={`product-${product.productId}`}
+                className="rounded-xl border bg-white p-4 shadow-sm transition-all"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1">
                   <div className="flex items-start gap-2">
                     <div className="flex-1">
                       <p className="text-xs text-slate-500">{product.sku}</p>
@@ -258,18 +300,18 @@ export function StockInventoryView({ products }: StockInventoryViewProps) {
 
                     <div
                       className={`rounded-lg p-2 ${
-                        product.available <= 0
+                        stockStatus === "out"
                           ? "bg-red-50"
-                          : product.available < 10
+                          : stockStatus === "low"
                             ? "bg-amber-50"
                             : "bg-emerald-50"
                       }`}
                     >
                       <p
                         className={`text-xs ${
-                          product.available <= 0
+                          stockStatus === "out"
                             ? "text-red-700"
-                            : product.available < 10
+                            : stockStatus === "low"
                               ? "text-amber-700"
                               : "text-emerald-700"
                         }`}
@@ -278,9 +320,9 @@ export function StockInventoryView({ products }: StockInventoryViewProps) {
                       </p>
                       <p
                         className={`text-lg font-bold ${
-                          product.available <= 0
+                          stockStatus === "out"
                             ? "text-red-900"
-                            : product.available < 10
+                            : stockStatus === "low"
                               ? "text-amber-900"
                               : "text-emerald-900"
                         }`}
@@ -292,7 +334,8 @@ export function StockInventoryView({ products }: StockInventoryViewProps) {
                 </div>
               </div>
             </article>
-          ))
+            );
+          })
         )}
       </div>
 

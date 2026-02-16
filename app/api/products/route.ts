@@ -75,6 +75,8 @@ export async function POST(request: Request) {
         baseUnitId: payload.baseUnitId,
         priceBase: payload.priceBase,
         costBase: payload.costBase,
+        outStockThreshold: payload.outStockThreshold,
+        lowStockThreshold: payload.lowStockThreshold,
         categoryId: payload.categoryId,
         active: true,
       });

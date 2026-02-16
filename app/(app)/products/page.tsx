@@ -5,6 +5,9 @@ import { getSession } from "@/lib/auth/session";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 import { listCategories, listStoreProducts, listUnits } from "@/lib/products/service";
 import { getStoreFinancialConfig } from "@/lib/stores/financial";
+import { db } from "@/lib/db/client";
+import { stores } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 
 const ProductsManagement = dynamic(
   () =>
@@ -51,11 +54,20 @@ export default async function ProductsPage() {
     );
   }
 
-  const [products, units, categories, financial] = await Promise.all([
+  const [products, units, categories, financial, storeRow] = await Promise.all([
     listStoreProducts(session.activeStoreId),
     listUnits(session.activeStoreId),
     listCategories(session.activeStoreId),
     getStoreFinancialConfig(session.activeStoreId),
+    db
+      .select({
+        outStockThreshold: stores.outStockThreshold,
+        lowStockThreshold: stores.lowStockThreshold,
+      })
+      .from(stores)
+      .where(eq(stores.id, session.activeStoreId))
+      .limit(1)
+      .then((rows) => rows[0] ?? null),
   ]);
 
   return (
@@ -70,6 +82,8 @@ export default async function ProductsPage() {
         units={units}
         categories={categories}
         currency={financial?.currency ?? "LAK"}
+        storeOutStockThreshold={storeRow?.outStockThreshold ?? 0}
+        storeLowStockThreshold={storeRow?.lowStockThreshold ?? 10}
         canCreate={canCreate}
         canUpdate={canUpdate}
         canArchive={canArchive}

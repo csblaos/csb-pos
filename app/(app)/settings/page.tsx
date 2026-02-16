@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Lock,
   Package,
+  PackageCheck,
   PlugZap,
   Settings2,
   Shield,
@@ -231,6 +232,14 @@ export default async function SettingsPage() {
       visible: canViewProducts,
     },
     {
+      id: "stock-thresholds",
+      href: "/settings/stock",
+      title: "ตั้งค่าแจ้งเตือนสต็อก",
+      description: "กำหนดเกณฑ์สต็อกหมดและสต็อกต่ำของร้าน",
+      icon: PackageCheck,
+      visible: canViewProducts,
+    },
+    {
       id: "units",
       href: "/settings/units",
       title: "หน่วยสินค้า",
@@ -300,6 +309,31 @@ export default async function SettingsPage() {
       </header>
 
       <div className="space-y-4">
+        {adminLinks.some((item) => item.visible) ? (
+          <div className="space-y-2">
+            <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+              พื้นที่ผู้ดูแล
+            </p>
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <ul className="divide-y divide-slate-100">
+                {adminLinks
+                  .filter((item) => item.visible)
+                  .map((item) => (
+                    <li key={item.id}>
+                      <SettingsLinkRow
+                        href={item.href}
+                        title={item.title}
+                        description={item.description}
+                        icon={item.icon}
+                        badgeText={item.badgeText}
+                      />
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          </div>
+        ) : null}
+
         <div className="space-y-2">
           <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
             บัญชีและร้าน
@@ -418,31 +452,6 @@ export default async function SettingsPage() {
             </ul>
           </div>
         </div>
-
-        {adminLinks.some((item) => item.visible) ? (
-          <div className="space-y-2">
-            <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-              พื้นที่ผู้ดูแล
-            </p>
-            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <ul className="divide-y divide-slate-100">
-                {adminLinks
-                  .filter((item) => item.visible)
-                  .map((item) => (
-                    <li key={item.id}>
-                      <SettingsLinkRow
-                        href={item.href}
-                        title={item.title}
-                        description={item.description}
-                        icon={item.icon}
-                        badgeText={item.badgeText}
-                      />
-                    </li>
-                  ))}
-              </ul>
-            </div>
-          </div>
-        ) : null}
 
         <div className="space-y-2">
           <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">

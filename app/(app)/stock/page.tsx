@@ -127,7 +127,11 @@ export default async function StockPage({
             offset: 0,
           }),
           db
-            .select({ currency: stores.currency })
+            .select({
+              currency: stores.currency,
+              outStockThreshold: stores.outStockThreshold,
+              lowStockThreshold: stores.lowStockThreshold,
+            })
             .from(stores)
             .where(eq(stores.id, activeStoreId))
             .limit(1)
@@ -140,6 +144,8 @@ export default async function StockPage({
     const initialPOs = purchaseOrderRows.slice(0, PO_PAGE_SIZE);
 
     const storeCurrency = parseStoreCurrency(storeRow?.currency);
+    const storeOutStockThreshold = storeRow?.outStockThreshold ?? 0;
+    const storeLowStockThreshold = storeRow?.lowStockThreshold ?? 10;
     const params = await searchParams;
     const initialTab = params?.tab === "purchase" 
       ? "purchase" 
@@ -147,7 +153,7 @@ export default async function StockPage({
         ? "inventory"
         : params?.tab === "history"
           ? "history"
-          : "recording";
+          : "inventory";
 
     return (
       <section className="space-y-4">
@@ -168,7 +174,13 @@ export default async function StockPage({
               canInbound={canInbound}
             />
           }
-          inventoryTab={<StockInventoryView products={initialProducts} />}
+          inventoryTab={
+            <StockInventoryView
+              products={initialProducts}
+              storeOutStockThreshold={storeOutStockThreshold}
+              storeLowStockThreshold={storeLowStockThreshold}
+            />
+          }
           historyTab={<StockMovementHistory movements={movements} />}
           purchaseTab={
             <PurchaseOrderList

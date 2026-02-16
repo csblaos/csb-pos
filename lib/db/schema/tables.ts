@@ -125,6 +125,8 @@ export const stores = sqliteTable(
     vatMode: text("vat_mode", { enum: storeVatModeEnum })
       .notNull()
       .default("EXCLUSIVE"),
+    outStockThreshold: integer("out_stock_threshold").notNull().default(0),
+    lowStockThreshold: integer("low_stock_threshold").notNull().default(10),
     maxBranchesOverride: integer("max_branches_override"),
     createdAt: text("created_at").notNull().default(createdAtDefault),
   },
@@ -412,6 +414,8 @@ export const products = sqliteTable(
       .references(() => units.id),
     priceBase: integer("price_base").notNull(),
     costBase: integer("cost_base").notNull().default(0),
+    outStockThreshold: integer("out_stock_threshold"),
+    lowStockThreshold: integer("low_stock_threshold"),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     createdAt: text("created_at").notNull().default(createdAtDefault),
   },

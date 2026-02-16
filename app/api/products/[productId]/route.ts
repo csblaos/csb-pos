@@ -236,6 +236,8 @@ export async function PATCH(
           baseUnitId: payload.baseUnitId,
           priceBase: payload.priceBase,
           costBase: payload.costBase,
+          outStockThreshold: payload.outStockThreshold,
+          lowStockThreshold: payload.lowStockThreshold,
           categoryId: payload.categoryId,
         })
         .where(and(eq(products.id, productId), eq(products.storeId, storeId)));

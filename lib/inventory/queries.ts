@@ -6,6 +6,7 @@ import {
   inventoryMovements,
   productUnits,
   products,
+  stores,
   units,
   users,
 } from "@/lib/db/schema";
@@ -35,6 +36,8 @@ export type StockProductOption = {
   onHand: number;
   reserved: number;
   available: number;
+  outStockThreshold: number | null;
+  lowStockThreshold: number | null;
   unitOptions: StockUnitOption[];
 };
 
@@ -57,6 +60,29 @@ export type LowStockItem = {
   available: number;
   baseUnitCode: string;
 };
+
+export type StoreStockThresholds = {
+  outStockThreshold: number;
+  lowStockThreshold: number;
+};
+
+export async function getStoreStockThresholds(
+  storeId: string,
+): Promise<StoreStockThresholds> {
+  const [store] = await db
+    .select({
+      outStockThreshold: stores.outStockThreshold,
+      lowStockThreshold: stores.lowStockThreshold,
+    })
+    .from(stores)
+    .where(eq(stores.id, storeId))
+    .limit(1);
+
+  return {
+    outStockThreshold: store?.outStockThreshold ?? 0,
+    lowStockThreshold: store?.lowStockThreshold ?? 10,
+  };
+}
 
 const movementBalances = async (
   storeId: string,
@@ -183,6 +209,8 @@ export async function getStockProductsForStore(
         baseUnitId: products.baseUnitId,
         baseUnitCode: baseUnits.code,
         baseUnitNameTh: baseUnits.nameTh,
+        outStockThreshold: products.outStockThreshold,
+        lowStockThreshold: products.lowStockThreshold,
       })
       .from(products)
       .innerJoin(baseUnits, eq(products.baseUnitId, baseUnits.id))
@@ -250,6 +278,8 @@ export async function getStockProductsForStore(
       onHand: balance?.onHand ?? 0,
       reserved: balance?.reserved ?? 0,
       available: balance?.available ?? 0,
+      outStockThreshold: product.outStockThreshold ?? null,
+      lowStockThreshold: product.lowStockThreshold ?? null,
       unitOptions,
     };
   });
@@ -271,6 +301,8 @@ export async function getStockProductsForStorePage(
       baseUnitId: products.baseUnitId,
       baseUnitCode: baseUnits.code,
       baseUnitNameTh: baseUnits.nameTh,
+      outStockThreshold: products.outStockThreshold,
+      lowStockThreshold: products.lowStockThreshold,
     })
     .from(products)
     .innerJoin(baseUnits, eq(products.baseUnitId, baseUnits.id))
@@ -345,6 +377,8 @@ export async function getStockProductsForStorePage(
       onHand: balance?.onHand ?? 0,
       reserved: balance?.reserved ?? 0,
       available: balance?.available ?? 0,
+      outStockThreshold: product.outStockThreshold ?? null,
+      lowStockThreshold: product.lowStockThreshold ?? null,
       unitOptions,
     };
   });
@@ -388,12 +422,30 @@ export async function getRecentInventoryMovements(
 
 export async function getLowStockProducts(
   storeId: string,
-  thresholdBase = 10,
+  thresholds?: StoreStockThresholds,
 ): Promise<LowStockItem[]> {
   const productsWithBalance = await getStockProductsForStore(storeId);
+  const storeThresholds = thresholds ?? (await getStoreStockThresholds(storeId));
+  const storeOutThreshold = storeThresholds.outStockThreshold ?? 0;
+  const storeLowThreshold = Math.max(
+    storeThresholds.lowStockThreshold ?? 10,
+    storeOutThreshold,
+  );
 
   return productsWithBalance
-    .filter((product) => product.active && product.available <= thresholdBase)
+    .filter((product) => {
+      if (!product.active) {
+        return false;
+      }
+
+      const outThreshold = product.outStockThreshold ?? storeOutThreshold;
+      const lowThreshold = Math.max(
+        product.lowStockThreshold ?? storeLowThreshold,
+        outThreshold,
+      );
+
+      return product.available <= lowThreshold;
+    })
     .sort((a, b) => a.available - b.available)
     .map((product) => ({
       productId: product.productId,

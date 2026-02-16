@@ -59,7 +59,6 @@ export default async function DashboardPage() {
       ? perf.step("service.getDashboardViewData", async () =>
           getDashboardViewData({
             storeId: activeStoreId,
-            thresholdBase: 10,
             useCache: true,
           }),
         )

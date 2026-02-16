@@ -283,6 +283,8 @@ export function StockLedger({
         onHand: 0,
         reserved: 0,
         available: 0,
+        outStockThreshold: product.outStockThreshold ?? null,
+        lowStockThreshold: product.lowStockThreshold ?? null,
       };
       setProductItems((prev) => [newProduct, ...prev]);
     }

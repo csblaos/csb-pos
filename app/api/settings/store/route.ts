@@ -30,6 +30,8 @@ const updateStoreJsonSchema = z
     vatEnabled: z.boolean().optional(),
     vatRate: z.number().int().min(0).max(10000).optional(),
     vatMode: z.enum(storeVatModeValues).optional(),
+    outStockThreshold: z.number().int().min(0).max(100000).optional(),
+    lowStockThreshold: z.number().int().min(0).max(100000).optional(),
   })
   .refine(
     (payload) =>
@@ -40,12 +42,27 @@ const updateStoreJsonSchema = z
       payload.supportedCurrencies !== undefined ||
       payload.vatEnabled !== undefined ||
       payload.vatRate !== undefined ||
-      payload.vatMode !== undefined,
+      payload.vatMode !== undefined ||
+      payload.outStockThreshold !== undefined ||
+      payload.lowStockThreshold !== undefined,
     {
       message: "ไม่มีข้อมูลสำหรับอัปเดต",
       path: ["address"],
     },
-  );
+  )
+  .superRefine((payload, ctx) => {
+    if (
+      payload.outStockThreshold !== undefined &&
+      payload.lowStockThreshold !== undefined &&
+      payload.lowStockThreshold < payload.outStockThreshold
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["lowStockThreshold"],
+        message: "ค่าสต็อกต่ำต้องมากกว่าหรือเท่ากับค่าสต็อกหมด",
+      });
+    }
+  });
 
 const updateStoreMultipartSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -312,6 +329,8 @@ async function patchByJsonBody(storeId: string, request: Request, userId: string
         vatEnabled: boolean;
         vatRate: number;
         vatMode: string;
+        outStockThreshold: number;
+        lowStockThreshold: number;
       }
     | null = null;
 
@@ -329,6 +348,8 @@ async function patchByJsonBody(storeId: string, request: Request, userId: string
         vatEnabled: stores.vatEnabled,
         vatRate: stores.vatRate,
         vatMode: stores.vatMode,
+        outStockThreshold: stores.outStockThreshold,
+        lowStockThreshold: stores.lowStockThreshold,
       })
       .from(stores)
       .where(eq(stores.id, storeId))
@@ -383,6 +404,14 @@ async function patchByJsonBody(storeId: string, request: Request, userId: string
     updateValues.vatMode = parseStoreVatMode(payload.data.vatMode);
   }
 
+  if (payload.data.outStockThreshold !== undefined) {
+    updateValues.outStockThreshold = payload.data.outStockThreshold;
+  }
+
+  if (payload.data.lowStockThreshold !== undefined) {
+    updateValues.lowStockThreshold = payload.data.lowStockThreshold;
+  }
+
   await db.update(stores).set(updateValues).where(eq(stores.id, storeId));
 
   return NextResponse.json({
@@ -401,6 +430,10 @@ async function patchByJsonBody(storeId: string, request: Request, userId: string
       vatEnabled: updateValues.vatEnabled ?? Boolean(targetStore.vatEnabled),
       vatRate: updateValues.vatRate ?? targetStore.vatRate,
       vatMode: updateValues.vatMode ?? parseStoreVatMode(targetStore.vatMode),
+      outStockThreshold:
+        updateValues.outStockThreshold ?? targetStore.outStockThreshold,
+      lowStockThreshold:
+        updateValues.lowStockThreshold ?? targetStore.lowStockThreshold,
     },
   });
 }
@@ -418,6 +451,8 @@ export async function GET() {
         logoUrl: stores.logoUrl,
         address: stores.address,
         phoneNumber: stores.phoneNumber,
+        outStockThreshold: stores.outStockThreshold,
+        lowStockThreshold: stores.lowStockThreshold,
       })
       .from(stores)
       .where(eq(stores.id, storeId))
@@ -436,6 +471,8 @@ export async function GET() {
         vatEnabled: financial?.vatEnabled ?? false,
         vatRate: financial?.vatRate ?? 700,
         vatMode: financial?.vatMode ?? "EXCLUSIVE",
+        outStockThreshold: store.outStockThreshold ?? 0,
+        lowStockThreshold: store.lowStockThreshold ?? 10,
       },
     });
   } catch (error) {

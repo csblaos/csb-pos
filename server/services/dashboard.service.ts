@@ -8,7 +8,11 @@ import {
   getPendingPaymentCount,
   getTodaySales,
 } from "@/server/repositories/dashboard.repo";
-import type { LowStockItem } from "@/lib/inventory/queries";
+import {
+  getStoreStockThresholds,
+  type LowStockItem,
+  type StoreStockThresholds,
+} from "@/lib/inventory/queries";
 
 export type DashboardSummary = {
   todaySales: number;
@@ -24,26 +28,28 @@ export type DashboardViewData = {
 
 const DASHBOARD_CACHE_TTL_SECONDS = 20;
 
-const dashboardSummaryCacheKey = (storeId: string, thresholdBase: number) => {
+const dashboardSummaryCacheKey = (
+  storeId: string,
+  thresholds: StoreStockThresholds,
+) => {
   const dayKey = new Date().toISOString().slice(0, 10);
-  return `dashboard:summary:${storeId}:${thresholdBase}:${dayKey}`;
+  return `dashboard:summary:${storeId}:${thresholds.outStockThreshold}:${thresholds.lowStockThreshold}:${dayKey}`;
 };
 
 export async function invalidateDashboardSummaryCache(
   storeId: string,
-  thresholdBase = 10,
 ) {
-  await redisDelete(dashboardSummaryCacheKey(storeId, thresholdBase));
+  const thresholds = await getStoreStockThresholds(storeId);
+  await redisDelete(dashboardSummaryCacheKey(storeId, thresholds));
 }
 
 export async function getDashboardViewData(params: {
   storeId: string;
-  thresholdBase?: number;
   useCache?: boolean;
 }): Promise<DashboardViewData> {
-  const thresholdBase = params.thresholdBase ?? 10;
   const useCache = params.useCache ?? true;
-  const cacheKey = dashboardSummaryCacheKey(params.storeId, thresholdBase);
+  const thresholds = await getStoreStockThresholds(params.storeId);
+  const cacheKey = dashboardSummaryCacheKey(params.storeId, thresholds);
 
   return timePerf("dashboard.service.getViewData.total", async () => {
     const scope = createPerfScope("dashboard.service.getViewData");
@@ -64,7 +70,7 @@ export async function getDashboardViewData(params: {
             getTodaySales(params.storeId),
             getOrdersCountToday(params.storeId),
             getPendingPaymentCount(params.storeId),
-            getLowStockItemsByStore(params.storeId, thresholdBase),
+            getLowStockItemsByStore(params.storeId, thresholds),
           ]),
         );
 
