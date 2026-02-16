@@ -576,6 +576,101 @@ async function ensureSchemaCompatForLatestAuthChanges() {
       and trim(\`promptpay_id\`) <> ''
   `);
   console.info("[db:repair] ensured store_payment_accounts table and indexes");
+
+  // ── product_categories + products.image_url/category_id (migration 0022) ──
+
+  await client.execute(`
+    create table if not exists \`product_categories\` (
+      \`id\` text primary key not null,
+      \`store_id\` text not null references \`stores\`(\`id\`) on delete cascade,
+      \`name\` text not null,
+      \`sort_order\` integer not null default 0,
+      \`created_at\` text not null default (CURRENT_TIMESTAMP)
+    )
+  `);
+  await client.execute(
+    "create index if not exists `product_categories_store_id_idx` on `product_categories` (`store_id`)",
+  );
+  await client.execute(
+    "create unique index if not exists `product_categories_store_name_unique` on `product_categories` (`store_id`, `name`)",
+  );
+  console.info("[db:repair] ensured table product_categories");
+
+  if (!(await columnExists("products", "image_url"))) {
+    await client.execute("alter table `products` add `image_url` text");
+    console.info("[db:repair] added column products.image_url");
+  }
+
+  if (!(await columnExists("products", "category_id"))) {
+    await client.execute(
+      "alter table `products` add `category_id` text references `product_categories`(`id`) on delete set null",
+    );
+    console.info("[db:repair] added column products.category_id");
+  }
+
+  await client.execute(
+    "create index if not exists `products_category_id_idx` on `products` (`category_id`)",
+  );
+  console.info("[db:repair] ensured products.category_id index");
+
+  // ── purchase_orders + purchase_order_items (migration 0023) ──
+
+  await client.execute(`
+    create table if not exists \`purchase_orders\` (
+      \`id\` text primary key not null,
+      \`store_id\` text not null references \`stores\`(\`id\`) on delete cascade,
+      \`po_number\` text not null,
+      \`supplier_name\` text,
+      \`supplier_contact\` text,
+      \`purchase_currency\` text not null default 'LAK',
+      \`exchange_rate\` integer not null default 1,
+      \`shipping_cost\` integer not null default 0,
+      \`other_cost\` integer not null default 0,
+      \`other_cost_note\` text,
+      \`status\` text not null default 'DRAFT',
+      \`ordered_at\` text,
+      \`expected_at\` text,
+      \`shipped_at\` text,
+      \`received_at\` text,
+      \`tracking_info\` text,
+      \`note\` text,
+      \`created_by\` text references \`users\`(\`id\`),
+      \`created_at\` text not null default (CURRENT_TIMESTAMP)
+    )
+  `);
+  await client.execute(
+    "create index if not exists `po_store_id_idx` on `purchase_orders` (`store_id`)",
+  );
+  await client.execute(
+    "create index if not exists `po_status_idx` on `purchase_orders` (`store_id`, `status`)",
+  );
+  await client.execute(
+    "create index if not exists `po_created_at_idx` on `purchase_orders` (`store_id`, `created_at`)",
+  );
+  await client.execute(
+    "create unique index if not exists `po_store_po_number_unique` on `purchase_orders` (`store_id`, `po_number`)",
+  );
+  console.info("[db:repair] ensured table purchase_orders + indexes");
+
+  await client.execute(`
+    create table if not exists \`purchase_order_items\` (
+      \`id\` text primary key not null,
+      \`purchase_order_id\` text not null references \`purchase_orders\`(\`id\`) on delete cascade,
+      \`product_id\` text not null references \`products\`(\`id\`) on delete restrict,
+      \`qty_ordered\` integer not null,
+      \`qty_received\` integer not null default 0,
+      \`unit_cost_purchase\` integer not null default 0,
+      \`unit_cost_base\` integer not null default 0,
+      \`landed_cost_per_unit\` integer not null default 0
+    )
+  `);
+  await client.execute(
+    "create index if not exists `po_items_po_id_idx` on `purchase_order_items` (`purchase_order_id`)",
+  );
+  await client.execute(
+    "create index if not exists `po_items_product_id_idx` on `purchase_order_items` (`product_id`)",
+  );
+  console.info("[db:repair] ensured table purchase_order_items + indexes");
 }
 
 async function ensureMigrationTable() {

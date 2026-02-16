@@ -35,6 +35,8 @@ const moduleActionPermissions: PermissionSeed[] = moduleActionResources.flatMap(
 const extraPermissions: PermissionSeed[] = [
   { resource: "products", action: "archive" },
   { resource: "products", action: "price.update" },
+  { resource: "products", action: "cost.view" },
+  { resource: "products", action: "cost.update" },
   { resource: "inventory", action: "in" },
   { resource: "inventory", action: "out" },
   { resource: "inventory", action: "adjust" },
@@ -90,6 +92,8 @@ export const defaultRolePermissions: Record<DefaultRoleName, "ALL" | string[]> =
     ...keys("rbac.permissions", ["view"]),
     "products.archive",
     "products.price.update",
+    "products.cost.view",
+    "products.cost.update",
     "inventory.in",
     "inventory.out",
     "inventory.adjust",

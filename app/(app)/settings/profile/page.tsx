@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { eq } from "drizzle-orm";
-import { ChevronRight, KeyRound, UserRound } from "lucide-react";
+import { ChevronRight, Lock, UserRound } from "lucide-react";
 import { redirect } from "next/navigation";
 
+import { AccountPasswordSettings } from "@/components/app/account-password-settings";
 import { AccountProfileSettings } from "@/components/app/account-profile-settings";
 import { getSession } from "@/lib/auth/session";
 import { db } from "@/lib/db/client";
@@ -38,6 +39,7 @@ export default async function SettingsProfilePage() {
     .select({
       name: users.name,
       email: users.email,
+      mustChangePassword: users.mustChangePassword,
     })
     .from(users)
     .where(eq(users.id, session.userId))
@@ -58,11 +60,19 @@ export default async function SettingsProfilePage() {
   return (
     <section className="space-y-5">
       <header className="space-y-1 px-1">
-        <h1 className="text-[28px] font-semibold tracking-tight text-slate-900">โปรไฟล์บัญชี</h1>
-        <p className="text-sm text-slate-500">แก้ไขชื่อผู้ใช้ที่ใช้แสดงในระบบ และตรวจสอบอีเมลเข้าสู่ระบบ</p>
+        <h1 className="text-[28px] font-semibold tracking-tight text-slate-900">บัญชีของฉัน</h1>
+        <p className="text-sm text-slate-500">แก้ไขโปรไฟล์และจัดการความปลอดภัยบัญชี</p>
       </header>
 
-      <AccountProfileSettings initialName={account.name} email={account.email} />
+      <div className="space-y-2">
+        <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">โปรไฟล์</p>
+        <AccountProfileSettings initialName={account.name} email={account.email} />
+      </div>
+
+      <div className="space-y-2">
+        <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">ความปลอดภัย</p>
+        <AccountPasswordSettings mustChangePassword={account.mustChangePassword} />
+      </div>
 
       <div className="space-y-2">
         <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">นำทาง</p>
@@ -72,11 +82,11 @@ export default async function SettingsProfilePage() {
             className="group flex min-h-14 items-center gap-3 border-b border-slate-100 px-4 py-3 transition-colors hover:bg-slate-50"
           >
             <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
-              <KeyRound className="h-4 w-4" />
+              <Lock className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium text-slate-900">ไปหน้าความปลอดภัยบัญชี</span>
-              <span className="mt-0.5 block truncate text-xs text-slate-500">เปลี่ยนรหัสผ่านและตรวจสถานะความปลอดภัย</span>
+              <span className="mt-0.5 block truncate text-xs text-slate-500">ตรวจสอบสถานะรหัสผ่านและขีดจำกัดอุปกรณ์</span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
           </Link>

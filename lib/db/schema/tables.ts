@@ -32,7 +32,7 @@ export const movementTypeEnum = [
   "ADJUST",
   "RETURN",
 ] as const;
-export const movementRefTypeEnum = ["ORDER", "MANUAL", "RETURN"] as const;
+export const movementRefTypeEnum = ["ORDER", "MANUAL", "RETURN", "PURCHASE"] as const;
 export const orderChannelEnum = ["WALK_IN", "FACEBOOK", "WHATSAPP"] as const;
 export const orderPaymentMethodEnum = ["CASH", "LAO_QR"] as const;
 export const orderStatusEnum = [
@@ -48,6 +48,13 @@ export const connectionStatusEnum = [
   "DISCONNECTED",
   "CONNECTED",
   "ERROR",
+] as const;
+export const purchaseOrderStatusEnum = [
+  "DRAFT",
+  "ORDERED",
+  "SHIPPED",
+  "RECEIVED",
+  "CANCELLED",
 ] as const;
 export const unitScopeEnum = ["SYSTEM", "STORE"] as const;
 export const memberBranchAccessModeEnum = ["ALL", "SELECTED"] as const;
@@ -368,6 +375,26 @@ export const units = sqliteTable(
   }),
 );
 
+export const productCategories = sqliteTable(
+  "product_categories",
+  {
+    id: id(),
+    storeId: text("store_id")
+      .notNull()
+      .references(() => stores.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: text("created_at").notNull().default(createdAtDefault),
+  },
+  (table) => ({
+    productCategoriesStoreIdIdx: index("product_categories_store_id_idx").on(table.storeId),
+    productCategoriesStoreNameUnique: uniqueIndex("product_categories_store_name_unique").on(
+      table.storeId,
+      table.name,
+    ),
+  }),
+);
+
 export const products = sqliteTable(
   "products",
   {
@@ -378,17 +405,20 @@ export const products = sqliteTable(
     sku: text("sku").notNull(),
     name: text("name").notNull(),
     barcode: text("barcode"),
+    imageUrl: text("image_url"),
+    categoryId: text("category_id").references(() => productCategories.id, { onDelete: "set null" }),
     baseUnitId: text("base_unit_id")
       .notNull()
       .references(() => units.id),
     priceBase: integer("price_base").notNull(),
-    costBase: integer("cost_base").notNull(),
+    costBase: integer("cost_base").notNull().default(0),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
     createdAt: text("created_at").notNull().default(createdAtDefault),
   },
   (table) => ({
     productsStoreIdIdx: index("products_store_id_idx").on(table.storeId),
     productsCreatedAtIdx: index("products_created_at_idx").on(table.createdAt),
+    productsCategoryIdIdx: index("products_category_id_idx").on(table.categoryId),
     productsStoreSkuUnique: uniqueIndex("products_store_sku_unique").on(
       table.storeId,
       table.sku,
@@ -570,6 +600,68 @@ export const orderItems = sqliteTable(
   (table) => ({
     orderItemsOrderIdIdx: index("order_items_order_id_idx").on(table.orderId),
     orderItemsProductIdIdx: index("order_items_product_id_idx").on(table.productId),
+  }),
+);
+
+export const purchaseOrders = sqliteTable(
+  "purchase_orders",
+  {
+    id: id(),
+    storeId: text("store_id")
+      .notNull()
+      .references(() => stores.id, { onDelete: "cascade" }),
+    poNumber: text("po_number").notNull(),
+    supplierName: text("supplier_name"),
+    supplierContact: text("supplier_contact"),
+    purchaseCurrency: text("purchase_currency", { enum: storeCurrencyEnum })
+      .notNull()
+      .default("LAK"),
+    exchangeRate: integer("exchange_rate").notNull().default(1),
+    shippingCost: integer("shipping_cost").notNull().default(0),
+    otherCost: integer("other_cost").notNull().default(0),
+    otherCostNote: text("other_cost_note"),
+    status: text("status", { enum: purchaseOrderStatusEnum })
+      .notNull()
+      .default("DRAFT"),
+    orderedAt: text("ordered_at"),
+    expectedAt: text("expected_at"),
+    shippedAt: text("shipped_at"),
+    receivedAt: text("received_at"),
+    trackingInfo: text("tracking_info"),
+    note: text("note"),
+    createdBy: text("created_by").references(() => users.id),
+    createdAt: text("created_at").notNull().default(createdAtDefault),
+  },
+  (table) => ({
+    poStoreIdIdx: index("po_store_id_idx").on(table.storeId),
+    poStatusIdx: index("po_status_idx").on(table.storeId, table.status),
+    poCreatedAtIdx: index("po_created_at_idx").on(table.storeId, table.createdAt),
+    poStorePoNumberUnique: uniqueIndex("po_store_po_number_unique").on(
+      table.storeId,
+      table.poNumber,
+    ),
+  }),
+);
+
+export const purchaseOrderItems = sqliteTable(
+  "purchase_order_items",
+  {
+    id: id(),
+    purchaseOrderId: text("purchase_order_id")
+      .notNull()
+      .references(() => purchaseOrders.id, { onDelete: "cascade" }),
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "restrict" }),
+    qtyOrdered: integer("qty_ordered").notNull(),
+    qtyReceived: integer("qty_received").notNull().default(0),
+    unitCostPurchase: integer("unit_cost_purchase").notNull().default(0),
+    unitCostBase: integer("unit_cost_base").notNull().default(0),
+    landedCostPerUnit: integer("landed_cost_per_unit").notNull().default(0),
+  },
+  (table) => ({
+    poItemsPoIdIdx: index("po_items_po_id_idx").on(table.purchaseOrderId),
+    poItemsProductIdIdx: index("po_items_product_id_idx").on(table.productId),
   }),
 );
 

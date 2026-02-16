@@ -16,6 +16,9 @@ const MAX_LOGO_SIZE_BYTES = 5 * 1024 * 1024;
 const DEFAULT_RESIZE_MAX_WIDTH = 1280;
 const MAX_PAYMENT_QR_SIZE_BYTES = 4 * 1024 * 1024;
 const DEFAULT_PAYMENT_QR_RESIZE_MAX_WIDTH = 1024;
+const MAX_PRODUCT_IMAGE_SIZE_BYTES = 3 * 1024 * 1024;
+const DEFAULT_PRODUCT_IMAGE_RESIZE_MAX_WIDTH = 640;
+const PRODUCT_IMAGE_WEBP_QUALITY = 75;
 const WEBP_QUALITY = 82;
 
 type StoreLogoUploadPolicy = {
@@ -351,6 +354,104 @@ export async function deletePaymentQrImageFromR2(params: { qrImageUrl: string })
   }
 
   const objectKey = extractObjectKeyFromUrl(config, params.qrImageUrl);
+  if (!objectKey) {
+    return false;
+  }
+
+  const client = createClient(config);
+  await client.send(
+    new DeleteObjectCommand({
+      Bucket: config.bucket,
+      Key: objectKey,
+    }),
+  );
+
+  return true;
+}
+
+function loadProductImageR2Config() {
+  const prefix = process.env.R2_PRODUCT_IMAGE_PREFIX?.trim() || "product-images";
+  return loadR2ConfigWithPrefix(prefix);
+}
+
+export function isProductImageR2Configured() {
+  return loadProductImageR2Config() !== null;
+}
+
+export async function uploadProductImageToR2(params: {
+  storeId: string;
+  productName: string;
+  file: Blob;
+}) {
+  const config = loadProductImageR2Config();
+  if (!config) {
+    throw new Error("R2_NOT_CONFIGURED");
+  }
+
+  if (!params.file.type.startsWith("image/")) {
+    throw new Error("UNSUPPORTED_FILE_TYPE");
+  }
+
+  if (params.file.size > MAX_PRODUCT_IMAGE_SIZE_BYTES) {
+    throw new Error("FILE_TOO_LARGE");
+  }
+
+  let extension = contentTypeToExtension(params.file.type);
+  let contentType = params.file.type || "application/octet-stream";
+  let body: Uint8Array = new Uint8Array(await params.file.arrayBuffer());
+
+  if (params.file.type !== "image/svg+xml") {
+    try {
+      const resized = await sharp(body)
+        .rotate()
+        .resize({
+          width: DEFAULT_PRODUCT_IMAGE_RESIZE_MAX_WIDTH,
+          withoutEnlargement: true,
+          fit: "inside",
+        })
+        .webp({ quality: PRODUCT_IMAGE_WEBP_QUALITY })
+        .toBuffer();
+
+      body = resized;
+      extension = "webp";
+      contentType = "image/webp";
+    } catch {
+      // fallback to original file when resize fails
+    }
+  }
+
+  if (body.byteLength > MAX_PRODUCT_IMAGE_SIZE_BYTES) {
+    throw new Error("FILE_TOO_LARGE");
+  }
+
+  const objectKey = `${config.keyPrefix}/${params.storeId}/${randomUUID()}.${extension}`;
+  const client = createClient(config);
+
+  await client.send(
+    new PutObjectCommand({
+      Bucket: config.bucket,
+      Key: objectKey,
+      Body: body,
+      ContentType: contentType,
+      Metadata: {
+        productName: params.productName,
+      },
+    }),
+  );
+
+  return {
+    objectKey,
+    url: buildObjectUrl(config, objectKey),
+  };
+}
+
+export async function deleteProductImageFromR2(params: { imageUrl: string }) {
+  const config = loadProductImageR2Config();
+  if (!config) {
+    return false;
+  }
+
+  const objectKey = extractObjectKeyFromUrl(config, params.imageUrl);
   if (!objectKey) {
     return false;
   }

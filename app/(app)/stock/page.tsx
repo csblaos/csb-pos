@@ -1,13 +1,18 @@
 import dynamic from "next/dynamic";
 import { redirect } from "next/navigation";
+import { eq } from "drizzle-orm";
 
 import { getSession } from "@/lib/auth/session";
 import {
   getUserPermissionsForCurrentSession,
   isPermissionGranted,
 } from "@/lib/rbac/access";
+import { parseStoreCurrency } from "@/lib/finance/store-financial";
+import { db } from "@/lib/db/client";
+import { stores } from "@/lib/db/schema";
 import { createPerfScope } from "@/server/perf/perf";
 import { getStockOverview } from "@/server/services/stock.service";
+import { getPurchaseOrderList } from "@/server/services/purchase.service";
 
 const StockLedger = dynamic(
   () => import("@/components/app/stock-ledger").then((module) => module.StockLedger),
@@ -18,6 +23,25 @@ const StockLedger = dynamic(
       </div>
     ),
   },
+);
+
+const PurchaseOrderList = dynamic(
+  () =>
+    import("@/components/app/purchase-order-list").then(
+      (module) => module.PurchaseOrderList,
+    ),
+  {
+    loading: () => (
+      <div className="rounded-xl border bg-white p-4 text-sm text-muted-foreground">
+        กำลังโหลด...
+      </div>
+    ),
+  },
+);
+
+const StockTabs = dynamic(
+  () =>
+    import("@/components/app/stock-tabs").then((module) => module.StockTabs),
 );
 
 export default async function StockPage() {
@@ -52,31 +76,53 @@ export default async function StockPage() {
       );
     }
 
-    const { products, movements: recentMovements } = await perf.step(
-      "service.getStockOverview",
+    const [stockData, purchaseOrders, storeRow] = await perf.step(
+      "service.getStockAndPO",
       async () =>
-        getStockOverview({
-          storeId: activeStoreId,
-          movementLimit: 30,
-          useCache: true,
-        }),
+        Promise.all([
+          getStockOverview({
+            storeId: activeStoreId,
+            movementLimit: 30,
+            useCache: true,
+          }),
+          getPurchaseOrderList(activeStoreId),
+          db
+            .select({ currency: stores.currency })
+            .from(stores)
+            .where(eq(stores.id, activeStoreId))
+            .limit(1)
+            .then((rows) => rows[0] ?? null),
+        ]),
     );
+
+    const storeCurrency = parseStoreCurrency(storeRow?.currency);
 
     return (
       <section className="space-y-4">
         <header className="space-y-1">
           <h1 className="text-xl font-semibold">สต็อก</h1>
           <p className="text-sm text-muted-foreground">
-            จัดการรับเข้า ปรับสต็อก และตรวจสอบยอดคงเหลือสินค้า
+            จัดการรับเข้า ปรับสต็อก สั่งซื้อ และตรวจสอบยอดคงเหลือ
           </p>
         </header>
 
-        <StockLedger
-          products={products}
-          recentMovements={recentMovements}
-          canCreate={canPostMovement}
-          canAdjust={canAdjust}
-          canInbound={canInbound}
+        <StockTabs
+          stockTab={
+            <StockLedger
+              products={stockData.products}
+              recentMovements={stockData.movements}
+              canCreate={canPostMovement}
+              canAdjust={canAdjust}
+              canInbound={canInbound}
+            />
+          }
+          purchaseTab={
+            <PurchaseOrderList
+              purchaseOrders={purchaseOrders}
+              storeCurrency={storeCurrency}
+              canCreate={canCreate}
+            />
+          }
         />
       </section>
     );

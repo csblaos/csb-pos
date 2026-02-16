@@ -11,6 +11,7 @@ import {
 import { redirect } from "next/navigation";
 
 import { AccountPasswordSettings } from "@/components/app/account-password-settings";
+import { AccountProfileSettings } from "@/components/app/account-profile-settings";
 import { getSession } from "@/lib/auth/session";
 import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
@@ -143,6 +144,13 @@ export default async function SettingsSecurityPage() {
           เปลี่ยนรหัสผ่าน
         </p>
         <AccountPasswordSettings mustChangePassword={account.mustChangePassword} />
+      </div>
+
+      <div className="space-y-2">
+        <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+          โปรไฟล์บัญชี
+        </p>
+        <AccountProfileSettings initialName={account.name} email={account.email} />
       </div>
 
       <div className="space-y-2">

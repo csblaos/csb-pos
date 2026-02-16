@@ -21,7 +21,9 @@ export const productUpsertSchema = z
     costBase: z.coerce
       .number({ message: "กรอกต้นทุนให้ถูกต้อง" })
       .int("ต้นทุนต้องเป็นจำนวนเต็ม")
-      .min(0, "ต้นทุนต้องไม่ติดลบ"),
+      .min(0, "ต้นทุนต้องไม่ติดลบ")
+      .default(0),
+    categoryId: z.string().trim().optional().or(z.literal("")),
     conversions: z.array(productConversionSchema).max(20).default([]),
   })
   .superRefine((data, ctx) => {
@@ -67,6 +69,16 @@ export const updateProductSchema = z.discriminatedUnion("action", [
     action: z.literal("set_active"),
     active: z.boolean(),
   }),
+  z.object({
+    action: z.literal("update_cost"),
+    costBase: z.coerce
+      .number({ message: "กรอกต้นทุนให้ถูกต้อง" })
+      .int("ต้นทุนต้องเป็นจำนวนเต็ม")
+      .min(0, "ต้นทุนต้องไม่ติดลบ"),
+  }),
+  z.object({
+    action: z.literal("remove_image"),
+  }),
 ]);
 
 export type ProductUpsertInput = z.output<typeof productUpsertSchema>;
@@ -83,6 +95,7 @@ export const normalizeProductPayload = (payload: ProductUpsertInput) => ({
   baseUnitId: payload.baseUnitId,
   priceBase: payload.priceBase,
   costBase: payload.costBase,
+  categoryId: payload.categoryId?.trim() ? payload.categoryId.trim() : null,
   conversions: payload.conversions,
 });
 

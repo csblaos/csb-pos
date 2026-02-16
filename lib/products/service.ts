@@ -2,7 +2,7 @@ import { and, asc, desc, eq, like, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 
 import { db } from "@/lib/db/client";
-import { productUnits, products, units } from "@/lib/db/schema";
+import { productCategories, productUnits, products, units } from "@/lib/db/schema";
 
 export type UnitOption = {
   id: string;
@@ -24,6 +24,9 @@ export type ProductListItem = {
   sku: string;
   name: string;
   barcode: string | null;
+  imageUrl: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
   baseUnitId: string;
   baseUnitCode: string;
   baseUnitNameTh: string;
@@ -71,6 +74,9 @@ export async function listStoreProducts(
       sku: products.sku,
       name: products.name,
       barcode: products.barcode,
+      imageUrl: products.imageUrl,
+      categoryId: products.categoryId,
+      categoryName: productCategories.name,
       baseUnitId: products.baseUnitId,
       baseUnitCode: baseUnits.code,
       baseUnitNameTh: baseUnits.nameTh,
@@ -85,6 +91,7 @@ export async function listStoreProducts(
     })
     .from(products)
     .innerJoin(baseUnits, eq(products.baseUnitId, baseUnits.id))
+    .leftJoin(productCategories, eq(products.categoryId, productCategories.id))
     .leftJoin(productUnits, eq(productUnits.productId, products.id))
     .leftJoin(conversionUnits, eq(productUnits.unitId, conversionUnits.id))
     .where(
@@ -111,6 +118,9 @@ export async function listStoreProducts(
         sku: row.sku,
         name: row.name,
         barcode: row.barcode,
+        imageUrl: row.imageUrl,
+        categoryId: row.categoryId,
+        categoryName: row.categoryName,
         baseUnitId: row.baseUnitId,
         baseUnitCode: row.baseUnitCode,
         baseUnitNameTh: row.baseUnitNameTh,
@@ -146,4 +156,31 @@ export async function listStoreProducts(
   });
 
   return productsList;
+}
+
+/* ── Categories ── */
+
+export type CategoryItem = {
+  id: string;
+  name: string;
+  sortOrder: number;
+  productCount: number;
+};
+
+export async function listCategories(storeId: string): Promise<CategoryItem[]> {
+  const rows = await db
+    .select({
+      id: productCategories.id,
+      name: productCategories.name,
+      sortOrder: productCategories.sortOrder,
+      productCount: sql<number>`(
+        SELECT COUNT(*) FROM ${products}
+        WHERE ${products.categoryId} = ${productCategories.id}
+      )`,
+    })
+    .from(productCategories)
+    .where(eq(productCategories.storeId, storeId))
+    .orderBy(asc(productCategories.sortOrder), asc(productCategories.name));
+
+  return rows;
 }

@@ -1,10 +1,11 @@
 "use client";
 
-import { CheckCircle2, CircleAlert, Loader2, UserRound } from "lucide-react";
+import { CheckCircle2, ChevronRight, CircleAlert, Loader2, UserRound } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { SlideUpSheet } from "@/components/ui/slide-up-sheet";
 import { authFetch, setClientAuthToken } from "@/lib/auth/client-token";
 
 type AccountProfileSettingsProps = {
@@ -25,12 +26,20 @@ type UpdateProfileResponse = {
 
 export function AccountProfileSettings({ initialName, email }: AccountProfileSettingsProps) {
   const router = useRouter();
+  const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [name, setName] = useState(initialName);
   const [savedName, setSavedName] = useState(initialName);
   const [isSaving, setIsSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const closeSheet = useCallback(() => {
+    if (isSaving) return;
+    setIsSheetOpen(false);
+    setErrorMessage(null);
+    setWarningMessage(null);
+  }, [isSaving]);
 
   const normalizedName = name.trim();
   const isDirty = normalizedName !== savedName.trim();
@@ -117,22 +126,42 @@ export function AccountProfileSettings({ initialName, email }: AccountProfileSet
     "h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none ring-primary focus:ring-2 disabled:bg-slate-100";
 
   return (
-    <section className="space-y-4">
-      <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-          <div className="flex items-center gap-2">
-            <UserRound className="h-4 w-4 text-slate-600" />
-            <p className="text-sm font-semibold text-slate-900">โปรไฟล์บัญชี</p>
-          </div>
+    <>
+      {/* CTA Card */}
+      <button
+        type="button"
+        className="group w-full overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm transition-colors hover:bg-slate-50"
+        onClick={() => setIsSheetOpen(true)}
+      >
+        <div className="flex min-h-14 items-center gap-3 px-4 py-3">
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+            <UserRound className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-medium text-slate-900">แก้ไขโปรไฟล์บัญชี</span>
+            <span className="mt-0.5 block truncate text-xs text-slate-500">
+              {savedName} • {email}
+            </span>
+          </span>
           <span
-            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${profileStatus.className}`}
+            className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${profileStatus.className}`}
           >
             <ProfileStatusIcon className="h-3.5 w-3.5" />
             {profileStatus.text}
           </span>
+          <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
         </div>
+      </button>
 
-        <div className="space-y-4 p-4">
+      {/* Slide-up sheet with profile form */}
+      <SlideUpSheet
+        isOpen={isSheetOpen}
+        onClose={closeSheet}
+        title="แก้ไขโปรไฟล์บัญชี"
+        description="เปลี่ยนชื่อที่แสดงในระบบ ตรวจสอบอีเมลล็อกอิน"
+        disabled={isSaving}
+      >
+        <div className="space-y-4">
           <div className="space-y-2">
             <label className="text-xs text-muted-foreground" htmlFor="account-name">
               ชื่อที่แสดง
@@ -185,7 +214,7 @@ export function AccountProfileSettings({ initialName, email }: AccountProfileSet
             </Button>
           </div>
         </div>
-      </article>
-    </section>
+      </SlideUpSheet>
+    </>
   );
 }

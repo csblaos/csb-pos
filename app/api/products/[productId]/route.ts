@@ -12,12 +12,74 @@ import {
   toRBACErrorResponse,
 } from "@/lib/rbac/access";
 import { normalizeProductPayload, updateProductSchema } from "@/lib/products/validation";
+import {
+  deleteProductImageFromR2,
+  uploadProductImageToR2,
+  isProductImageR2Configured,
+} from "@/lib/storage/r2";
 
 export async function PATCH(
   request: Request,
   context: { params: Promise<{ productId: string }> },
 ) {
   try {
+    const contentType = request.headers.get("content-type") ?? "";
+
+    // ── Image upload (multipart/form-data) ──
+    if (contentType.includes("multipart/form-data")) {
+      const { storeId } = await enforcePermission("products.update");
+      const { productId } = await context.params;
+
+      if (!isProductImageR2Configured()) {
+        return NextResponse.json(
+          { message: "ยังไม่ได้ตั้งค่า R2 สำหรับรูปสินค้า" },
+          { status: 500 },
+        );
+      }
+
+      const [targetProduct] = await db
+        .select({ id: products.id, name: products.name, imageUrl: products.imageUrl })
+        .from(products)
+        .where(and(eq(products.id, productId), eq(products.storeId, storeId)))
+        .limit(1);
+
+      if (!targetProduct) {
+        return NextResponse.json({ message: "ไม่พบสินค้า" }, { status: 404 });
+      }
+
+      const formData = await request.formData();
+      const file = formData.get("image");
+      if (!file || !(file instanceof Blob)) {
+        return NextResponse.json(
+          { message: "กรุณาเลือกไฟล์รูปภาพ" },
+          { status: 400 },
+        );
+      }
+
+      const { url: imageUrl } = await uploadProductImageToR2({
+        storeId,
+        productName: targetProduct.name,
+        file,
+      });
+
+      // Delete old image if exists
+      if (targetProduct.imageUrl) {
+        try {
+          await deleteProductImageFromR2({ imageUrl: targetProduct.imageUrl });
+        } catch {
+          // non-critical
+        }
+      }
+
+      await db
+        .update(products)
+        .set({ imageUrl })
+        .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
+
+      return NextResponse.json({ ok: true, imageUrl });
+    }
+
+    // ── JSON actions ──
     const parsed = updateProductSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json({ message: "ข้อมูลไม่ถูกต้อง" }, { status: 400 });
@@ -25,6 +87,7 @@ export async function PATCH(
 
     const { productId } = await context.params;
 
+    // ── set_active ──
     if (parsed.data.action === "set_active") {
       const { storeId, session } = await enforcePermission("products.view");
       const [canArchive, canDelete] = await Promise.all([
@@ -54,6 +117,67 @@ export async function PATCH(
       return NextResponse.json({ ok: true });
     }
 
+    // ── update_cost ──
+    if (parsed.data.action === "update_cost") {
+      const { storeId, session } = await enforcePermission("products.view");
+      const canUpdateCost = await hasPermission(
+        { userId: session.userId },
+        storeId,
+        "products.cost.update",
+      );
+      if (!canUpdateCost) {
+        throw new RBACError(403, "ไม่มีสิทธิ์แก้ไขต้นทุนสินค้า");
+      }
+
+      const [targetProduct] = await db
+        .select({ id: products.id })
+        .from(products)
+        .where(and(eq(products.id, productId), eq(products.storeId, storeId)))
+        .limit(1);
+
+      if (!targetProduct) {
+        return NextResponse.json({ message: "ไม่พบสินค้า" }, { status: 404 });
+      }
+
+      await db
+        .update(products)
+        .set({ costBase: parsed.data.costBase })
+        .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
+
+      return NextResponse.json({ ok: true });
+    }
+
+    // ── remove_image ──
+    if (parsed.data.action === "remove_image") {
+      const { storeId } = await enforcePermission("products.update");
+
+      const [targetProduct] = await db
+        .select({ id: products.id, imageUrl: products.imageUrl })
+        .from(products)
+        .where(and(eq(products.id, productId), eq(products.storeId, storeId)))
+        .limit(1);
+
+      if (!targetProduct) {
+        return NextResponse.json({ message: "ไม่พบสินค้า" }, { status: 404 });
+      }
+
+      if (targetProduct.imageUrl) {
+        try {
+          await deleteProductImageFromR2({ imageUrl: targetProduct.imageUrl });
+        } catch {
+          // non-critical
+        }
+      }
+
+      await db
+        .update(products)
+        .set({ imageUrl: null })
+        .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
+
+      return NextResponse.json({ ok: true });
+    }
+
+    // ── update (full product data) ──
     const { storeId } = await enforcePermission("products.update");
 
     const [targetProduct] = await db
@@ -112,6 +236,7 @@ export async function PATCH(
           baseUnitId: payload.baseUnitId,
           priceBase: payload.priceBase,
           costBase: payload.costBase,
+          categoryId: payload.categoryId,
         })
         .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
 
@@ -131,6 +256,7 @@ export async function PATCH(
 
     return NextResponse.json({ ok: true });
   } catch (error) {
+    console.error("[PATCH /api/products/:id] error →", error);
     return toRBACErrorResponse(error);
   }
 }

@@ -75,6 +75,7 @@ export async function POST(request: Request) {
         baseUnitId: payload.baseUnitId,
         priceBase: payload.priceBase,
         costBase: payload.costBase,
+        categoryId: payload.categoryId,
         active: true,
       });
 

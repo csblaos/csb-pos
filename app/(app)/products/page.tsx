@@ -1,10 +1,10 @@
-import Link from "next/link";
 import dynamic from "next/dynamic";
 import { redirect } from "next/navigation";
 
 import { getSession } from "@/lib/auth/session";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
-import { listStoreProducts, listUnits } from "@/lib/products/service";
+import { listCategories, listStoreProducts, listUnits } from "@/lib/products/service";
+import { getStoreFinancialConfig } from "@/lib/stores/financial";
 
 const ProductsManagement = dynamic(
   () =>
@@ -39,9 +39,8 @@ export default async function ProductsPage() {
   const canArchive =
     isPermissionGranted(permissionKeys, "products.archive") ||
     isPermissionGranted(permissionKeys, "products.delete");
-  const canManageUnits =
-    isPermissionGranted(permissionKeys, "units.view") ||
-    isPermissionGranted(permissionKeys, "units.create");
+  const canViewCost = isPermissionGranted(permissionKeys, "products.cost.view");
+  const canUpdateCost = isPermissionGranted(permissionKeys, "products.cost.update");
 
   if (!canView) {
     return (
@@ -52,9 +51,11 @@ export default async function ProductsPage() {
     );
   }
 
-  const [products, units] = await Promise.all([
+  const [products, units, categories, financial] = await Promise.all([
     listStoreProducts(session.activeStoreId),
     listUnits(session.activeStoreId),
+    listCategories(session.activeStoreId),
+    getStoreFinancialConfig(session.activeStoreId),
   ]);
 
   return (
@@ -67,15 +68,14 @@ export default async function ProductsPage() {
       <ProductsManagement
         products={products}
         units={units}
+        categories={categories}
+        currency={financial?.currency ?? "LAK"}
         canCreate={canCreate}
         canUpdate={canUpdate}
         canArchive={canArchive}
-        canManageUnits={canManageUnits}
+        canViewCost={canViewCost}
+        canUpdateCost={canUpdateCost}
       />
-
-      <Link href="/settings" className="text-sm font-medium text-blue-700 hover:underline">
-        กลับไปหน้าตั้งค่า
-      </Link>
     </section>
   );
 }

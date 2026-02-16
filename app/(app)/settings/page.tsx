@@ -5,10 +5,12 @@ import {
   CheckCircle2,
   ChevronRight,
   Lock,
+  Package,
   PlugZap,
   Settings2,
   Shield,
   Store,
+  Tags,
   UserRound,
   Users,
   WalletCards,
@@ -108,6 +110,7 @@ export default async function SettingsPage() {
   const canViewUsers = isPermissionGranted(permissionKeys, "members.view");
   const canViewRoles = isPermissionGranted(permissionKeys, "rbac.roles.view");
   const canViewUnits = isPermissionGranted(permissionKeys, "units.view");
+  const canViewProducts = isPermissionGranted(permissionKeys, "products.view");
   const canViewReports = isPermissionGranted(permissionKeys, "reports.view");
   const canViewConnections = isPermissionGranted(permissionKeys, "connections.view");
   const canUpdateSettings = isPermissionGranted(permissionKeys, "settings.update");
@@ -209,14 +212,6 @@ export default async function SettingsPage() {
       visible: canViewRoles,
     },
     {
-      id: "units",
-      href: "/settings/units",
-      title: "หน่วยสินค้า",
-      description: "จัดการหน่วยพื้นฐาน เช่น PCS, PACK, BOX",
-      icon: Settings2,
-      visible: canViewUnits,
-    },
-    {
       id: "reports",
       href: "/reports",
       title: "รายงาน",
@@ -226,7 +221,27 @@ export default async function SettingsPage() {
     },
   ];
 
+  const productSettingsLinks: SettingsLinkItem[] = [
+    {
+      id: "categories",
+      href: "/settings/categories",
+      title: "หมวดหมู่สินค้า",
+      description: "จัดกลุ่มสินค้า เช่น อาหาร เครื่องดื่ม ขนม",
+      icon: Tags,
+      visible: canViewProducts,
+    },
+    {
+      id: "units",
+      href: "/settings/units",
+      title: "หน่วยสินค้า",
+      description: "จัดการหน่วยพื้นฐาน เช่น PCS, PACK, BOX",
+      icon: Package,
+      visible: canViewUnits,
+    },
+  ];
+
   const accountLinks: SettingsLinkItem[] = [
+
     {
       id: "account-profile",
       href: "/settings/profile",
@@ -356,6 +371,30 @@ export default async function SettingsPage() {
             </ul>
           </div>
         </div>
+
+        {productSettingsLinks.some((item) => item.visible) && (
+          <div className="space-y-2">
+            <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+              ตั้งค่าสินค้า
+            </p>
+            <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <ul className="divide-y divide-slate-100">
+                {productSettingsLinks
+                  .filter((item) => item.visible)
+                  .map((item) => (
+                    <li key={item.id}>
+                      <SettingsLinkRow
+                        href={item.href}
+                        title={item.title}
+                        description={item.description}
+                        icon={item.icon}
+                      />
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          </div>
+        )}
 
         <div className="space-y-2">
           <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">

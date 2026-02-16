@@ -76,6 +76,16 @@ export function currencyLabel(currency: StoreCurrency) {
   return "USD";
 }
 
+const CURRENCY_SYMBOLS: Record<StoreCurrency, string> = {
+  LAK: "₭",
+  THB: "฿",
+  USD: "$",
+};
+
+export function currencySymbol(currency: StoreCurrency): string {
+  return CURRENCY_SYMBOLS[currency] ?? currency;
+}
+
 export function vatModeLabel(mode: StoreVatMode) {
   return mode === "INCLUSIVE" ? "รวม VAT" : "ไม่รวม VAT";
 }
