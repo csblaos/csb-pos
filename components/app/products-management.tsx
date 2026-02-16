@@ -1659,32 +1659,35 @@ function BarcodeScanner({
     trackRef.current = null;
   };
 
-  const safeStop = () => {
+  type ExtendedMediaTrackCapabilities = MediaTrackCapabilities & {
+    torch?: boolean;
+    zoom?: { min: number; max: number; step: number };
+  };
+
+  const safeStop = useCallback(() => {
     if (controlsRef.current) {
       controlsRef.current.stop();
       controlsRef.current = null;
     }
     stopStream();
-  };
+  }, []);
 
-  const refreshDevices = async () => {
+  const refreshDevices = useCallback(async () => {
     const list = await navigator.mediaDevices.enumerateDevices();
     const cams = list.filter((d) => d.kind === "videoinput");
     setDevices(cams);
     return cams;
-  };
+  }, []);
 
-  const syncCapabilities = (track: MediaStreamTrack) => {
-    const caps = (track.getCapabilities?.() as any) ?? null;
+  const syncCapabilities = useCallback((track: MediaStreamTrack) => {
+    const caps = (track.getCapabilities?.() as ExtendedMediaTrackCapabilities | null) ?? null;
     if (caps && "torch" in caps) {
       setTorchSupported(Boolean(caps.torch));
     } else {
       setTorchSupported(false);
     }
     if (caps && "zoom" in caps) {
-      const zoomCaps = caps.zoom as
-        | { min: number; max: number; step: number }
-        | undefined;
+      const zoomCaps = caps.zoom;
       if (zoomCaps) {
         setZoomRange({
           min: zoomCaps.min ?? 1,
@@ -1697,9 +1700,9 @@ function BarcodeScanner({
     } else {
       setZoomRange(null);
     }
-  };
+  }, []);
 
-  const startScanner = async (deviceId?: string) => {
+  const startScanner = useCallback(async (deviceId?: string) => {
     setError(null);
     setStatus("opening");
 
@@ -1770,7 +1773,7 @@ function BarcodeScanner({
       setError("ไม่สามารถเปิดกล้องได้ — กรุณาพิมพ์บาร์โค้ดด้านล่าง");
       safeStop();
     }
-  };
+  }, [onResult, refreshDevices, safeStop, syncCapabilities]);
 
   useEffect(() => {
     let mounted = true;
@@ -1784,7 +1787,7 @@ function BarcodeScanner({
       safeStop();
       codeReaderRef.current = null;
     };
-  }, [onResult]);
+  }, [safeStop, startScanner]);
 
   return (
     <div className="space-y-4">
