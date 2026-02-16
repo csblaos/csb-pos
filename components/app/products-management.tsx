@@ -6,6 +6,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -132,6 +133,8 @@ export function ProductsManagement({
   const [detailTab, setDetailTab] = useState<DetailTab>("info");
   const [editingCost, setEditingCost] = useState(false);
   const [costDraft, setCostDraft] = useState(0);
+  const detailContentRef = useRef<HTMLDivElement>(null);
+  const [detailContentHeight, setDetailContentHeight] = useState<number | null>(null);
 
   /* ── Units lookup ── */
   const unitById = useMemo(() => new Map(units.map((u) => [u.id, u])), [units]);
@@ -139,6 +142,12 @@ export function ProductsManagement({
   /* ── Sync server data ── */
   useEffect(() => setProductItems(initialProducts), [initialProducts]);
   useEffect(() => setCategories(initialCategories), [initialCategories]);
+
+  useLayoutEffect(() => {
+    if (!detailContentRef.current) return;
+    const nextHeight = detailContentRef.current.getBoundingClientRect().height;
+    setDetailContentHeight(nextHeight);
+  }, [detailTab, detailProduct, editingCost, costDraft]);
 
   useEffect(() => {
     const seen = window.localStorage.getItem("scanner-permission-seen") === "1";
@@ -818,6 +827,9 @@ export function ProductsManagement({
                     {product.sku}
                     {product.categoryName ? ` · ${product.categoryName}` : ""}
                   </p>
+                  <p className="mt-0.5 text-[11px] text-slate-400">
+                    Barcode: {product.barcode ?? "—"}
+                  </p>
                 </div>
 
                 {/* Price + Status */}
@@ -1313,243 +1325,252 @@ export function ProductsManagement({
               ))}
             </div>
 
-            {/* Tab — ข้อมูล */}
-            {detailTab === "info" && (
-              <div className="space-y-3">
-                <InfoRow label="ชื่อ" value={detailProduct.name} />
-                <InfoRow label="SKU" value={detailProduct.sku} />
-                <InfoRow
-                  label="บาร์โค้ด"
-                  value={detailProduct.barcode ?? "—"}
-                />
-                <InfoRow
-                  label="หมวดหมู่"
-                  value={detailProduct.categoryName ?? "— ไม่ระบุ —"}
-                />
-                <InfoRow
-                  label="หน่วยหลัก"
-                  value={`${detailProduct.baseUnitCode} (${detailProduct.baseUnitNameTh})`}
-                />
-                <InfoRow
-                  label="สถานะ"
-                  value={detailProduct.active ? "ใช้งาน" : "ปิดใช้งาน"}
-                />
-
-                <div className="flex gap-2 pt-2">
-                  {canUpdate && (
-                    <Button
-                      variant="outline"
-                      className="h-9 flex-1 rounded-lg text-xs"
-                      onClick={() => beginEdit(detailProduct)}
-                      disabled={loadingKey !== null}
-                    >
-                      <Pencil className="mr-1 h-3 w-3" />
-                      แก้ไข
-                    </Button>
-                  )}
-                  {canCreate && (
-                    <Button
-                      variant="outline"
-                      className="h-9 flex-1 rounded-lg text-xs"
-                      onClick={() => duplicateProduct(detailProduct)}
-                      disabled={loadingKey !== null}
-                    >
-                      <Copy className="mr-1 h-3 w-3" />
-                      สำเนา
-                    </Button>
-                  )}
-                  {canArchive && (
-                    <Button
-                      variant={detailProduct.active ? "outline" : "default"}
-                      className="h-9 flex-1 rounded-lg text-xs"
-                      onClick={() => {
-                        setActiveState(detailProduct, !detailProduct.active);
-                        setShowDetailSheet(false);
-                      }}
-                      disabled={loadingKey !== null}
-                    >
-                      {detailProduct.active ? "ปิดใช้งาน" : "เปิดใช้งาน"}
-                    </Button>
-                  )}
-                </div>
-
-                {/* Print barcode */}
-                {detailProduct.barcode && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="h-9 w-full rounded-lg text-xs"
-                    onClick={() => printBarcodeLabel(detailProduct)}
-                  >
-                    <Printer className="mr-1.5 h-3.5 w-3.5" />
-                    พิมพ์บาร์โค้ด
-                  </Button>
-                )}
-              </div>
-            )}
-
-            {/* Tab — ราคา */}
-            {detailTab === "price" && (
-              <div className="space-y-3">
-                <div className="rounded-xl bg-blue-50 p-4 text-center">
-                  <p className="text-2xl font-bold text-blue-700">
-                    {fmtPrice(detailProduct.priceBase, currency)}
-                  </p>
-                  <p className="text-xs text-blue-600">
-                    ราคาขาย / {detailProduct.baseUnitCode}
-                  </p>
-                </div>
-                {detailProduct.conversions.length > 0 && (
-                  <div className="space-y-1">
-                    <p className="text-xs font-medium text-slate-700">
-                      ราคาตามหน่วยแปลง
-                    </p>
-                    {detailProduct.conversions.map((c) => (
-                      <div
-                        key={c.unitId}
-                        className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2"
-                      >
-                        <span className="text-xs text-slate-600">
-                          {c.unitCode} ({c.unitNameTh})
-                        </span>
-                        <span className="text-sm font-semibold">
-                          {fmtPrice(
-                            detailProduct.priceBase * c.multiplierToBase,
-                            currency,
-                          )}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Tab — ต้นทุน 🔒 */}
-            {detailTab === "cost" && canViewCost && (
-              <div className="space-y-3">
-                {editingCost ? (
-                  <div className="space-y-2">
-                    <label className="text-xs font-medium text-slate-700">
-                      ต้นทุน / {detailProduct.baseUnitCode}
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      step={1}
-                      value={costDraft}
-                      onChange={(e) => setCostDraft(Number(e.target.value))}
-                      className="h-10 w-full rounded-lg border px-3 text-sm outline-none ring-blue-500 focus:ring-2"
+            <div
+              className="overflow-hidden transition-[height] duration-300 ease-out"
+              style={{
+                height: detailContentHeight ? `${detailContentHeight}px` : "auto",
+              }}
+            >
+              <div ref={detailContentRef}>
+                {/* Tab — ข้อมูล */}
+                {detailTab === "info" && (
+                  <div className="space-y-3">
+                    <InfoRow label="ชื่อ" value={detailProduct.name} />
+                    <InfoRow label="SKU" value={detailProduct.sku} />
+                    <InfoRow
+                      label="บาร์โค้ด"
+                      value={detailProduct.barcode ?? "—"}
                     />
-                    <div className="flex gap-2">
+                    <InfoRow
+                      label="หมวดหมู่"
+                      value={detailProduct.categoryName ?? "— ไม่ระบุ —"}
+                    />
+                    <InfoRow
+                      label="หน่วยหลัก"
+                      value={`${detailProduct.baseUnitCode} (${detailProduct.baseUnitNameTh})`}
+                    />
+                    <InfoRow
+                      label="สถานะ"
+                      value={detailProduct.active ? "ใช้งาน" : "ปิดใช้งาน"}
+                    />
+
+                    <div className="flex gap-2 pt-2">
+                      {canUpdate && (
+                        <Button
+                          variant="outline"
+                          className="h-9 flex-1 rounded-lg text-xs"
+                          onClick={() => beginEdit(detailProduct)}
+                          disabled={loadingKey !== null}
+                        >
+                          <Pencil className="mr-1 h-3 w-3" />
+                          แก้ไข
+                        </Button>
+                      )}
+                      {canCreate && (
+                        <Button
+                          variant="outline"
+                          className="h-9 flex-1 rounded-lg text-xs"
+                          onClick={() => duplicateProduct(detailProduct)}
+                          disabled={loadingKey !== null}
+                        >
+                          <Copy className="mr-1 h-3 w-3" />
+                          สำเนา
+                        </Button>
+                      )}
+                      {canArchive && (
+                        <Button
+                          variant={detailProduct.active ? "outline" : "default"}
+                          className="h-9 flex-1 rounded-lg text-xs"
+                          onClick={() => {
+                            setActiveState(detailProduct, !detailProduct.active);
+                            setShowDetailSheet(false);
+                          }}
+                          disabled={loadingKey !== null}
+                        >
+                          {detailProduct.active ? "ปิดใช้งาน" : "เปิดใช้งาน"}
+                        </Button>
+                      )}
+                    </div>
+
+                    {/* Print barcode */}
+                    {detailProduct.barcode && (
                       <Button
                         type="button"
                         variant="outline"
-                        className="h-9 flex-1 text-xs"
-                        onClick={() => setEditingCost(false)}
-                        disabled={loadingKey !== null}
+                        className="h-9 w-full rounded-lg text-xs"
+                        onClick={() => printBarcodeLabel(detailProduct)}
                       >
-                        ยกเลิก
+                        <Printer className="mr-1.5 h-3.5 w-3.5" />
+                        พิมพ์บาร์โค้ด
                       </Button>
-                      <Button
-                        type="button"
-                        className="h-9 flex-1 text-xs"
-                        onClick={saveCost}
-                        disabled={loadingKey !== null}
-                      >
-                        {loadingKey === `cost-${detailProduct.id}`
-                          ? "กำลังบันทึก..."
-                          : "บันทึก"}
-                      </Button>
-                    </div>
+                    )}
                   </div>
-                ) : (
-                  <>
-                    {/* Price vs Cost comparison */}
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="rounded-xl bg-blue-50 p-3 text-center">
-                        <p className="text-lg font-bold text-blue-700">
-                          {fmtPrice(detailProduct.priceBase, currency)}
+                )}
+
+                {/* Tab — ราคา */}
+                {detailTab === "price" && (
+                  <div className="space-y-3">
+                    <div className="rounded-xl bg-blue-50 p-4 text-center">
+                      <p className="text-2xl font-bold text-blue-700">
+                        {fmtPrice(detailProduct.priceBase, currency)}
+                      </p>
+                      <p className="text-xs text-blue-600">
+                        ราคาขาย / {detailProduct.baseUnitCode}
+                      </p>
+                    </div>
+                    {detailProduct.conversions.length > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-xs font-medium text-slate-700">
+                          ราคาตามหน่วยแปลง
                         </p>
-                        <p className="text-[10px] text-blue-500">
-                          ราคาขาย / {detailProduct.baseUnitCode}
-                        </p>
+                        {detailProduct.conversions.map((c) => (
+                          <div
+                            key={c.unitId}
+                            className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2"
+                          >
+                            <span className="text-xs text-slate-600">
+                              {c.unitCode} ({c.unitNameTh})
+                            </span>
+                            <span className="text-sm font-semibold">
+                              {fmtPrice(
+                                detailProduct.priceBase * c.multiplierToBase,
+                                currency,
+                              )}
+                            </span>
+                          </div>
+                        ))}
                       </div>
-                      <div className="rounded-xl bg-amber-50 p-3 text-center">
-                        <p className="text-lg font-bold text-amber-700">
-                          {fmtPrice(detailProduct.costBase, currency)}
-                        </p>
-                        <p className="text-[10px] text-amber-500">
+                    )}
+                  </div>
+                )}
+
+                {/* Tab — ต้นทุน 🔒 */}
+                {detailTab === "cost" && canViewCost && (
+                  <div className="space-y-3">
+                    {editingCost ? (
+                      <div className="space-y-2">
+                        <label className="text-xs font-medium text-slate-700">
                           ต้นทุน / {detailProduct.baseUnitCode}
-                        </p>
+                        </label>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={costDraft}
+                          onChange={(e) => setCostDraft(Number(e.target.value))}
+                          className="h-10 w-full rounded-lg border px-3 text-sm outline-none ring-blue-500 focus:ring-2"
+                        />
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-9 flex-1 text-xs"
+                            onClick={() => setEditingCost(false)}
+                            disabled={loadingKey !== null}
+                          >
+                            ยกเลิก
+                          </Button>
+                          <Button
+                            type="button"
+                            className="h-9 flex-1 text-xs"
+                            onClick={saveCost}
+                            disabled={loadingKey !== null}
+                          >
+                            {loadingKey === `cost-${detailProduct.id}`
+                              ? "กำลังบันทึก..."
+                              : "บันทึก"}
+                          </Button>
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <>
+                        {/* Price vs Cost comparison */}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="rounded-xl bg-blue-50 p-3 text-center">
+                            <p className="text-lg font-bold text-blue-700">
+                              {fmtPrice(detailProduct.priceBase, currency)}
+                            </p>
+                            <p className="text-[10px] text-blue-500">
+                              ราคาขาย / {detailProduct.baseUnitCode}
+                            </p>
+                          </div>
+                          <div className="rounded-xl bg-amber-50 p-3 text-center">
+                            <p className="text-lg font-bold text-amber-700">
+                              {fmtPrice(detailProduct.costBase, currency)}
+                            </p>
+                            <p className="text-[10px] text-amber-500">
+                              ต้นทุน / {detailProduct.baseUnitCode}
+                            </p>
+                          </div>
+                        </div>
 
-                    {/* Profit summary */}
-                    {detailProduct.priceBase > 0 && (
-                      <div className="rounded-lg bg-slate-50 px-3 py-2.5">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-slate-500">กำไร/หน่วยหลัก</span>
-                          <span className="text-sm font-semibold text-emerald-700">
-                            {fmtPrice(
-                              detailProduct.priceBase -
-                                detailProduct.costBase,
-                              currency,
-                            )}
+                        {/* Profit summary */}
+                        {detailProduct.priceBase > 0 && (
+                          <div className="rounded-lg bg-slate-50 px-3 py-2.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-slate-500">กำไร/หน่วยหลัก</span>
+                              <span className="text-sm font-semibold text-emerald-700">
+                                {fmtPrice(
+                                  detailProduct.priceBase -
+                                    detailProduct.costBase,
+                                  currency,
+                                )}
+                              </span>
+                            </div>
+                            <div className="mt-1 flex items-center justify-between">
+                              <span className="text-xs text-slate-500">อัตรากำไร</span>
+                              <span className="text-sm font-semibold text-emerald-700">
+                                {detailProduct.costBase > 0
+                                  ? `${(((detailProduct.priceBase - detailProduct.costBase) / detailProduct.costBase) * 100).toFixed(1)}%`
+                                  : "—"}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+
+                        {canUpdateCost && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-9 w-full text-xs"
+                            onClick={() => setEditingCost(true)}
+                            disabled={loadingKey !== null}
+                          >
+                            แก้ไขต้นทุน
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Tab — หน่วยแปลง */}
+                {detailTab === "conversions" && (
+                  <div className="space-y-2">
+                    {detailProduct.conversions.length === 0 ? (
+                      <p className="py-6 text-center text-xs text-muted-foreground">
+                        ไม่มีหน่วยแปลง
+                      </p>
+                    ) : (
+                      detailProduct.conversions.map((c) => (
+                        <div
+                          key={c.unitId}
+                          className="flex items-center justify-between rounded-lg border px-3 py-2.5"
+                        >
+                          <span className="text-sm font-medium">
+                            {c.unitCode} ({c.unitNameTh})
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            1 {c.unitCode} = {fmtNumber(c.multiplierToBase)}{" "}
+                            {detailProduct.baseUnitCode}
                           </span>
                         </div>
-                        <div className="flex items-center justify-between mt-1">
-                          <span className="text-xs text-slate-500">อัตรากำไร</span>
-                          <span className="text-sm font-semibold text-emerald-700">
-                            {detailProduct.costBase > 0
-                              ? `${(((detailProduct.priceBase - detailProduct.costBase) / detailProduct.costBase) * 100).toFixed(1)}%`
-                              : "—"}
-                          </span>
-                        </div>
-                      </div>
+                      ))
                     )}
-
-                    {canUpdateCost && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-9 w-full text-xs"
-                        onClick={() => setEditingCost(true)}
-                        disabled={loadingKey !== null}
-                      >
-                        แก้ไขต้นทุน
-                      </Button>
-                    )}
-                  </>
+                  </div>
                 )}
               </div>
-            )}
-
-            {/* Tab — หน่วยแปลง */}
-            {detailTab === "conversions" && (
-              <div className="space-y-2">
-                {detailProduct.conversions.length === 0 ? (
-                  <p className="py-6 text-center text-xs text-muted-foreground">
-                    ไม่มีหน่วยแปลง
-                  </p>
-                ) : (
-                  detailProduct.conversions.map((c) => (
-                    <div
-                      key={c.unitId}
-                      className="flex items-center justify-between rounded-lg border px-3 py-2.5"
-                    >
-                      <span className="text-sm font-medium">
-                        {c.unitCode} ({c.unitNameTh})
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        1 {c.unitCode} = {fmtNumber(c.multiplierToBase)}{" "}
-                        {detailProduct.baseUnitCode}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
+            </div>
           </div>
         )}
       </SlideUpSheet>
@@ -1608,6 +1629,7 @@ export function ProductsManagement({
         description="ส่องกล้องไปที่บาร์โค้ดสินค้า"
       >
         <BarcodeScanner
+          isOpen={showScannerSheet}
           onResult={handleBarcodeResult}
           onClose={() => setShowScannerSheet(false)}
         />
@@ -1630,9 +1652,11 @@ function InfoRow({ label, value }: { label: string; value: string }) {
 /* ─── BarcodeScanner ─── */
 
 function BarcodeScanner({
+  isOpen,
   onResult,
   onClose,
 }: {
+  isOpen: boolean;
   onResult: (barcode: string) => void;
   onClose: () => void;
 }) {
@@ -1776,6 +1800,12 @@ function BarcodeScanner({
   }, [onResult, refreshDevices, safeStop, syncCapabilities]);
 
   useEffect(() => {
+    if (!isOpen) {
+      safeStop();
+      setStatus("paused");
+      return;
+    }
+
     let mounted = true;
     const storedDeviceId = window.localStorage.getItem("scanner-camera-id");
     if (mounted) {
@@ -1787,7 +1817,7 @@ function BarcodeScanner({
       safeStop();
       codeReaderRef.current = null;
     };
-  }, [safeStop, startScanner]);
+  }, [isOpen, safeStop, startScanner]);
 
   return (
     <div className="space-y-4">
@@ -1799,7 +1829,7 @@ function BarcodeScanner({
           playsInline
         />
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div className="h-[46%] w-[80%] rounded-lg border-2 border-blue-400/80 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
+          <div className="h-[46%] w-[80%] rounded-lg border-2 border-blue-400/80" />
         </div>
       </div>
 
