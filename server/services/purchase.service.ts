@@ -2,6 +2,7 @@ import "server-only";
 
 import type {
   CreatePurchaseOrderInput,
+  UpdatePurchaseOrderInput,
   UpdatePOStatusInput,
 } from "@/lib/purchases/validation";
 import {
@@ -13,7 +14,10 @@ import {
   insertPurchaseOrder,
   insertPurchaseOrderItems,
   listPurchaseOrders,
+  listPurchaseOrdersPaged,
+  replacePurchaseOrderItems,
   updateProductCostBase,
+  updatePurchaseOrderFields,
   updatePurchaseOrderItemReceived,
   updatePurchaseOrderStatus,
 } from "@/server/repositories/purchase.repo";
@@ -38,6 +42,14 @@ export class PurchaseServiceError extends Error {
 
 export async function getPurchaseOrderList(storeId: string) {
   return listPurchaseOrders(storeId);
+}
+
+export async function getPurchaseOrderListPage(
+  storeId: string,
+  limit: number,
+  offset: number,
+) {
+  return listPurchaseOrdersPaged(storeId, limit, offset);
 }
 
 /* ────────────────────────────────────────────────
@@ -251,10 +263,143 @@ export async function updatePurchaseOrderStatusFlow(params: {
       });
 
     await receiveStockAndUpdateCost(storeId, userId, poId, finalItems);
+  } else if (payload.status === "CANCELLED") {
+    updates.cancelledAt = now;
   }
 
   await updatePurchaseOrderStatus(poId, updates);
   return getPurchaseOrderDetail(poId, storeId);
+}
+
+export async function updatePurchaseOrderFlow(params: {
+  poId: string;
+  storeId: string;
+  storeCurrency: string;
+  payload: UpdatePurchaseOrderInput;
+}): Promise<PurchaseOrderView> {
+  const { poId, storeId, storeCurrency, payload } = params;
+  const po = await getPurchaseOrderById(poId, storeId);
+
+  if (!po) {
+    throw new PurchaseServiceError(404, "ไม่พบใบสั่งซื้อ");
+  }
+
+  if (po.status === "RECEIVED" || po.status === "CANCELLED") {
+    throw new PurchaseServiceError(
+      400,
+      "PO ที่รับสินค้าแล้วหรือยกเลิกแล้ว ไม่สามารถแก้ไขได้",
+    );
+  }
+
+  const isDraft = po.status === "DRAFT";
+  const restrictedKeys = [
+    "supplierName",
+    "supplierContact",
+    "purchaseCurrency",
+    "exchangeRate",
+    "shippingCost",
+    "otherCost",
+    "otherCostNote",
+    "items",
+  ] as const;
+
+  if (!isDraft) {
+    const hasRestrictedChange = restrictedKeys.some(
+      (key) => payload[key] !== undefined,
+    );
+    if (hasRestrictedChange) {
+      throw new PurchaseServiceError(
+        400,
+        "สถานะนี้แก้ได้เฉพาะหมายเหตุ วันที่คาดรับ และข้อมูล Tracking",
+      );
+    }
+  }
+
+  const updates: Record<string, unknown> = {};
+
+  if (payload.note !== undefined) updates.note = payload.note || null;
+  if (payload.expectedAt !== undefined) updates.expectedAt = payload.expectedAt || null;
+  if (payload.trackingInfo !== undefined) {
+    updates.trackingInfo = payload.trackingInfo || null;
+  }
+
+  if (isDraft) {
+    if (payload.supplierName !== undefined) updates.supplierName = payload.supplierName || null;
+    if (payload.supplierContact !== undefined) {
+      updates.supplierContact = payload.supplierContact || null;
+    }
+    if (payload.shippingCost !== undefined) updates.shippingCost = payload.shippingCost;
+    if (payload.otherCost !== undefined) updates.otherCost = payload.otherCost;
+    if (payload.otherCostNote !== undefined) {
+      updates.otherCostNote = payload.otherCostNote || null;
+    }
+
+    const nextCurrency = payload.purchaseCurrency ?? po.purchaseCurrency;
+    const nextRate =
+      nextCurrency === storeCurrency ? 1 : Math.round(payload.exchangeRate ?? po.exchangeRate);
+
+    if (payload.purchaseCurrency !== undefined || payload.exchangeRate !== undefined) {
+      updates.purchaseCurrency = nextCurrency;
+      updates.exchangeRate = nextRate;
+    }
+
+    const costAffectingChanged =
+      payload.items !== undefined ||
+      payload.purchaseCurrency !== undefined ||
+      payload.exchangeRate !== undefined ||
+      payload.shippingCost !== undefined ||
+      payload.otherCost !== undefined;
+
+    if (costAffectingChanged) {
+      const sourceItems =
+        payload.items ??
+        po.items.map((item) => ({
+          productId: item.productId,
+          qtyOrdered: item.qtyOrdered,
+          unitCostPurchase: item.unitCostPurchase,
+        }));
+
+      const shippingCost = payload.shippingCost ?? po.shippingCost;
+      const otherCost = payload.otherCost ?? po.otherCost;
+      const totalExtraCost = shippingCost + otherCost;
+
+      const items = sourceItems.map((item) => ({
+        purchaseOrderId: po.id,
+        productId: item.productId,
+        qtyOrdered: item.qtyOrdered,
+        qtyReceived: 0,
+        unitCostPurchase: item.unitCostPurchase,
+        unitCostBase: Math.round(item.unitCostPurchase * nextRate),
+        landedCostPerUnit: 0,
+      }));
+
+      if (totalExtraCost > 0) {
+        const totalItemsCostBase = items.reduce(
+          (sum, it) => sum + it.unitCostBase * it.qtyOrdered,
+          0,
+        );
+
+        for (const item of items) {
+          const itemTotalCostBase = item.unitCostBase * item.qtyOrdered;
+          const proportion =
+            totalItemsCostBase > 0 ? itemTotalCostBase / totalItemsCostBase : 0;
+          const allocatedExtra = Math.round(totalExtraCost * proportion);
+          item.landedCostPerUnit = Math.round(
+            (itemTotalCostBase + allocatedExtra) / item.qtyOrdered,
+          );
+        }
+      } else {
+        for (const item of items) {
+          item.landedCostPerUnit = item.unitCostBase;
+        }
+      }
+
+      await replacePurchaseOrderItems(po.id, items);
+    }
+  }
+
+  await updatePurchaseOrderFields(po.id, updates);
+  return getPurchaseOrderDetail(po.id, storeId);
 }
 
 /* ────────────────────────────────────────────────

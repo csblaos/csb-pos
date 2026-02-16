@@ -14,6 +14,7 @@ import {
   getStockBalanceByProduct,
   listRecentStockMovementsByStore,
   listStockProductsByStore,
+  listStockProductsByStorePage,
 } from "@/server/repositories/stock.repo";
 import type {
   InventoryMovementView,
@@ -109,6 +110,25 @@ export async function getStockOverview(params: {
       scope.end();
     }
   });
+}
+
+export async function getRecentStockMovements(params: {
+  storeId: string;
+  limit: number;
+}): Promise<InventoryMovementView[]> {
+  return listRecentStockMovementsByStore(params.storeId, params.limit);
+}
+
+export async function getStockProductsPage(params: {
+  storeId: string;
+  limit: number;
+  offset: number;
+}): Promise<StockProductOption[]> {
+  return listStockProductsByStorePage(
+    params.storeId,
+    params.limit,
+    params.offset,
+  );
 }
 
 export async function invalidateStockOverviewCache(

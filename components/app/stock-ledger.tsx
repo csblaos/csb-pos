@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
@@ -16,6 +23,8 @@ type StockLedgerProps = {
   canCreate: boolean;
   canAdjust: boolean;
   canInbound: boolean;
+  productPageSize: number;
+  initialHasMoreProducts: boolean;
 };
 
 type MovementType = "IN" | "ADJUST" | "RETURN";
@@ -51,8 +60,9 @@ export function StockLedger({
   canCreate,
   canAdjust,
   canInbound,
+  productPageSize,
+  initialHasMoreProducts,
 }: StockLedgerProps) {
-  const PRODUCT_PAGE_SIZE = 20;
   const MOVEMENT_PAGE_SIZE = 20;
 
   const router = useRouter();
@@ -61,6 +71,9 @@ export function StockLedger({
   const [productItems, setProductItems] = useState(products);
   const [movementItems, setMovementItems] = useState(recentMovements);
   const [productPage, setProductPage] = useState(1);
+  const [hasMoreProducts, setHasMoreProducts] = useState(initialHasMoreProducts);
+  const [isLoadingMoreProducts, setIsLoadingMoreProducts] = useState(false);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const [movementPage, setMovementPage] = useState(1);
 
   const movementTypeOptions = useMemo(() => {
@@ -89,7 +102,9 @@ export function StockLedger({
 
   useEffect(() => {
     setProductItems(products);
-  }, [products]);
+    setProductPage(1);
+    setHasMoreProducts(initialHasMoreProducts);
+  }, [initialHasMoreProducts, products]);
 
   useEffect(() => {
     setMovementItems(recentMovements);
@@ -157,16 +172,6 @@ export function StockLedger({
     setUnitId(product?.unitOptions[0]?.unitId ?? "");
   };
 
-  const productPageCount = Math.max(
-    1,
-    Math.ceil(productItems.length / PRODUCT_PAGE_SIZE),
-  );
-  const currentProductPage = Math.min(productPage, productPageCount);
-  const paginatedProducts = useMemo(() => {
-    const start = (currentProductPage - 1) * PRODUCT_PAGE_SIZE;
-    return productItems.slice(start, start + PRODUCT_PAGE_SIZE);
-  }, [currentProductPage, productItems]);
-
   const movementPageCount = Math.max(
     1,
     Math.ceil(movementItems.length / MOVEMENT_PAGE_SIZE),
@@ -178,16 +183,46 @@ export function StockLedger({
   }, [currentMovementPage, movementItems]);
 
   useEffect(() => {
-    if (productPage > productPageCount) {
-      setProductPage(productPageCount);
-    }
-  }, [productPage, productPageCount]);
-
-  useEffect(() => {
     if (movementPage > movementPageCount) {
       setMovementPage(movementPageCount);
     }
   }, [movementPage, movementPageCount]);
+
+  const loadMoreProducts = useCallback(async () => {
+    if (isLoadingMoreProducts || !hasMoreProducts) return;
+    setIsLoadingMoreProducts(true);
+    try {
+      const nextPage = productPage + 1;
+      const res = await authFetch(
+        `/api/stock/products?page=${nextPage}&pageSize=${productPageSize}`,
+      );
+      const data = await res.json();
+      if (res.ok && data?.products) {
+        setProductItems((prev) => [...prev, ...data.products]);
+        setProductPage(nextPage);
+        setHasMoreProducts(Boolean(data.hasMore));
+      }
+    } finally {
+      setIsLoadingMoreProducts(false);
+    }
+  }, [hasMoreProducts, isLoadingMoreProducts, productPage, productPageSize]);
+
+  useEffect(() => {
+    const target = loadMoreRef.current;
+    if (!target || !hasMoreProducts) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          loadMoreProducts();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMoreProducts, loadMoreProducts]);
 
   const submitMovement = async () => {
     if (!canCreate) {
@@ -264,7 +299,6 @@ export function StockLedger({
         },
         ...previous,
       ]);
-      setProductPage(1);
       setMovementPage(1);
     }
 
@@ -408,7 +442,7 @@ export function StockLedger({
           <p className="text-sm text-muted-foreground">ยังไม่มีสินค้าในร้าน</p>
         ) : (
           <div className="space-y-2">
-            {paginatedProducts.map((product) => (
+            {productItems.map((product) => (
               <div key={product.productId} className="rounded-lg border p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -448,37 +482,27 @@ export function StockLedger({
 
             <div className="flex items-center justify-between rounded-lg border bg-white px-3 py-2 text-xs">
               <p className="text-muted-foreground">
-                หน้า {currentProductPage.toLocaleString("th-TH")} /{" "}
-                {productPageCount.toLocaleString("th-TH")} (
-                {productItems.length.toLocaleString("th-TH")} รายการ)
+                แสดงแล้ว {productItems.length.toLocaleString("th-TH")} รายการ
               </p>
               <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-8 px-2 text-xs"
-                  disabled={currentProductPage <= 1}
-                  onClick={() =>
-                    setProductPage((previous) => Math.max(1, previous - 1))
-                  }
-                >
-                  ก่อนหน้า
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-8 px-2 text-xs"
-                  disabled={currentProductPage >= productPageCount}
-                  onClick={() =>
-                    setProductPage((previous) =>
-                      Math.min(productPageCount, previous + 1),
-                    )
-                  }
-                >
-                  ถัดไป
-                </Button>
+                {hasMoreProducts ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-8 px-2 text-xs"
+                    onClick={loadMoreProducts}
+                    disabled={isLoadingMoreProducts}
+                  >
+                    {isLoadingMoreProducts ? "กำลังโหลด..." : "โหลดเพิ่ม"}
+                  </Button>
+                ) : (
+                  <span className="text-slate-400">ครบแล้ว</span>
+                )}
               </div>
             </div>
+            {hasMoreProducts && (
+              <div ref={loadMoreRef} className="h-6" />
+            )}
           </div>
         )}
       </article>

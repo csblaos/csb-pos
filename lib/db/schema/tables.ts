@@ -627,6 +627,7 @@ export const purchaseOrders = sqliteTable(
     expectedAt: text("expected_at"),
     shippedAt: text("shipped_at"),
     receivedAt: text("received_at"),
+    cancelledAt: text("cancelled_at"),
     trackingInfo: text("tracking_info"),
     note: text("note"),
     createdBy: text("created_by").references(() => users.id),

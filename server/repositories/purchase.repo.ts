@@ -38,9 +38,11 @@ export type PurchaseOrderListItem = {
   totalCostBase: number;
   shippingCost: number;
   otherCost: number;
+  orderedAt: string | null;
   expectedAt: string | null;
   shippedAt: string | null;
   receivedAt: string | null;
+  cancelledAt: string | null;
   createdAt: string;
 };
 
@@ -84,9 +86,11 @@ export async function listPurchaseOrders(
       status: purchaseOrders.status,
       shippingCost: purchaseOrders.shippingCost,
       otherCost: purchaseOrders.otherCost,
+      orderedAt: purchaseOrders.orderedAt,
       expectedAt: purchaseOrders.expectedAt,
       shippedAt: purchaseOrders.shippedAt,
       receivedAt: purchaseOrders.receivedAt,
+      cancelledAt: purchaseOrders.cancelledAt,
       createdAt: purchaseOrders.createdAt,
       itemCount: sql<number>`(
         SELECT count(*) FROM ${purchaseOrderItems}
@@ -112,9 +116,66 @@ export async function listPurchaseOrders(
     totalCostBase: Number(r.totalCostBase),
     shippingCost: r.shippingCost,
     otherCost: r.otherCost,
+    orderedAt: r.orderedAt,
     expectedAt: r.expectedAt,
     shippedAt: r.shippedAt,
     receivedAt: r.receivedAt,
+    cancelledAt: r.cancelledAt,
+    createdAt: r.createdAt,
+  }));
+}
+
+export async function listPurchaseOrdersPaged(
+  storeId: string,
+  limit: number,
+  offset: number,
+): Promise<PurchaseOrderListItem[]> {
+  const rows = await db
+    .select({
+      id: purchaseOrders.id,
+      poNumber: purchaseOrders.poNumber,
+      supplierName: purchaseOrders.supplierName,
+      purchaseCurrency: purchaseOrders.purchaseCurrency,
+      status: purchaseOrders.status,
+      shippingCost: purchaseOrders.shippingCost,
+      otherCost: purchaseOrders.otherCost,
+      orderedAt: purchaseOrders.orderedAt,
+      expectedAt: purchaseOrders.expectedAt,
+      shippedAt: purchaseOrders.shippedAt,
+      receivedAt: purchaseOrders.receivedAt,
+      cancelledAt: purchaseOrders.cancelledAt,
+      createdAt: purchaseOrders.createdAt,
+      itemCount: sql<number>`(
+        SELECT count(*) FROM ${purchaseOrderItems}
+        WHERE ${purchaseOrderItems.purchaseOrderId} = ${purchaseOrders.id}
+      )`,
+      totalCostBase: sql<number>`(
+        SELECT coalesce(sum(${purchaseOrderItems.unitCostBase} * ${purchaseOrderItems.qtyOrdered}), 0)
+        FROM ${purchaseOrderItems}
+        WHERE ${purchaseOrderItems.purchaseOrderId} = ${purchaseOrders.id}
+      )`,
+    })
+    .from(purchaseOrders)
+    .where(eq(purchaseOrders.storeId, storeId))
+    .orderBy(desc(purchaseOrders.createdAt))
+    .limit(limit)
+    .offset(offset);
+
+  return rows.map((r) => ({
+    id: r.id,
+    poNumber: r.poNumber,
+    supplierName: r.supplierName,
+    purchaseCurrency: r.purchaseCurrency as "LAK" | "THB" | "USD",
+    status: r.status as PurchaseOrderListItem["status"],
+    itemCount: Number(r.itemCount),
+    totalCostBase: Number(r.totalCostBase),
+    shippingCost: r.shippingCost,
+    otherCost: r.otherCost,
+    orderedAt: r.orderedAt,
+    expectedAt: r.expectedAt,
+    shippedAt: r.shippedAt,
+    receivedAt: r.receivedAt,
+    cancelledAt: r.cancelledAt,
     createdAt: r.createdAt,
   }));
 }
@@ -182,6 +243,27 @@ export async function insertPurchaseOrderItems(
 ) {
   if (items.length === 0) return;
   await db.insert(purchaseOrderItems).values(items);
+}
+
+export async function replacePurchaseOrderItems(
+  poId: string,
+  items: (typeof purchaseOrderItems.$inferInsert)[],
+) {
+  await db
+    .delete(purchaseOrderItems)
+    .where(eq(purchaseOrderItems.purchaseOrderId, poId));
+  if (items.length === 0) return;
+  await db.insert(purchaseOrderItems).values(items);
+}
+
+export async function updatePurchaseOrderFields(
+  poId: string,
+  updates: Partial<typeof purchaseOrders.$inferInsert>,
+) {
+  await db
+    .update(purchaseOrders)
+    .set(updates)
+    .where(eq(purchaseOrders.id, poId));
 }
 
 export async function updatePurchaseOrderStatus(

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 
 import { db } from "@/lib/db/client";
@@ -105,8 +105,62 @@ const movementBalances = async (
   });
 };
 
+const movementBalancesByProductIds = async (
+  storeId: string,
+  productIds: string[],
+): Promise<InventoryBalance[]> => {
+  if (productIds.length === 0) return [];
+
+  const rows = await db
+    .select({
+      productId: inventoryMovements.productId,
+      onHand: sql<number>`
+        coalesce(sum(case
+          when ${inventoryMovements.type} = 'IN' then ${inventoryMovements.qtyBase}
+          when ${inventoryMovements.type} = 'RETURN' then ${inventoryMovements.qtyBase}
+          when ${inventoryMovements.type} = 'OUT' then -${inventoryMovements.qtyBase}
+          when ${inventoryMovements.type} = 'ADJUST' then ${inventoryMovements.qtyBase}
+          else 0
+        end), 0)
+      `,
+      reserved: sql<number>`
+        coalesce(sum(case
+          when ${inventoryMovements.type} = 'RESERVE' then ${inventoryMovements.qtyBase}
+          when ${inventoryMovements.type} = 'RELEASE' then -${inventoryMovements.qtyBase}
+          else 0
+        end), 0)
+      `,
+    })
+    .from(inventoryMovements)
+    .where(
+      and(
+        eq(inventoryMovements.storeId, storeId),
+        inArray(inventoryMovements.productId, productIds),
+      ),
+    )
+    .groupBy(inventoryMovements.productId);
+
+  return rows.map((row) => {
+    const onHand = Number(row.onHand ?? 0);
+    const reserved = Number(row.reserved ?? 0);
+    return {
+      productId: row.productId,
+      onHand,
+      reserved,
+      available: onHand - reserved,
+    };
+  });
+};
+
 export async function getInventoryBalancesByStore(storeId: string) {
   return movementBalances(storeId);
+}
+
+export async function getInventoryBalancesByStoreForProducts(
+  storeId: string,
+  productIds: string[],
+) {
+  return movementBalancesByProductIds(storeId, productIds);
 }
 
 export async function getInventoryBalanceForProduct(storeId: string, productId: string) {
@@ -147,6 +201,101 @@ export async function getStockProductsForStore(
       .innerJoin(units, eq(productUnits.unitId, units.id))
       .where(eq(products.storeId, storeId)),
     getInventoryBalancesByStore(storeId),
+  ]);
+
+  const balanceMap = new Map(balances.map((row) => [row.productId, row]));
+  const conversionMap = new Map<string, StockUnitOption[]>();
+
+  for (const row of conversionRows) {
+    const current = conversionMap.get(row.productId) ?? [];
+    current.push({
+      unitId: row.unitId,
+      unitCode: row.unitCode,
+      unitNameTh: row.unitNameTh,
+      multiplierToBase: row.multiplierToBase,
+    });
+    conversionMap.set(row.productId, current);
+  }
+
+  return productRows.map((product) => {
+    const balance = balanceMap.get(product.productId);
+    const conversionOptions = conversionMap.get(product.productId) ?? [];
+
+    const unitOptionMap = new Map<string, StockUnitOption>();
+    unitOptionMap.set(product.baseUnitId, {
+      unitId: product.baseUnitId,
+      unitCode: product.baseUnitCode,
+      unitNameTh: product.baseUnitNameTh,
+      multiplierToBase: 1,
+    });
+
+    for (const option of conversionOptions) {
+      if (!unitOptionMap.has(option.unitId)) {
+        unitOptionMap.set(option.unitId, option);
+      }
+    }
+
+    const unitOptions = [...unitOptionMap.values()].sort(
+      (a, b) => a.multiplierToBase - b.multiplierToBase,
+    );
+
+    return {
+      productId: product.productId,
+      sku: product.sku,
+      name: product.name,
+      active: Boolean(product.active),
+      baseUnitId: product.baseUnitId,
+      baseUnitCode: product.baseUnitCode,
+      baseUnitNameTh: product.baseUnitNameTh,
+      onHand: balance?.onHand ?? 0,
+      reserved: balance?.reserved ?? 0,
+      available: balance?.available ?? 0,
+      unitOptions,
+    };
+  });
+}
+
+export async function getStockProductsForStorePage(
+  storeId: string,
+  limit: number,
+  offset: number,
+): Promise<StockProductOption[]> {
+  const baseUnits = alias(units, "base_units");
+
+  const productRows = await db
+    .select({
+      productId: products.id,
+      sku: products.sku,
+      name: products.name,
+      active: products.active,
+      baseUnitId: products.baseUnitId,
+      baseUnitCode: baseUnits.code,
+      baseUnitNameTh: baseUnits.nameTh,
+    })
+    .from(products)
+    .innerJoin(baseUnits, eq(products.baseUnitId, baseUnits.id))
+    .where(eq(products.storeId, storeId))
+    .orderBy(asc(products.name))
+    .limit(limit)
+    .offset(offset);
+
+  const productIds = productRows.map((row) => row.productId);
+  if (productIds.length === 0) return [];
+
+  const [conversionRows, balances] = await Promise.all([
+    db
+      .select({
+        productId: productUnits.productId,
+        unitId: units.id,
+        unitCode: units.code,
+        unitNameTh: units.nameTh,
+        multiplierToBase: productUnits.multiplierToBase,
+      })
+      .from(productUnits)
+      .innerJoin(products, eq(productUnits.productId, products.id))
+      .innerJoin(units, eq(productUnits.unitId, units.id))
+      .where(inArray(productUnits.productId, productIds)),
+    getInventoryBalancesByStoreForProducts(storeId, productIds),
   ]);
 
   const balanceMap = new Map(balances.map((row) => [row.productId, row]));

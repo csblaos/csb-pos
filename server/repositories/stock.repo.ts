@@ -8,6 +8,7 @@ import {
   getInventoryBalanceForProduct,
   getRecentInventoryMovements,
   getStockProductsForStore,
+  getStockProductsForStorePage,
   type InventoryMovementView,
   type StockProductOption,
 } from "@/lib/inventory/queries";
@@ -24,6 +25,16 @@ export async function listStockProductsByStore(
 ): Promise<StockProductOption[]> {
   return timeDb("stock.repo.listProducts", async () =>
     getStockProductsForStore(storeId),
+  );
+}
+
+export async function listStockProductsByStorePage(
+  storeId: string,
+  limit: number,
+  offset: number,
+): Promise<StockProductOption[]> {
+  return timeDb("stock.repo.listProductsPage", async () =>
+    getStockProductsForStorePage(storeId, limit, offset),
   );
 }
 

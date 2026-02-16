@@ -4,7 +4,9 @@ import {
   Clock,
   Loader2,
   Package,
+  Pencil,
   Plus,
+  Printer,
   ShoppingCart,
   Truck,
   CheckCircle2,
@@ -13,6 +15,7 @@ import {
   X,
   ChevronRight,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   type TouchEvent,
@@ -66,6 +69,8 @@ type PurchaseOrderListProps = {
   purchaseOrders: PurchaseOrderListItem[];
   storeCurrency: StoreCurrency;
   canCreate: boolean;
+  pageSize: number;
+  initialHasMore: boolean;
 };
 
 type StatusFilter = "ALL" | PurchaseOrderListItem["status"];
@@ -95,9 +100,15 @@ export function PurchaseOrderList({
   purchaseOrders: initialList,
   storeCurrency,
   canCreate,
+  pageSize,
+  initialHasMore,
 }: PurchaseOrderListProps) {
   const router = useRouter();
   const [poList, setPoList] = useState(initialList);
+  const [poPage, setPoPage] = useState(1);
+  const [hasMore, setHasMore] = useState(initialHasMore);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [selectedPO, setSelectedPO] = useState<string | null>(null);
@@ -225,6 +236,59 @@ export function PurchaseOrderList({
     if (statusFilter === "ALL") return poList;
     return poList.filter((po) => po.status === statusFilter);
   }, [poList, statusFilter]);
+
+  const loadPurchaseOrders = useCallback(
+    async (page: number, replace = false) => {
+      const res = await authFetch(
+        `/api/stock/purchase-orders?page=${page}&pageSize=${pageSize}`,
+      );
+      const data = await res.json();
+      if (res.ok && data?.purchaseOrders) {
+        setPoList((prev) =>
+          replace ? data.purchaseOrders : [...prev, ...data.purchaseOrders],
+        );
+        setPoPage(page);
+        setHasMore(Boolean(data.hasMore));
+      }
+    },
+    [pageSize],
+  );
+
+  const reloadFirstPage = useCallback(async () => {
+    setIsLoadingMore(true);
+    try {
+      await loadPurchaseOrders(1, true);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [loadPurchaseOrders]);
+
+  const loadMore = useCallback(async () => {
+    if (isLoadingMore || !hasMore) return;
+    setIsLoadingMore(true);
+    try {
+      await loadPurchaseOrders(poPage + 1, false);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [hasMore, isLoadingMore, loadPurchaseOrders, poPage]);
+
+  useEffect(() => {
+    const target = loadMoreRef.current;
+    if (!target || !hasMore) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          loadMore();
+        }
+      },
+      { rootMargin: "200px" },
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hasMore, loadMore]);
 
   /* ── Load products for item picker ── */
   const loadProducts = useCallback(async () => {
@@ -357,12 +421,7 @@ export function PurchaseOrderList({
           : "สร้างใบสั่งซื้อเรียบร้อย",
       );
       setIsCreateOpen(false);
-      // Refresh list
-      const listRes = await authFetch("/api/stock/purchase-orders");
-      const listData = await listRes.json();
-      if (listData.ok) {
-        setPoList(listData.purchaseOrders);
-      }
+      await reloadFirstPage();
       router.refresh();
     } catch {
       toast.error("เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่");
@@ -388,9 +447,7 @@ export function PurchaseOrderList({
         return;
       }
       toast.success(`อัปเดตสถานะเป็น "${statusConfig[status].label}" เรียบร้อย`);
-      const listRes = await authFetch("/api/stock/purchase-orders");
-      const listData = await listRes.json();
-      if (listData.ok) setPoList(listData.purchaseOrders);
+      await reloadFirstPage();
       setSelectedPO(null);
       router.refresh();
     } catch {
@@ -458,6 +515,7 @@ export function PurchaseOrderList({
             { id: "ORDERED" as StatusFilter, label: "สั่งแล้ว" },
             { id: "SHIPPED" as StatusFilter, label: "จัดส่ง" },
             { id: "RECEIVED" as StatusFilter, label: "รับแล้ว" },
+            { id: "CANCELLED" as StatusFilter, label: "ยกเลิก" },
           ] as const
         ).map((f) => {
           const count = statusCounts[f.id] ?? 0;
@@ -468,7 +526,7 @@ export function PurchaseOrderList({
               type="button"
               className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                 isActive
-                  ? "bg-slate-900 text-white"
+                  ? "bg-primary text-white"
                   : "bg-slate-100 text-slate-600 active:bg-slate-200"
               }`}
               onClick={() => setStatusFilter(f.id)}
@@ -552,12 +610,78 @@ export function PurchaseOrderList({
                   </div>
                   <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-slate-400" />
                 </div>
+                <div className="mt-2">
+                  <div className="space-y-1 text-[11px] text-slate-600">
+                    {/* Timeline based on status */}
+                    {po.status === "DRAFT" && (
+                      <div>สั่งเมื่อ {formatDate(po.createdAt)}</div>
+                    )}
+                    {po.status === "ORDERED" && (
+                      <div>
+                        สั่งเมื่อ {formatDate(po.createdAt)}
+                        {po.orderedAt && (
+                          <>
+                            {" "}
+                            → ยืนยันเมื่อ {formatDate(po.orderedAt)}
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {po.status === "SHIPPED" && (
+                      <div>
+                        สั่งเมื่อ {formatDate(po.createdAt)}
+                        {po.shippedAt && (
+                          <>
+                            {" "}
+                            → จัดส่งเมื่อ {formatDate(po.shippedAt)}
+                          </>
+                        )}
+                        {po.expectedAt && (
+                          <>
+                            {" "}
+                            → คาดว่า {formatDate(po.expectedAt)}
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {po.status === "RECEIVED" && (
+                      <div>
+                        สั่งเมื่อ {formatDate(po.createdAt)}
+                        {po.shippedAt && (
+                          <>
+                            {" "}
+                            → จัดส่งเมื่อ {formatDate(po.shippedAt)}
+                          </>
+                        )}
+                        {po.receivedAt && (
+                          <>
+                            {" "}
+                            → รับเมื่อ {formatDate(po.receivedAt)}
+                          </>
+                        )}
+                      </div>
+                    )}
+    {po.status === "CANCELLED" && (
+                      <div>
+                        สั่งเมื่อ {formatDate(po.createdAt)}{" "}
+                        {po.cancelledAt && (
+                          <>
+                            · <span className="text-red-600">ยกเลิกเมื่อ {formatDate(po.cancelledAt)}</span>
+                          </>
+                        )}
+                        {!po.cancelledAt && (
+                          <>
+                            · <span className="text-red-600">ยกเลิก</span>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
                 {remaining !== null && (
-                  <div className="mt-2">
+                  <div className="mt-1.5">
                     <div className="flex items-center justify-between text-[11px]">
-                      <span className="text-slate-500">
-                        คาดว่า {formatDate(po.expectedAt!)}
-                      </span>
+                      <span className="text-slate-500">ความคืบหน้า</span>
                       <span
                         className={
                           remaining <= 0
@@ -591,6 +715,20 @@ export function PurchaseOrderList({
               </button>
             );
           })}
+          {hasMore && (
+            <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-4">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 px-4 text-xs"
+                onClick={loadMore}
+                disabled={isLoadingMore}
+              >
+                {isLoadingMore ? "กำลังโหลด..." : "โหลดเพิ่ม"}
+              </Button>
+              <div ref={loadMoreRef} className="h-2 w-full" />
+            </div>
+          )}
         </div>
       )}
 
@@ -1046,11 +1184,7 @@ export function PurchaseOrderList({
                       });
                       toast.success("สร้างใบสั่งซื้อ + ยืนยันสั่งแล้ว");
                       setIsCreateOpen(false);
-                      const listRes = await authFetch(
-                        "/api/stock/purchase-orders",
-                      );
-                      const listData = await listRes.json();
-                      if (listData.ok) setPoList(listData.purchaseOrders);
+                      await reloadFirstPage();
                       router.refresh();
                     } catch {
                       toast.error("เชื่อมต่อไม่สำเร็จ");
@@ -1101,14 +1235,17 @@ function PODetailSheet({
     status: "ORDERED" | "SHIPPED" | "RECEIVED" | "CANCELLED",
   ) => void;
 }) {
+  const router = useRouter();
   const [po, setPo] = useState<{
     id: string;
     poNumber: string;
     supplierName: string | null;
+    supplierContact: string | null;
     purchaseCurrency: string;
     exchangeRate: number;
     shippingCost: number;
     otherCost: number;
+    otherCostNote: string | null;
     status: string;
     orderedAt: string | null;
     shippedAt: string | null;
@@ -1120,6 +1257,7 @@ function PODetailSheet({
     createdAt: string;
     items: {
       id: string;
+      productId: string;
       productName: string;
       productSku: string;
       qtyOrdered: number;
@@ -1132,20 +1270,87 @@ function PODetailSheet({
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragY, setDragY] = useState(0);
+  const startYRef = useRef<number | null>(null);
+  const canDragRef = useRef(false);
+  const [isDesktopViewport, setIsDesktopViewport] = useState(false);
+  const [editForm, setEditForm] = useState({
+    supplierName: "",
+    supplierContact: "",
+    purchaseCurrency: storeCurrency,
+    exchangeRate: "1",
+    shippingCost: "0",
+    otherCost: "0",
+    otherCostNote: "",
+    note: "",
+    expectedAt: "",
+    trackingInfo: "",
+    items: [] as { productId: string; productName: string; qtyOrdered: string; unitCostPurchase: string }[],
+  });
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 640px)");
+    const apply = () => setIsDesktopViewport(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
 
   useEffect(() => {
     if (!poId) {
       setPo(null);
+      setIsEditMode(false);
       return;
     }
     setLoading(true);
     authFetch(`/api/stock/purchase-orders/${poId}`)
       .then((res) => res.json())
       .then((data) => {
-        if (data.ok) setPo(data.purchaseOrder);
+        if (data.ok) {
+          setPo(data.purchaseOrder);
+          setIsEditMode(false);
+        }
       })
       .finally(() => setLoading(false));
   }, [poId]);
+
+  const resetDrag = () => {
+    setDragY(0);
+    setIsDragging(false);
+    startYRef.current = null;
+    canDragRef.current = false;
+  };
+
+  const handleTouchStart = (e: TouchEvent<HTMLDivElement>) => {
+    if (isSavingEdit || isDesktopViewport) return;
+    canDragRef.current = true;
+    startYRef.current = e.touches[0]?.clientY ?? null;
+    setDragY(0);
+    setIsDragging(false);
+  };
+
+  const handleTouchMove = (e: TouchEvent<HTMLDivElement>) => {
+    if (isDesktopViewport || !canDragRef.current || startYRef.current === null) return;
+    const y = e.touches[0]?.clientY;
+    if (typeof y !== "number") return;
+    const dy = Math.max(0, y - startYRef.current);
+    if (dy <= 0) return;
+    setIsDragging(true);
+    setDragY(dy);
+    e.preventDefault();
+  };
+
+  const handleTouchEnd = () => {
+    if (isDesktopViewport) return;
+    if (dragY > 120) {
+      onClose();
+      return;
+    }
+    resetDrag();
+  };
 
   const handleStatusChange = async (
     newStatus: "ORDERED" | "SHIPPED" | "RECEIVED" | "CANCELLED",
@@ -1156,7 +1361,94 @@ function PODetailSheet({
     setUpdating(false);
   };
 
+  const canEditPO =
+    po?.status === "DRAFT" || po?.status === "ORDERED" || po?.status === "SHIPPED";
+  const canPrintPO = po?.status === "ORDERED" || po?.status === "SHIPPED" || po?.status === "RECEIVED" || po?.status === "CANCELLED";
+  const isDraftEditable = po?.status === "DRAFT";
+
+  const startEdit = () => {
+    if (!po) return;
+    setEditForm({
+      supplierName: po.supplierName ?? "",
+      supplierContact: po.supplierContact ?? "",
+      purchaseCurrency: (po.purchaseCurrency as StoreCurrency) ?? storeCurrency,
+      exchangeRate: String(po.exchangeRate ?? 1),
+      shippingCost: String(po.shippingCost ?? 0),
+      otherCost: String(po.otherCost ?? 0),
+      otherCostNote: po.otherCostNote ?? "",
+      note: po.note ?? "",
+      expectedAt: po.expectedAt ? po.expectedAt.slice(0, 10) : "",
+      trackingInfo: po.trackingInfo ?? "",
+      items: po.items.map((item) => ({
+        productId: item.productId,
+        productName: item.productName,
+        qtyOrdered: String(item.qtyOrdered),
+        unitCostPurchase: String(item.unitCostPurchase),
+      })),
+    });
+    setIsEditMode(true);
+  };
+
+  const saveEdit = async () => {
+    if (!po) return;
+    if (isDraftEditable && editForm.items.length === 0) {
+      toast.error("ต้องมีอย่างน้อย 1 รายการสินค้า");
+      return;
+    }
+
+    setIsSavingEdit(true);
+    try {
+      const payload = isDraftEditable
+        ? {
+            supplierName: editForm.supplierName || undefined,
+            supplierContact: editForm.supplierContact || undefined,
+            purchaseCurrency: editForm.purchaseCurrency,
+            exchangeRate: Number(editForm.exchangeRate) || 1,
+            shippingCost: Number(editForm.shippingCost) || 0,
+            otherCost: Number(editForm.otherCost) || 0,
+            otherCostNote: editForm.otherCostNote || undefined,
+            note: editForm.note || undefined,
+            expectedAt: editForm.expectedAt || undefined,
+            trackingInfo: editForm.trackingInfo || undefined,
+            items: editForm.items.map((item) => ({
+              productId: item.productId,
+              qtyOrdered: Number(item.qtyOrdered) || 1,
+              unitCostPurchase: Number(item.unitCostPurchase) || 0,
+            })),
+          }
+        : {
+            note: editForm.note || undefined,
+            expectedAt: editForm.expectedAt || undefined,
+            trackingInfo: editForm.trackingInfo || undefined,
+          };
+
+      const res = await authFetch(`/api/stock/purchase-orders/${po.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data?.message ?? "อัปเดต PO ไม่สำเร็จ");
+        return;
+      }
+
+      setPo(data.purchaseOrder);
+      setIsEditMode(false);
+      toast.success("บันทึกการแก้ไข PO เรียบร้อย");
+      router.refresh();
+    } catch {
+      toast.error("เชื่อมต่อไม่สำเร็จ");
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
   const isOpen = poId !== null;
+  const sheetStyle =
+    isOpen && !isDesktopViewport
+      ? { transform: `translateY(${dragY}px)` }
+      : undefined;
 
   return (
     <div
@@ -1173,13 +1465,30 @@ function PODetailSheet({
         disabled={updating}
       />
       <div
-        className={`absolute inset-x-0 bottom-0 max-h-[92dvh] overflow-y-auto rounded-t-3xl border border-slate-200 bg-white shadow-2xl transition-all duration-300 ease-out sm:inset-auto sm:left-1/2 sm:top-1/2 sm:w-full sm:max-w-lg sm:rounded-2xl ${
+        className={`absolute inset-x-0 bottom-0 flex max-h-[92dvh] flex-col rounded-t-3xl border border-slate-200 bg-white shadow-2xl transition-all duration-300 ease-out sm:inset-auto sm:left-1/2 sm:top-1/2 sm:w-full sm:max-w-lg sm:flex-row sm:rounded-2xl ${
+          isDragging && !isDesktopViewport
+            ? "transition-none"
+            : "transition-all duration-300 ease-out"
+        } ${
           isOpen
             ? "translate-y-0 opacity-100 sm:-translate-x-1/2 sm:-translate-y-1/2"
             : "translate-y-full opacity-0 sm:-translate-x-1/2 sm:-translate-y-[42%]"
         }`}
+        style={sheetStyle}
       >
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+        {/* Drag handle */}
+        <div
+          className="flex touch-none justify-center pt-2 sm:hidden"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+          onTouchCancel={handleTouchEnd}
+        >
+          <span className="h-1.5 w-12 rounded-full bg-slate-300" />
+        </div>
+
+        {/* Header - fixed */}
+        <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 py-3">
           <p className="text-sm font-semibold text-slate-900">
             {po?.poNumber ?? "รายละเอียด"}
           </p>
@@ -1193,7 +1502,8 @@ function PODetailSheet({
           </button>
         </div>
 
-        <div className="space-y-4 px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-4 sm:pb-4">
+        {/* Body - scrollable */}
+        <div className="flex-1 overflow-y-auto space-y-4 px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-4 sm:pb-4">
           {loading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
@@ -1201,25 +1511,284 @@ function PODetailSheet({
           ) : po ? (
             <>
               {/* Status + timeline */}
-              <div className="flex items-center gap-2">
-                {(() => {
-                  const cfg = statusConfig[po.status as PurchaseOrderListItem["status"]];
-                  const Icon = cfg?.icon ?? FileText;
-                  return (
-                    <span
-                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${cfg?.badgeClass ?? "bg-slate-100 text-slate-600"}`}
-                    >
-                      <Icon className="h-3.5 w-3.5" />
-                      {cfg?.label ?? po.status}
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  {(() => {
+                    const cfg = statusConfig[po.status as PurchaseOrderListItem["status"]];
+                    const Icon = cfg?.icon ?? FileText;
+                    return (
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${cfg?.badgeClass ?? "bg-slate-100 text-slate-600"}`}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                        {cfg?.label ?? po.status}
+                      </span>
+                    );
+                  })()}
+                  {po.supplierName && (
+                    <span className="text-xs text-slate-500">
+                      · {po.supplierName}
                     </span>
-                  );
-                })()}
-                {po.supplierName && (
-                  <span className="text-xs text-slate-500">
-                    · {po.supplierName}
-                  </span>
+                  )}
+                </div>
+                {canEditPO && !isEditMode && (
+                  <Button
+                    variant="outline"
+                    className="h-8 rounded-lg px-2.5 text-xs"
+                    onClick={startEdit}
+                    disabled={updating}
+                  >
+                    <Pencil className="mr-1 h-3.5 w-3.5" />
+                    แก้ไข
+                  </Button>
                 )}
               </div>
+
+              {canPrintPO && (
+                <div>
+                  <Link
+                    href={`/stock/purchase-orders/${po.id}/print`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    พิมพ์ PO
+                  </Link>
+                </div>
+              )}
+
+              {isEditMode && (
+                <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    แก้ไข PO
+                  </p>
+
+                  {isDraftEditable && (
+                    <>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <label className="text-[11px] text-slate-500">ซัพพลายเออร์</label>
+                          <input
+                            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                            value={editForm.supplierName}
+                            onChange={(e) =>
+                              setEditForm((prev) => ({
+                                ...prev,
+                                supplierName: e.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[11px] text-slate-500">เบอร์ติดต่อ</label>
+                          <input
+                            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                            value={editForm.supplierContact}
+                            onChange={(e) =>
+                              setEditForm((prev) => ({
+                                ...prev,
+                                supplierContact: e.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <label className="text-[11px] text-slate-500">สกุลเงิน</label>
+                          <select
+                            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                            value={editForm.purchaseCurrency}
+                            onChange={(e) =>
+                              setEditForm((prev) => ({
+                                ...prev,
+                                purchaseCurrency: e.target.value as StoreCurrency,
+                              }))
+                            }
+                          >
+                            <option value="LAK">LAK</option>
+                            <option value="THB">THB</option>
+                            <option value="USD">USD</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[11px] text-slate-500">อัตราแลกเปลี่ยน</label>
+                          <input
+                            type="number"
+                            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                            value={editForm.exchangeRate}
+                            onChange={(e) =>
+                              setEditForm((prev) => ({
+                                ...prev,
+                                exchangeRate: e.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <label className="text-[11px] text-slate-500">ค่าขนส่ง</label>
+                          <input
+                            type="number"
+                            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                            value={editForm.shippingCost}
+                            onChange={(e) =>
+                              setEditForm((prev) => ({
+                                ...prev,
+                                shippingCost: e.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[11px] text-slate-500">ค่าอื่นๆ</label>
+                          <input
+                            type="number"
+                            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                            value={editForm.otherCost}
+                            onChange={(e) =>
+                              setEditForm((prev) => ({
+                                ...prev,
+                                otherCost: e.target.value,
+                              }))
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[11px] text-slate-500">หมายเหตุค่าอื่นๆ</label>
+                        <input
+                          className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                          value={editForm.otherCostNote}
+                          onChange={(e) =>
+                            setEditForm((prev) => ({
+                              ...prev,
+                              otherCostNote: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <p className="text-[11px] text-slate-500">รายการสินค้า</p>
+                        {editForm.items.map((item, index) => (
+                          <div
+                            key={`${item.productId}-${index}`}
+                            className="rounded-lg border border-slate-200 bg-white p-2"
+                          >
+                            <p className="text-xs font-medium text-slate-700">
+                              {item.productName}
+                            </p>
+                            <div className="mt-1 grid grid-cols-2 gap-2">
+                              <input
+                                type="number"
+                                className="h-8 w-full rounded-md border border-slate-200 px-2 text-xs outline-none focus:ring-2 focus:ring-primary"
+                                value={item.qtyOrdered}
+                                onChange={(e) =>
+                                  setEditForm((prev) => ({
+                                    ...prev,
+                                    items: prev.items.map((x, i) =>
+                                      i === index
+                                        ? { ...x, qtyOrdered: e.target.value }
+                                        : x,
+                                    ),
+                                  }))
+                                }
+                              />
+                              <input
+                                type="number"
+                                className="h-8 w-full rounded-md border border-slate-200 px-2 text-xs outline-none focus:ring-2 focus:ring-primary"
+                                value={item.unitCostPurchase}
+                                onChange={(e) =>
+                                  setEditForm((prev) => ({
+                                    ...prev,
+                                    items: prev.items.map((x, i) =>
+                                      i === index
+                                        ? { ...x, unitCostPurchase: e.target.value }
+                                        : x,
+                                    ),
+                                  }))
+                                }
+                              />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  )}
+
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div className="space-y-1">
+                      <label className="text-[11px] text-slate-500">วันที่คาดรับ</label>
+                      <input
+                        type="date"
+                        className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                        value={editForm.expectedAt}
+                        onChange={(e) =>
+                          setEditForm((prev) => ({
+                            ...prev,
+                            expectedAt: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[11px] text-slate-500">Tracking</label>
+                      <input
+                        className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                        value={editForm.trackingInfo}
+                        onChange={(e) =>
+                          setEditForm((prev) => ({
+                            ...prev,
+                            trackingInfo: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] text-slate-500">หมายเหตุ</label>
+                    <input
+                      className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                      value={editForm.note}
+                      onChange={(e) =>
+                        setEditForm((prev) => ({
+                          ...prev,
+                          note: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="outline"
+                      className="h-10 rounded-lg"
+                      onClick={() => setIsEditMode(false)}
+                      disabled={isSavingEdit}
+                    >
+                      ยกเลิก
+                    </Button>
+                    <Button
+                      className="h-10 rounded-lg"
+                      onClick={saveEdit}
+                      disabled={isSavingEdit}
+                    >
+                      {isSavingEdit ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        "บันทึกการแก้ไข"
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               {/* Timeline */}
               <div className="space-y-1.5 text-xs">
@@ -1328,76 +1897,90 @@ function PODetailSheet({
               )}
 
               {/* Action buttons by status */}
-              {po.status === "DRAFT" && (
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    variant="outline"
-                    className="h-11 rounded-xl border-red-200 text-xs text-red-600 hover:bg-red-50"
-                    onClick={() => handleStatusChange("CANCELLED")}
-                    disabled={updating}
-                  >
-                    ยกเลิก
-                  </Button>
-                  <Button
-                    className="h-11 rounded-xl text-xs"
-                    onClick={() => handleStatusChange("ORDERED")}
-                    disabled={updating}
-                  >
-                    {updating ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      "ยืนยันสั่งซื้อ"
-                    )}
-                  </Button>
-                </div>
-              )}
-              {po.status === "ORDERED" && (
-                <div className="space-y-2">
-                  <Button
-                    className="h-11 w-full rounded-xl text-xs"
-                    onClick={() => handleStatusChange("SHIPPED")}
-                    disabled={updating}
-                  >
-                    {updating ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <>
-                        <Truck className="mr-1 h-3.5 w-3.5" />
-                        ซัพพลายเออร์ส่งแล้ว
-                      </>
-                    )}
-                  </Button>
-                  <Button
-                    className="h-11 w-full rounded-xl bg-emerald-600 text-xs hover:bg-emerald-700"
-                    onClick={() => handleStatusChange("RECEIVED")}
-                    disabled={updating}
-                  >
-                    {updating ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <>
-                        <Package className="mr-1 h-3.5 w-3.5" />
-                        รับสินค้า
-                      </>
-                    )}
-                  </Button>
-                </div>
-              )}
-              {po.status === "SHIPPED" && (
-                <Button
-                  className="h-11 w-full rounded-xl bg-emerald-600 text-xs hover:bg-emerald-700"
-                  onClick={() => handleStatusChange("RECEIVED")}
-                  disabled={updating}
-                >
-                  {updating ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <>
-                      <Package className="mr-1 h-3.5 w-3.5" />
-                      รับสินค้า
-                    </>
+              {!isEditMode && (
+                <>
+                  {po.status === "DRAFT" && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        variant="outline"
+                        className="h-11 rounded-xl border-red-200 text-xs text-red-600 hover:bg-red-50"
+                        onClick={() => handleStatusChange("CANCELLED")}
+                        disabled={updating}
+                      >
+                        ยกเลิก
+                      </Button>
+                      <Button
+                        className="h-11 rounded-xl text-xs"
+                        onClick={() => handleStatusChange("ORDERED")}
+                        disabled={updating}
+                      >
+                        {updating ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          "ยืนยันสั่งซื้อ"
+                        )}
+                      </Button>
+                    </div>
                   )}
-                </Button>
+                  {po.status === "ORDERED" && (
+                    <div className="space-y-2">
+                      <Button
+                        className="h-11 w-full rounded-xl text-xs"
+                        onClick={() => handleStatusChange("SHIPPED")}
+                        disabled={updating}
+                      >
+                        {updating ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <Truck className="mr-1 h-3.5 w-3.5" />
+                            ซัพพลายเออร์ส่งแล้ว
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        className="h-11 w-full rounded-xl bg-emerald-600 text-xs hover:bg-emerald-700"
+                        onClick={() => handleStatusChange("RECEIVED")}
+                        disabled={updating}
+                      >
+                        {updating ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <Package className="mr-1 h-3.5 w-3.5" />
+                            รับสินค้า
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  )}
+                  {po.status === "SHIPPED" && (
+                    <div className="space-y-2">
+                      <Button
+                        className="h-11 w-full rounded-xl bg-emerald-600 text-xs hover:bg-emerald-700"
+                        onClick={() => handleStatusChange("RECEIVED")}
+                        disabled={updating}
+                      >
+                        {updating ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <Package className="mr-1 h-3.5 w-3.5" />
+                            รับสินค้า
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="h-11 w-full rounded-xl border-red-200 text-xs text-red-600 hover:bg-red-50"
+                        onClick={() => handleStatusChange("CANCELLED")}
+                        disabled={updating}
+                      >
+                        ยกเลิก
+                      </Button>
+                    </div>
+                  )}
+                </>
               )}
             </>
           ) : (

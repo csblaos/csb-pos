@@ -632,6 +632,7 @@ async function ensureSchemaCompatForLatestAuthChanges() {
       \`expected_at\` text,
       \`shipped_at\` text,
       \`received_at\` text,
+      \`cancelled_at\` text,
       \`tracking_info\` text,
       \`note\` text,
       \`created_by\` text references \`users\`(\`id\`),
@@ -651,6 +652,12 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     "create unique index if not exists `po_store_po_number_unique` on `purchase_orders` (`store_id`, `po_number`)",
   );
   console.info("[db:repair] ensured table purchase_orders + indexes");
+
+  // Ensure cancelled_at column exists
+  if (!(await columnExists("purchase_orders", "cancelled_at"))) {
+    await client.execute("alter table `purchase_orders` add `cancelled_at` text");
+    console.info("[db:repair] added column purchase_orders.cancelled_at");
+  }
 
   await client.execute(`
     create table if not exists \`purchase_order_items\` (

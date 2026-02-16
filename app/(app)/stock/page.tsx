@@ -11,8 +11,11 @@ import { parseStoreCurrency } from "@/lib/finance/store-financial";
 import { db } from "@/lib/db/client";
 import { stores } from "@/lib/db/schema";
 import { createPerfScope } from "@/server/perf/perf";
-import { getStockOverview } from "@/server/services/stock.service";
-import { getPurchaseOrderList } from "@/server/services/purchase.service";
+import {
+  getRecentStockMovements,
+  getStockProductsPage,
+} from "@/server/services/stock.service";
+import { getPurchaseOrderListPage } from "@/server/services/purchase.service";
 
 const StockLedger = dynamic(
   () => import("@/components/app/stock-ledger").then((module) => module.StockLedger),
@@ -44,7 +47,11 @@ const StockTabs = dynamic(
     import("@/components/app/stock-tabs").then((module) => module.StockTabs),
 );
 
-export default async function StockPage() {
+export default async function StockPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ tab?: string }>;
+}) {
   const perf = createPerfScope("page.stock", "render");
 
   try {
@@ -76,16 +83,22 @@ export default async function StockPage() {
       );
     }
 
-    const [stockData, purchaseOrders, storeRow] = await perf.step(
-      "service.getStockAndPO",
-      async () =>
+    const PRODUCT_PAGE_SIZE = 20;
+    const PO_PAGE_SIZE = 20;
+
+    const [movements, purchaseOrderRows, stockProductRows, storeRow] =
+      await perf.step("service.getStockAndPO", async () =>
         Promise.all([
-          getStockOverview({
+          getRecentStockMovements({
             storeId: activeStoreId,
-            movementLimit: 30,
-            useCache: true,
+            limit: 30,
           }),
-          getPurchaseOrderList(activeStoreId),
+          getPurchaseOrderListPage(activeStoreId, PO_PAGE_SIZE + 1, 0),
+          getStockProductsPage({
+            storeId: activeStoreId,
+            limit: PRODUCT_PAGE_SIZE + 1,
+            offset: 0,
+          }),
           db
             .select({ currency: stores.currency })
             .from(stores)
@@ -93,9 +106,16 @@ export default async function StockPage() {
             .limit(1)
             .then((rows) => rows[0] ?? null),
         ]),
-    );
+      );
+
+    const hasMoreProducts = stockProductRows.length > PRODUCT_PAGE_SIZE;
+    const initialProducts = stockProductRows.slice(0, PRODUCT_PAGE_SIZE);
+    const hasMorePO = purchaseOrderRows.length > PO_PAGE_SIZE;
+    const initialPOs = purchaseOrderRows.slice(0, PO_PAGE_SIZE);
 
     const storeCurrency = parseStoreCurrency(storeRow?.currency);
+    const params = await searchParams;
+    const initialTab = params?.tab === "purchase" ? "purchase" : "stock";
 
     return (
       <section className="space-y-4">
@@ -107,20 +127,25 @@ export default async function StockPage() {
         </header>
 
         <StockTabs
+          initialTab={initialTab}
           stockTab={
             <StockLedger
-              products={stockData.products}
-              recentMovements={stockData.movements}
+              products={initialProducts}
+              recentMovements={movements}
               canCreate={canPostMovement}
               canAdjust={canAdjust}
               canInbound={canInbound}
+              productPageSize={PRODUCT_PAGE_SIZE}
+              initialHasMoreProducts={hasMoreProducts}
             />
           }
           purchaseTab={
             <PurchaseOrderList
-              purchaseOrders={purchaseOrders}
+              purchaseOrders={initialPOs}
               storeCurrency={storeCurrency}
               canCreate={canCreate}
+              pageSize={PO_PAGE_SIZE}
+              initialHasMore={hasMorePO}
             />
           }
         />

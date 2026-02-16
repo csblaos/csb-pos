@@ -5,17 +5,33 @@ import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { createPurchaseOrderSchema } from "@/lib/purchases/validation";
 import {
   createPurchaseOrder,
-  getPurchaseOrderList,
+  getPurchaseOrderListPage,
   PurchaseServiceError,
 } from "@/server/services/purchase.service";
 import { db } from "@/lib/db/client";
 import { stores } from "@/lib/db/schema";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const { storeId } = await enforcePermission("inventory.view");
-    const list = await getPurchaseOrderList(storeId);
-    return NextResponse.json({ ok: true, purchaseOrders: list });
+    const url = new URL(request.url);
+    const page = Math.max(1, Number(url.searchParams.get("page") ?? 1));
+    const pageSize = Math.min(
+      50,
+      Math.max(5, Number(url.searchParams.get("pageSize") ?? 20)),
+    );
+    const offset = (page - 1) * pageSize;
+    const rows = await getPurchaseOrderListPage(storeId, pageSize + 1, offset);
+    const hasMore = rows.length > pageSize;
+    const purchaseOrders = rows.slice(0, pageSize);
+
+    return NextResponse.json({
+      ok: true,
+      purchaseOrders,
+      page,
+      pageSize,
+      hasMore,
+    });
   } catch (error) {
     return toRBACErrorResponse(error);
   }

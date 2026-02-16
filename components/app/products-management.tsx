@@ -115,6 +115,7 @@ export function ProductsManagement({
   const [showCreateSheet, setShowCreateSheet] = useState(false);
   const [showDetailSheet, setShowDetailSheet] = useState(false);
   const [showScannerSheet, setShowScannerSheet] = useState(false);
+  const [showScannerPermissionSheet, setShowScannerPermissionSheet] = useState(false);
   const [scanContext, setScanContext] = useState<"search" | "form">("search");
 
   /* ── Form ── */
@@ -557,7 +558,7 @@ export function ProductsManagement({
   /* ── Open scanner with context ── */
   const openScanner = useCallback((ctx: "search" | "form") => {
     setScanContext(ctx);
-    setShowScannerSheet(true);
+    setShowScannerPermissionSheet(true);
   }, []);
 
   /* ── Barcode scan result ── */
@@ -1547,6 +1548,48 @@ export function ProductsManagement({
        * SlideUpSheet — Barcode Scanner
        * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
       <SlideUpSheet
+        isOpen={showScannerPermissionSheet}
+        onClose={() => setShowScannerPermissionSheet(false)}
+        title="ขออนุญาตใช้กล้อง"
+        description="ระบบต้องใช้กล้องเพื่อสแกนบาร์โค้ดสินค้า"
+      >
+        <div className="space-y-3">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+            <p className="font-medium text-slate-700">ทำไมต้องใช้กล้อง?</p>
+            <ul className="mt-2 list-disc space-y-1 pl-4">
+              <li>สแกนบาร์โค้ดได้เร็วขึ้น</li>
+              <li>ลดความผิดพลาดจากการพิมพ์</li>
+              <li>ใช้งานได้ทันทีในหน้านี้</li>
+            </ul>
+          </div>
+
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 flex-1"
+              onClick={() => setShowScannerPermissionSheet(false)}
+            >
+              ยกเลิก
+            </Button>
+            <Button
+              type="button"
+              className="h-10 flex-1"
+              onClick={() => {
+                setShowScannerPermissionSheet(false);
+                setShowScannerSheet(true);
+              }}
+            >
+              อนุญาตและสแกน
+            </Button>
+          </div>
+        </div>
+      </SlideUpSheet>
+
+      {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+       * SlideUpSheet — Barcode Scanner
+       * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
+      <SlideUpSheet
         isOpen={showScannerSheet}
         onClose={() => setShowScannerSheet(false)}
         title="สแกนบาร์โค้ด"
@@ -1581,17 +1624,16 @@ function BarcodeScanner({
   onResult: (barcode: string) => void;
   onClose: () => void;
 }) {
-  const scannerRef = useRef<HTMLDivElement>(null);
-  const html5QrRef = useRef<import("html5-qrcode").Html5Qrcode | null>(null);
-  const runningRef = useRef(false);
+  const scannerRef = useRef<HTMLVideoElement>(null);
+  const codeReaderRef = useRef<import("@zxing/browser").BrowserMultiFormatReader | null>(null);
+  const controlsRef = useRef<import("@zxing/browser").IScannerControls | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [manualBarcode, setManualBarcode] = useState("");
 
   const safeStop = () => {
-    const s = html5QrRef.current;
-    if (s && runningRef.current) {
-      runningRef.current = false;
-      s.stop().catch(() => {});
+    if (controlsRef.current) {
+      controlsRef.current.stop();
+      controlsRef.current = null;
     }
   };
 
@@ -1600,35 +1642,38 @@ function BarcodeScanner({
 
     const startScanner = async () => {
       try {
-        const { Html5Qrcode } = await import("html5-qrcode");
+        const { BrowserMultiFormatReader } = await import("@zxing/browser");
+        const { BarcodeFormat, DecodeHintType } = await import("@zxing/library");
 
         if (!mounted || !scannerRef.current) return;
 
-        const scannerId = "barcode-scanner-region";
-        scannerRef.current.id = scannerId;
+        const hints = new Map();
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+          BarcodeFormat.EAN_13,
+          BarcodeFormat.EAN_8,
+          BarcodeFormat.CODE_128,
+          BarcodeFormat.CODE_39,
+          BarcodeFormat.UPC_A,
+          BarcodeFormat.UPC_E,
+          BarcodeFormat.QR_CODE,
+        ]);
+        hints.set(DecodeHintType.TRY_HARDER, true);
 
-        const scanner = new Html5Qrcode(scannerId);
-        html5QrRef.current = scanner;
+        const reader = new BrowserMultiFormatReader(hints, {
+          delayBetweenScanAttempts: 300,
+        });
+        codeReaderRef.current = reader;
 
-        await scanner.start(
-          { facingMode: "environment" },
-          {
-            fps: 10,
-            qrbox: { width: 280, height: 160 },
-            aspectRatio: 1.5,
-          },
-          (decodedText) => {
+        const controls = await reader.decodeFromVideoDevice(
+          undefined,
+          scannerRef.current,
+          (result) => {
+            if (!result) return;
             safeStop();
-            onResult(decodedText);
+            onResult(result.getText());
           },
-          () => {},
         );
-
-        if (mounted) {
-          runningRef.current = true;
-        } else {
-          scanner.stop().catch(() => {});
-        }
+        controlsRef.current = controls;
       } catch {
         if (mounted) {
           setError(
@@ -1643,16 +1688,22 @@ function BarcodeScanner({
     return () => {
       mounted = false;
       safeStop();
-      html5QrRef.current = null;
+      codeReaderRef.current = null;
     };
   }, [onResult]);
 
   return (
     <div className="space-y-4">
-      <div
+      <video
         ref={scannerRef}
-        className="mx-auto aspect-[3/2] max-w-sm overflow-hidden rounded-xl bg-black"
+        className="mx-auto aspect-[3/2] w-full max-w-sm rounded-xl bg-black"
+        muted
+        playsInline
       />
+
+      <p className="text-center text-[11px] text-slate-500">
+        วางบาร์โค้ดให้อยู่กลางกรอบและมีแสงสว่างเพียงพอ
+      </p>
 
       {error && (
         <p className="text-center text-xs text-amber-600">{error}</p>

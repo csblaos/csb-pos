@@ -1,11 +1,13 @@
 "use client";
 
 import { Package, ShoppingCart } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { type ReactNode, useEffect, useState } from "react";
 
 type StockTabsProps = {
   stockTab: ReactNode;
   purchaseTab: ReactNode;
+  initialTab?: string;
 };
 
 const tabs = [
@@ -15,8 +17,17 @@ const tabs = [
 
 type TabId = (typeof tabs)[number]["id"];
 
-export function StockTabs({ stockTab, purchaseTab }: StockTabsProps) {
-  const [activeTab, setActiveTab] = useState<TabId>("stock");
+export function StockTabs({ stockTab, purchaseTab, initialTab = "stock" }: StockTabsProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [activeTab, setActiveTab] = useState<TabId>((searchParams.get("tab") as TabId) || (initialTab as TabId));
+
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    if (tabParam && (tabParam === "stock" || tabParam === "purchase")) {
+      setActiveTab(tabParam as TabId);
+    }
+  }, [searchParams]);
 
   return (
     <div className="space-y-4">
@@ -34,7 +45,12 @@ export function StockTabs({ stockTab, purchaseTab }: StockTabsProps) {
                   ? "bg-white text-slate-900 shadow-sm"
                   : "text-slate-500 hover:text-slate-700"
               }`}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => {
+                setActiveTab(tab.id);
+                const params = new URLSearchParams(searchParams);
+                params.set("tab", tab.id);
+                router.push(`?${params.toString()}`);
+              }}
             >
               <Icon className="h-4 w-4" />
               {tab.label}
