@@ -129,8 +129,16 @@ export default async function StockPage({
           db
             .select({
               currency: stores.currency,
+              logoUrl: stores.logoUrl,
               outStockThreshold: stores.outStockThreshold,
               lowStockThreshold: stores.lowStockThreshold,
+              pdfShowLogo: stores.pdfShowLogo,
+              pdfShowSignature: stores.pdfShowSignature,
+              pdfShowNote: stores.pdfShowNote,
+              pdfHeaderColor: stores.pdfHeaderColor,
+              pdfCompanyName: stores.pdfCompanyName,
+              pdfCompanyAddress: stores.pdfCompanyAddress,
+              pdfCompanyPhone: stores.pdfCompanyPhone,
             })
             .from(stores)
             .where(eq(stores.id, activeStoreId))
@@ -144,6 +152,16 @@ export default async function StockPage({
     const initialPOs = purchaseOrderRows.slice(0, PO_PAGE_SIZE);
 
     const storeCurrency = parseStoreCurrency(storeRow?.currency);
+    const storeLogoUrl = storeRow?.logoUrl ?? null;
+    const storePdfConfig = {
+      showLogo: storeRow?.pdfShowLogo ?? true,
+      showSignature: storeRow?.pdfShowSignature ?? true,
+      showNote: storeRow?.pdfShowNote ?? true,
+      headerColor: storeRow?.pdfHeaderColor ?? "#f1f5f9",
+      companyName: storeRow?.pdfCompanyName ?? null,
+      companyAddress: storeRow?.pdfCompanyAddress ?? null,
+      companyPhone: storeRow?.pdfCompanyPhone ?? null,
+    };
     const storeOutStockThreshold = storeRow?.outStockThreshold ?? 0;
     const storeLowStockThreshold = storeRow?.lowStockThreshold ?? 10;
     const params = await searchParams;
@@ -189,6 +207,8 @@ export default async function StockPage({
               canCreate={canCreate}
               pageSize={PO_PAGE_SIZE}
               initialHasMore={hasMorePO}
+              storeLogoUrl={storeLogoUrl}
+              pdfConfig={storePdfConfig}
             />
           }
         />

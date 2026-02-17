@@ -2,11 +2,12 @@
 
 import {
   Clock,
+  Download,
   Loader2,
   Package,
   Pencil,
   Plus,
-  Printer,
+  Share2,
   ShoppingCart,
   Truck,
   CheckCircle2,
@@ -15,10 +16,8 @@ import {
   X,
   ChevronRight,
 } from "lucide-react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  type TouchEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -28,9 +27,13 @@ import {
 import toast from "react-hot-toast";
 
 import { Button } from "@/components/ui/button";
+import { SlideUpSheet } from "@/components/ui/slide-up-sheet";
 import { authFetch } from "@/lib/auth/client-token";
 import type { StoreCurrency } from "@/lib/finance/store-financial";
 import { currencySymbol } from "@/lib/finance/store-financial";
+import type { POPdfData } from "@/lib/pdf/generate-po-pdf";
+import type { PoPdfConfig } from "@/lib/pdf/generate-po-pdf";
+import { canNativeShare } from "@/lib/pdf/share-or-download";
 import type { PurchaseOrderListItem } from "@/server/repositories/purchase.repo";
 
 /* ── Status config ── */
@@ -71,6 +74,8 @@ type PurchaseOrderListProps = {
   canCreate: boolean;
   pageSize: number;
   initialHasMore: boolean;
+  storeLogoUrl?: string | null;
+  pdfConfig?: Partial<PoPdfConfig>;
 };
 
 type StatusFilter = "ALL" | PurchaseOrderListItem["status"];
@@ -102,6 +107,8 @@ export function PurchaseOrderList({
   canCreate,
   pageSize,
   initialHasMore,
+  storeLogoUrl,
+  pdfConfig,
 }: PurchaseOrderListProps) {
   const router = useRouter();
   const [poList, setPoList] = useState(initialList);
@@ -115,7 +122,6 @@ export function PurchaseOrderList({
 
   /* ── Create wizard state ── */
   const [wizardStep, setWizardStep] = useState(1);
-  const [isDesktopViewport, setIsDesktopViewport] = useState(false);
 
   /* ── Create form ── */
   const [supplierName, setSupplierName] = useState("");
@@ -139,97 +145,6 @@ export function PurchaseOrderList({
     { id: string; name: string; sku: string }[]
   >([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
-
-  /* ── Drag-to-dismiss ── */
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragY, setDragY] = useState(0);
-  const startYRef = useRef<number | null>(null);
-  const canDragRef = useRef(false);
-
-  /* ── Body scroll lock ── */
-  const sheetScrollYRef = useRef(0);
-  const bodyStyleRef = useRef<{
-    position: string;
-    top: string;
-    left: string;
-    right: string;
-    width: string;
-    overflow: string;
-  } | null>(null);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(min-width: 640px)");
-    const apply = () => setIsDesktopViewport(mq.matches);
-    apply();
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
-  }, []);
-
-  useEffect(() => {
-    if (!isCreateOpen && !selectedPO) return;
-    const body = document.body;
-    sheetScrollYRef.current = window.scrollY;
-    bodyStyleRef.current = {
-      position: body.style.position,
-      top: body.style.top,
-      left: body.style.left,
-      right: body.style.right,
-      width: body.style.width,
-      overflow: body.style.overflow,
-    };
-    body.style.position = "fixed";
-    body.style.top = `-${sheetScrollYRef.current}px`;
-    body.style.left = "0";
-    body.style.right = "0";
-    body.style.width = "100%";
-    body.style.overflow = "hidden";
-    return () => {
-      const prev = bodyStyleRef.current;
-      if (prev) {
-        body.style.position = prev.position;
-        body.style.top = prev.top;
-        body.style.left = prev.left;
-        body.style.right = prev.right;
-        body.style.width = prev.width;
-        body.style.overflow = prev.overflow;
-      }
-      window.scrollTo(0, sheetScrollYRef.current);
-    };
-  }, [isCreateOpen, selectedPO]);
-
-  const resetDrag = () => {
-    setDragY(0);
-    setIsDragging(false);
-    startYRef.current = null;
-    canDragRef.current = false;
-  };
-
-  const handleTouchStart = (e: TouchEvent<HTMLDivElement>) => {
-    if (isSubmitting || isDesktopViewport) return;
-    canDragRef.current = true;
-    startYRef.current = e.touches[0]?.clientY ?? null;
-    setDragY(0);
-    setIsDragging(false);
-  };
-  const handleTouchMove = (e: TouchEvent<HTMLDivElement>) => {
-    if (isDesktopViewport || !canDragRef.current || startYRef.current === null)
-      return;
-    const y = e.touches[0]?.clientY;
-    if (typeof y !== "number") return;
-    const dy = Math.max(0, y - startYRef.current);
-    if (dy <= 0) return;
-    setIsDragging(true);
-    setDragY(dy);
-    e.preventDefault();
-  };
-  const handleTouchEnd = () => {
-    if (isDesktopViewport) return;
-    if (dragY > 120) {
-      closeCreateSheet();
-      return;
-    }
-    resetDrag();
-  };
 
   /* ── Filtered list ── */
   const filteredList = useMemo(() => {
@@ -326,14 +241,12 @@ export function PurchaseOrderList({
     setNote("");
     setExpectedAt("");
     setWizardStep(1);
-    resetDrag();
     setIsCreateOpen(true);
     loadProducts();
   };
 
   const closeCreateSheet = () => {
     if (isSubmitting) return;
-    resetDrag();
     setIsCreateOpen(false);
   };
 
@@ -459,14 +372,6 @@ export function PurchaseOrderList({
   const fieldClassName =
     "h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none ring-primary focus:ring-2 disabled:bg-slate-100";
 
-  const backdropOpacity = isCreateOpen
-    ? Math.max(0, 1 - Math.min(dragY / 220, 1) * 0.55)
-    : 0;
-  const sheetStyle =
-    isCreateOpen && !isDesktopViewport
-      ? { transform: `translateY(${dragY}px)` }
-      : undefined;
-
   const filteredProductOptions = productOptions.filter(
     (p) =>
       !items.some((i) => i.productId === p.id) &&
@@ -495,14 +400,26 @@ export function PurchaseOrderList({
           </p>
         </div>
         {canCreate && (
-          <button
-            type="button"
-            className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-primary px-3.5 text-sm font-medium text-white shadow-sm transition-transform active:scale-95"
-            onClick={openCreateSheet}
-          >
-            <Plus className="h-4 w-4" strokeWidth={2.5} />
-            สร้างใบสั่งซื้อ
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="inline-flex h-9 items-center gap-1.5 rounded-full bg-primary px-3.5 text-sm font-medium text-white shadow-sm transition-transform active:scale-95"
+              onClick={openCreateSheet}
+            >
+              <Plus className="h-4 w-4" strokeWidth={2.5} />
+              สร้างใบสั่งซื้อ
+            </button>
+
+            <button
+              type="button"
+              className="inline-flex h-9 items-center gap-1 rounded-full border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              onClick={() => router.push('/settings/pdf?tab=po')}
+              title="ตั้งค่าเอกสาร PDF - ใบสั่งซื้อ"
+            >
+              <FileText className="h-4 w-4" />
+              ตั้งค่า PDF
+            </button>
+          </div>
         )}
       </div>
 
@@ -735,66 +652,13 @@ export function PurchaseOrderList({
       {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
        * SlideUpSheet — Create PO Wizard
        * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
-      <div
-        className={`fixed inset-0 z-50 ${isCreateOpen ? "" : "pointer-events-none"}`}
-        aria-hidden={!isCreateOpen}
+      <SlideUpSheet
+        isOpen={isCreateOpen}
+        onClose={closeCreateSheet}
+        title="สร้างใบสั่งซื้อ"
+        description={`ขั้นตอน ${wizardStep}/3`}
+        disabled={isSubmitting}
       >
-        <button
-          type="button"
-          aria-label="ปิด"
-          className={`absolute inset-0 bg-slate-900/40 backdrop-blur-[1px] transition-opacity duration-200 ${
-            isCreateOpen ? "opacity-100" : "opacity-0"
-          }`}
-          style={{ opacity: backdropOpacity }}
-          onClick={closeCreateSheet}
-          disabled={isSubmitting}
-        />
-        <div
-          className={`absolute inset-x-0 bottom-0 max-h-[92dvh] overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-2xl sm:inset-auto sm:left-1/2 sm:top-1/2 sm:w-full sm:max-w-lg sm:rounded-2xl ${
-            isDragging && !isDesktopViewport
-              ? "transition-none"
-              : "transition-all duration-300 ease-out"
-          } ${
-            isCreateOpen
-              ? "translate-y-0 opacity-100 sm:-translate-x-1/2 sm:-translate-y-1/2"
-              : "translate-y-full opacity-0 sm:-translate-x-1/2 sm:-translate-y-[42%]"
-          }`}
-          style={sheetStyle}
-        >
-          {/* Drag handle */}
-          <div
-            className="flex touch-none justify-center pt-2 sm:hidden"
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-            onTouchCancel={handleTouchEnd}
-          >
-            <span className="h-1.5 w-12 rounded-full bg-slate-300" />
-          </div>
-
-          {/* Header */}
-          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-            <div>
-              <p className="text-sm font-semibold text-slate-900">
-                สร้างใบสั่งซื้อ
-              </p>
-              <p className="mt-0.5 text-xs text-slate-500">
-                ขั้นตอน {wizardStep}/3
-              </p>
-            </div>
-            <button
-              type="button"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600"
-              onClick={closeCreateSheet}
-              disabled={isSubmitting}
-              aria-label="ปิด"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-
-          {/* Wizard content */}
-          <div className="overflow-y-auto px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-4 sm:pb-4">
             {/* Step 1: Info */}
             {wizardStep === 1 && (
               <div className="space-y-3">
@@ -1203,9 +1067,7 @@ export function PurchaseOrderList({
                 </Button>
               </div>
             )}
-          </div>
-        </div>
-      </div>
+      </SlideUpSheet>
 
       {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
        * PO Detail Sheet (quick actions)
@@ -1213,6 +1075,8 @@ export function PurchaseOrderList({
       <PODetailSheet
         poId={selectedPO}
         storeCurrency={storeCurrency}
+        storeLogoUrl={storeLogoUrl}
+        pdfConfig={pdfConfig}
         onClose={() => setSelectedPO(null)}
         onUpdateStatus={updateStatus}
       />
@@ -1224,11 +1088,15 @@ export function PurchaseOrderList({
 function PODetailSheet({
   poId,
   storeCurrency,
+  storeLogoUrl,
+  pdfConfig,
   onClose,
   onUpdateStatus,
 }: {
   poId: string | null;
   storeCurrency: StoreCurrency;
+  storeLogoUrl?: string | null;
+  pdfConfig?: Partial<PoPdfConfig>;
   onClose: () => void;
   onUpdateStatus: (
     poId: string,
@@ -1272,11 +1140,7 @@ function PODetailSheet({
   const [updating, setUpdating] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragY, setDragY] = useState(0);
-  const startYRef = useRef<number | null>(null);
-  const canDragRef = useRef(false);
-  const [isDesktopViewport, setIsDesktopViewport] = useState(false);
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [editForm, setEditForm] = useState({
     supplierName: "",
     supplierContact: "",
@@ -1290,14 +1154,6 @@ function PODetailSheet({
     trackingInfo: "",
     items: [] as { productId: string; productName: string; qtyOrdered: string; unitCostPurchase: string }[],
   });
-
-  useEffect(() => {
-    const mq = window.matchMedia("(min-width: 640px)");
-    const apply = () => setIsDesktopViewport(mq.matches);
-    apply();
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
-  }, []);
 
   useEffect(() => {
     if (!poId) {
@@ -1316,41 +1172,6 @@ function PODetailSheet({
       })
       .finally(() => setLoading(false));
   }, [poId]);
-
-  const resetDrag = () => {
-    setDragY(0);
-    setIsDragging(false);
-    startYRef.current = null;
-    canDragRef.current = false;
-  };
-
-  const handleTouchStart = (e: TouchEvent<HTMLDivElement>) => {
-    if (isSavingEdit || isDesktopViewport) return;
-    canDragRef.current = true;
-    startYRef.current = e.touches[0]?.clientY ?? null;
-    setDragY(0);
-    setIsDragging(false);
-  };
-
-  const handleTouchMove = (e: TouchEvent<HTMLDivElement>) => {
-    if (isDesktopViewport || !canDragRef.current || startYRef.current === null) return;
-    const y = e.touches[0]?.clientY;
-    if (typeof y !== "number") return;
-    const dy = Math.max(0, y - startYRef.current);
-    if (dy <= 0) return;
-    setIsDragging(true);
-    setDragY(dy);
-    e.preventDefault();
-  };
-
-  const handleTouchEnd = () => {
-    if (isDesktopViewport) return;
-    if (dragY > 120) {
-      onClose();
-      return;
-    }
-    resetDrag();
-  };
 
   const handleStatusChange = async (
     newStatus: "ORDERED" | "SHIPPED" | "RECEIVED" | "CANCELLED",
@@ -1445,65 +1266,15 @@ function PODetailSheet({
   };
 
   const isOpen = poId !== null;
-  const sheetStyle =
-    isOpen && !isDesktopViewport
-      ? { transform: `translateY(${dragY}px)` }
-      : undefined;
 
   return (
-    <div
-      className={`fixed inset-0 z-50 ${isOpen ? "" : "pointer-events-none"}`}
-      aria-hidden={!isOpen}
+    <SlideUpSheet
+      isOpen={isOpen}
+      onClose={onClose}
+      title={po?.poNumber ?? "รายละเอียด"}
+      disabled={updating || isSavingEdit}
     >
-      <button
-        type="button"
-        aria-label="ปิด"
-        className={`absolute inset-0 bg-slate-900/40 transition-opacity duration-200 ${
-          isOpen ? "opacity-100" : "opacity-0"
-        }`}
-        onClick={onClose}
-        disabled={updating}
-      />
-      <div
-        className={`absolute inset-x-0 bottom-0 flex max-h-[92dvh] flex-col rounded-t-3xl border border-slate-200 bg-white shadow-2xl transition-all duration-300 ease-out sm:inset-auto sm:left-1/2 sm:top-1/2 sm:w-full sm:max-w-lg sm:flex-row sm:rounded-2xl ${
-          isDragging && !isDesktopViewport
-            ? "transition-none"
-            : "transition-all duration-300 ease-out"
-        } ${
-          isOpen
-            ? "translate-y-0 opacity-100 sm:-translate-x-1/2 sm:-translate-y-1/2"
-            : "translate-y-full opacity-0 sm:-translate-x-1/2 sm:-translate-y-[42%]"
-        }`}
-        style={sheetStyle}
-      >
-        {/* Drag handle */}
-        <div
-          className="flex touch-none justify-center pt-2 sm:hidden"
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
-          onTouchCancel={handleTouchEnd}
-        >
-          <span className="h-1.5 w-12 rounded-full bg-slate-300" />
-        </div>
-
-        {/* Header - fixed */}
-        <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 py-3">
-          <p className="text-sm font-semibold text-slate-900">
-            {po?.poNumber ?? "รายละเอียด"}
-          </p>
-          <button
-            type="button"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600"
-            onClick={onClose}
-            aria-label="ปิด"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        {/* Body - scrollable */}
-        <div className="flex-1 overflow-y-auto space-y-4 px-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] pt-4 sm:pb-4">
+      <div className="space-y-4">
           {loading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-slate-400" />
@@ -1545,16 +1316,113 @@ function PODetailSheet({
               </div>
 
               {canPrintPO && (
-                <div>
-                  <Link
-                    href={`/stock/purchase-orders/${po.id}/print`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                    disabled={isGeneratingPdf}
+                    onClick={async () => {
+                      if (!po) return;
+                      setIsGeneratingPdf(true);
+                      try {
+                        const { generatePoPdf } = await import("@/lib/pdf/generate-po-pdf");
+                        const pdfData: POPdfData = {
+                          poNumber: po.poNumber,
+                          status: po.status,
+                          supplierName: po.supplierName,
+                          supplierContact: po.supplierContact,
+                          purchaseCurrency: po.purchaseCurrency,
+                          exchangeRate: po.exchangeRate,
+                          shippingCost: po.shippingCost,
+                          otherCost: po.otherCost,
+                          otherCostNote: po.otherCostNote,
+                          note: po.note,
+                          createdByName: po.createdByName,
+                          createdAt: po.createdAt,
+                          orderedAt: po.orderedAt,
+                          shippedAt: po.shippedAt,
+                          receivedAt: po.receivedAt,
+                          expectedAt: po.expectedAt,
+                          trackingInfo: po.trackingInfo,
+                          totalCostBase: po.totalCostBase,
+                          storeLogoUrl: storeLogoUrl,
+                          items: po.items.map((item) => ({
+                            productName: item.productName,
+                            productSku: item.productSku,
+                            qtyOrdered: item.qtyOrdered,
+                            unitCostBase: item.unitCostBase,
+                          })),
+                        };
+                        const blob = await generatePoPdf(pdfData, storeCurrency, pdfConfig);
+                        const { downloadBlob } = await import("@/lib/pdf/share-or-download");
+                        downloadBlob(blob, `${po.poNumber}.pdf`);
+                        toast.success("ดาวน์โหลด PDF เรียบร้อย");
+                      } catch {
+                        toast.error("สร้าง PDF ไม่สำเร็จ");
+                      } finally {
+                        setIsGeneratingPdf(false);
+                      }
+                    }}
                   >
-                    <Printer className="h-3.5 w-3.5" />
-                    พิมพ์ PO
-                  </Link>
+                    {isGeneratingPdf ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Download className="h-3.5 w-3.5" />
+                    )}
+                    PDF
+                  </button>
+                  {canNativeShare() && (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      disabled={isGeneratingPdf}
+                      onClick={async () => {
+                        if (!po) return;
+                        setIsGeneratingPdf(true);
+                        try {
+                          const { generatePoPdf } = await import("@/lib/pdf/generate-po-pdf");
+                          const pdfData: POPdfData = {
+                            poNumber: po.poNumber,
+                            status: po.status,
+                            supplierName: po.supplierName,
+                            supplierContact: po.supplierContact,
+                            purchaseCurrency: po.purchaseCurrency,
+                            exchangeRate: po.exchangeRate,
+                            shippingCost: po.shippingCost,
+                            otherCost: po.otherCost,
+                            otherCostNote: po.otherCostNote,
+                            note: po.note,
+                            createdByName: po.createdByName,
+                            createdAt: po.createdAt,
+                            orderedAt: po.orderedAt,
+                            shippedAt: po.shippedAt,
+                            receivedAt: po.receivedAt,
+                            expectedAt: po.expectedAt,
+                            trackingInfo: po.trackingInfo,
+                            totalCostBase: po.totalCostBase,
+                            storeLogoUrl: storeLogoUrl,
+                            items: po.items.map((item) => ({
+                              productName: item.productName,
+                              productSku: item.productSku,
+                              qtyOrdered: item.qtyOrdered,
+                              unitCostBase: item.unitCostBase,
+                            })),
+                          };
+                          const blob = await generatePoPdf(pdfData, storeCurrency, pdfConfig);
+                          const { shareOrDownload } = await import("@/lib/pdf/share-or-download");
+                          const result = await shareOrDownload(blob, `${po.poNumber}.pdf`, `ใบสั่งซื้อ ${po.poNumber}`);
+                          if (result === "downloaded") toast.success("ดาวน์โหลด PDF เรียบร้อย");
+                        } catch {
+                          toast.error("แชร์ PDF ไม่สำเร็จ");
+                        } finally {
+                          setIsGeneratingPdf(false);
+                        }
+                      }}
+                    >
+                      <Share2 className="h-3.5 w-3.5" />
+                      แชร์
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -1988,8 +1856,7 @@ function PODetailSheet({
               ไม่พบข้อมูล
             </p>
           )}
-        </div>
       </div>
-    </div>
+    </SlideUpSheet>
   );
 }

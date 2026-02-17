@@ -11,6 +11,9 @@ import {
   users,
 } from "@/lib/db/schema";
 
+export type PurchaseRepoTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type PurchaseRepoExecutor = typeof db | PurchaseRepoTx;
+
 /* ────────────────────────────────────────────────
  * Types
  * ──────────────────────────────────────────────── */
@@ -50,11 +53,15 @@ export type PurchaseOrderListItem = {
  * Queries
  * ──────────────────────────────────────────────── */
 
-export async function getNextPoNumber(storeId: string): Promise<string> {
+export async function getNextPoNumber(
+  storeId: string,
+  tx?: PurchaseRepoTx,
+): Promise<string> {
+  const executor: PurchaseRepoExecutor = tx ?? db;
   const year = new Date().getFullYear();
   const prefix = `PO-${year}-`;
 
-  const rows = await db
+  const rows = await executor
     .select({ poNumber: purchaseOrders.poNumber })
     .from(purchaseOrders)
     .where(
@@ -183,8 +190,10 @@ export async function listPurchaseOrdersPaged(
 export async function getPurchaseOrderById(
   poId: string,
   storeId: string,
+  tx?: PurchaseRepoTx,
 ): Promise<PurchaseOrderView | null> {
-  const [poRow] = await db
+  const executor: PurchaseRepoExecutor = tx ?? db;
+  const [poRow] = await executor
     .select({
       po: purchaseOrders,
       createdByName: users.name,
@@ -197,7 +206,7 @@ export async function getPurchaseOrderById(
 
   if (!poRow) return null;
 
-  const itemRows = await db
+  const itemRows = await executor
     .select({
       item: purchaseOrderItems,
       productName: products.name,
@@ -233,34 +242,42 @@ export async function getPurchaseOrderById(
 
 export async function insertPurchaseOrder(
   data: typeof purchaseOrders.$inferInsert,
+  tx?: PurchaseRepoTx,
 ) {
-  const [row] = await db.insert(purchaseOrders).values(data).returning();
+  const executor: PurchaseRepoExecutor = tx ?? db;
+  const [row] = await executor.insert(purchaseOrders).values(data).returning();
   return row!;
 }
 
 export async function insertPurchaseOrderItems(
   items: (typeof purchaseOrderItems.$inferInsert)[],
+  tx?: PurchaseRepoTx,
 ) {
+  const executor: PurchaseRepoExecutor = tx ?? db;
   if (items.length === 0) return;
-  await db.insert(purchaseOrderItems).values(items);
+  await executor.insert(purchaseOrderItems).values(items);
 }
 
 export async function replacePurchaseOrderItems(
   poId: string,
   items: (typeof purchaseOrderItems.$inferInsert)[],
+  tx?: PurchaseRepoTx,
 ) {
-  await db
+  const executor: PurchaseRepoExecutor = tx ?? db;
+  await executor
     .delete(purchaseOrderItems)
     .where(eq(purchaseOrderItems.purchaseOrderId, poId));
   if (items.length === 0) return;
-  await db.insert(purchaseOrderItems).values(items);
+  await executor.insert(purchaseOrderItems).values(items);
 }
 
 export async function updatePurchaseOrderFields(
   poId: string,
   updates: Partial<typeof purchaseOrders.$inferInsert>,
+  tx?: PurchaseRepoTx,
 ) {
-  await db
+  const executor: PurchaseRepoExecutor = tx ?? db;
+  await executor
     .update(purchaseOrders)
     .set(updates)
     .where(eq(purchaseOrders.id, poId));
@@ -269,8 +286,10 @@ export async function updatePurchaseOrderFields(
 export async function updatePurchaseOrderStatus(
   poId: string,
   updates: Partial<typeof purchaseOrders.$inferInsert>,
+  tx?: PurchaseRepoTx,
 ) {
-  await db
+  const executor: PurchaseRepoExecutor = tx ?? db;
+  await executor
     .update(purchaseOrders)
     .set(updates)
     .where(eq(purchaseOrders.id, poId));
@@ -280,8 +299,10 @@ export async function updatePurchaseOrderItemReceived(
   itemId: string,
   qtyReceived: number,
   landedCostPerUnit: number,
+  tx?: PurchaseRepoTx,
 ) {
-  await db
+  const executor: PurchaseRepoExecutor = tx ?? db;
+  await executor
     .update(purchaseOrderItems)
     .set({ qtyReceived, landedCostPerUnit })
     .where(eq(purchaseOrderItems.id, itemId));
@@ -289,16 +310,20 @@ export async function updatePurchaseOrderItemReceived(
 
 export async function insertInventoryMovementsForPO(
   movements: (typeof inventoryMovements.$inferInsert)[],
+  tx?: PurchaseRepoTx,
 ) {
+  const executor: PurchaseRepoExecutor = tx ?? db;
   if (movements.length === 0) return;
-  await db.insert(inventoryMovements).values(movements);
+  await executor.insert(inventoryMovements).values(movements);
 }
 
 export async function updateProductCostBase(
   productId: string,
   newCostBase: number,
+  tx?: PurchaseRepoTx,
 ) {
-  await db
+  const executor: PurchaseRepoExecutor = tx ?? db;
+  await executor
     .update(products)
     .set({ costBase: newCostBase })
     .where(eq(products.id, productId));
@@ -307,8 +332,10 @@ export async function updateProductCostBase(
 export async function getProductCurrentStock(
   storeId: string,
   productId: string,
+  tx?: PurchaseRepoTx,
 ): Promise<number> {
-  const [row] = await db
+  const executor: PurchaseRepoExecutor = tx ?? db;
+  const [row] = await executor
     .select({
       onHand: sql<number>`coalesce(sum(case
         when ${inventoryMovements.type} = 'IN' then ${inventoryMovements.qtyBase}
@@ -329,8 +356,12 @@ export async function getProductCurrentStock(
   return Number(row?.onHand ?? 0);
 }
 
-export async function getProductCostBase(productId: string): Promise<number> {
-  const [row] = await db
+export async function getProductCostBase(
+  productId: string,
+  tx?: PurchaseRepoTx,
+): Promise<number> {
+  const executor: PurchaseRepoExecutor = tx ?? db;
+  const [row] = await executor
     .select({ costBase: products.costBase })
     .from(products)
     .where(eq(products.id, productId));

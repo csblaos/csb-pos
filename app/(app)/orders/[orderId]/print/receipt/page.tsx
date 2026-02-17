@@ -5,6 +5,13 @@ import { currencyLabel, vatModeLabel } from "@/lib/finance/store-financial";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 import { getOrderDetail } from "@/lib/orders/queries";
 
+const paymentMethodLabel = (method: "CASH" | "LAO_QR" | "COD" | "BANK_TRANSFER") => {
+  if (method === "LAO_QR") return "QR โอนเงิน";
+  if (method === "COD") return "COD";
+  if (method === "BANK_TRANSFER") return "โอนเงิน";
+  return "เงินสด";
+};
+
 export default async function PrintReceiptPage({
   params,
 }: {
@@ -96,7 +103,7 @@ export default async function PrintReceiptPage({
         </p>
         <p className="flex justify-between">
           <span>วิธีชำระ</span>
-          <span>{order.paymentMethod === "LAO_QR" ? "QR โอนเงิน" : "เงินสด"}</span>
+          <span>{paymentMethodLabel(order.paymentMethod)}</span>
         </p>
       </div>
 

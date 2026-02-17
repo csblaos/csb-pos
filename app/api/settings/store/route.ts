@@ -17,8 +17,17 @@ import { RBACError, enforcePermission, hasPermission, toRBACErrorResponse } from
 import { getStoreFinancialConfig } from "@/lib/stores/financial";
 import { deleteStoreLogoFromR2, isR2Configured, uploadStoreLogoToR2 } from "@/lib/storage/r2";
 import { getGlobalStoreLogoPolicy } from "@/lib/system-config/policy";
+import { safeLogAuditEvent } from "@/server/services/audit.service";
 
 const phoneNumberPattern = /^[0-9+\-\s()]+$/;
+const STORE_SETTINGS_UPDATE_ACTION = "store.settings.update";
+
+type StoreSettingsAuditContext = {
+  storeId: string;
+  userId: string;
+  actorName: string | null;
+  actorRole: string | null;
+};
 
 const updateStoreJsonSchema = z
   .object({
@@ -140,7 +149,11 @@ function appendWarningMessage(current: string | null, next: string) {
   return `${current} ${next}`;
 }
 
-async function patchByMultipartForm(storeId: string, request: Request) {
+async function patchByMultipartForm(
+  storeId: string,
+  request: Request,
+  auditContext: StoreSettingsAuditContext,
+) {
   const formData = await request.formData();
   const payload = updateStoreMultipartSchema.safeParse({
     name: getFormString(formData, "name"),
@@ -153,6 +166,23 @@ async function patchByMultipartForm(storeId: string, request: Request) {
   });
 
   if (!payload.success) {
+    await safeLogAuditEvent({
+      scope: "STORE",
+      storeId,
+      actorUserId: auditContext.userId,
+      actorName: auditContext.actorName,
+      actorRole: auditContext.actorRole,
+      action: STORE_SETTINGS_UPDATE_ACTION,
+      entityType: "store",
+      entityId: storeId,
+      result: "FAIL",
+      reasonCode: "VALIDATION_ERROR",
+      metadata: {
+        channel: "multipart",
+        issues: payload.error.issues.map((issue) => issue.path.join(".")).slice(0, 5),
+      },
+      request,
+    });
     return NextResponse.json({ message: "ข้อมูลร้านไม่ถูกต้อง" }, { status: 400 });
   }
 
@@ -185,6 +215,9 @@ async function patchByMultipartForm(storeId: string, request: Request) {
   const [targetStore] = await db
     .select({
       id: stores.id,
+      name: stores.name,
+      address: stores.address,
+      phoneNumber: stores.phoneNumber,
       logoName: stores.logoName,
       logoUrl: stores.logoUrl,
     })
@@ -193,6 +226,22 @@ async function patchByMultipartForm(storeId: string, request: Request) {
     .limit(1);
 
   if (!targetStore) {
+    await safeLogAuditEvent({
+      scope: "STORE",
+      storeId,
+      actorUserId: auditContext.userId,
+      actorName: auditContext.actorName,
+      actorRole: auditContext.actorRole,
+      action: STORE_SETTINGS_UPDATE_ACTION,
+      entityType: "store",
+      entityId: storeId,
+      result: "FAIL",
+      reasonCode: "NOT_FOUND",
+      metadata: {
+        channel: "multipart",
+      },
+      request,
+    });
     return NextResponse.json({ message: "ไม่พบข้อมูลร้านค้า" }, { status: 404 });
   }
 
@@ -269,22 +318,69 @@ async function patchByMultipartForm(storeId: string, request: Request) {
     }
   }
 
+  const nextStore = {
+    name: payload.data.name,
+    address: formattedAddress,
+    phoneNumber: normalizedPhoneNumber,
+    logoName: nextLogoName,
+    logoUrl: nextLogoUrl,
+  };
+
+  await safeLogAuditEvent({
+    scope: "STORE",
+    storeId,
+    actorUserId: auditContext.userId,
+    actorName: auditContext.actorName,
+    actorRole: auditContext.actorRole,
+    action: STORE_SETTINGS_UPDATE_ACTION,
+    entityType: "store",
+    entityId: storeId,
+    metadata: {
+      channel: "multipart",
+      logoUpdated: Boolean(logoFile),
+    },
+    before: {
+      name: targetStore.name,
+      address: targetStore.address,
+      phoneNumber: targetStore.phoneNumber,
+      logoName: targetStore.logoName,
+      logoUrl: targetStore.logoUrl,
+    },
+    after: nextStore,
+    request,
+  });
+
   return NextResponse.json({
     ok: true,
     warning: warningMessage,
-    store: {
-      name: payload.data.name,
-      address: formattedAddress,
-      phoneNumber: normalizedPhoneNumber,
-      logoName: nextLogoName,
-      logoUrl: nextLogoUrl,
-    },
+    store: nextStore,
   });
 }
 
-async function patchByJsonBody(storeId: string, request: Request, userId: string) {
+async function patchByJsonBody(
+  storeId: string,
+  request: Request,
+  auditContext: StoreSettingsAuditContext,
+) {
   const payload = updateStoreJsonSchema.safeParse(await request.json());
   if (!payload.success) {
+    await safeLogAuditEvent({
+      scope: "STORE",
+      storeId,
+      actorUserId: auditContext.userId,
+      actorName: auditContext.actorName,
+      actorRole: auditContext.actorRole,
+      action: STORE_SETTINGS_UPDATE_ACTION,
+      entityType: "store",
+      entityId: storeId,
+      result: "FAIL",
+      reasonCode: "VALIDATION_ERROR",
+      metadata: {
+        channel: "json",
+        issues: payload.error.issues.map((issue) => issue.path.join(".")).slice(0, 5),
+      },
+      request,
+    });
     return NextResponse.json({ message: "ข้อมูลร้านไม่ถูกต้อง" }, { status: 400 });
   }
 
@@ -296,7 +392,7 @@ async function patchByJsonBody(storeId: string, request: Request, userId: string
     payload.data.vatMode !== undefined;
 
   if (requiresFinancialUpdate) {
-    const canManageFinancial = await hasPermission({ userId }, storeId, "stores.update");
+    const canManageFinancial = await hasPermission({ userId: auditContext.userId }, storeId, "stores.update");
     if (!canManageFinancial) {
       throw new RBACError(403, "คุณไม่มีสิทธิ์อัปเดตการตั้งค่าการเงินของร้าน");
     }
@@ -362,6 +458,22 @@ async function patchByJsonBody(storeId: string, request: Request, userId: string
   }
 
   if (!targetStore) {
+    await safeLogAuditEvent({
+      scope: "STORE",
+      storeId,
+      actorUserId: auditContext.userId,
+      actorName: auditContext.actorName,
+      actorRole: auditContext.actorRole,
+      action: STORE_SETTINGS_UPDATE_ACTION,
+      entityType: "store",
+      entityId: storeId,
+      result: "FAIL",
+      reasonCode: "NOT_FOUND",
+      metadata: {
+        channel: "json",
+      },
+      request,
+    });
     return NextResponse.json({ message: "ไม่พบข้อมูลร้านค้า" }, { status: 404 });
   }
 
@@ -414,27 +526,63 @@ async function patchByJsonBody(storeId: string, request: Request, userId: string
 
   await db.update(stores).set(updateValues).where(eq(stores.id, storeId));
 
-  return NextResponse.json({
-    ok: true,
-    store: {
-      name: updateValues.name ?? targetStore.name,
-      address: updateValues.address ?? targetStore.address,
-      phoneNumber: updateValues.phoneNumber ?? targetStore.phoneNumber,
+  const nextStore = {
+    name: updateValues.name ?? targetStore.name,
+    address: updateValues.address ?? targetStore.address,
+    phoneNumber: updateValues.phoneNumber ?? targetStore.phoneNumber,
+    logoName: targetStore.logoName,
+    logoUrl: targetStore.logoUrl,
+    currency: updateValues.currency ?? currentBaseCurrency,
+    supportedCurrencies:
+      updateValues.supportedCurrencies !== undefined
+        ? nextSupportedCurrencies
+        : parseSupportedCurrencies(targetStore.supportedCurrencies, currentBaseCurrency),
+    vatEnabled: updateValues.vatEnabled ?? Boolean(targetStore.vatEnabled),
+    vatRate: updateValues.vatRate ?? targetStore.vatRate,
+    vatMode: updateValues.vatMode ?? parseStoreVatMode(targetStore.vatMode),
+    outStockThreshold:
+      updateValues.outStockThreshold ?? targetStore.outStockThreshold,
+    lowStockThreshold:
+      updateValues.lowStockThreshold ?? targetStore.lowStockThreshold,
+  };
+
+  await safeLogAuditEvent({
+    scope: "STORE",
+    storeId,
+    actorUserId: auditContext.userId,
+    actorName: auditContext.actorName,
+    actorRole: auditContext.actorRole,
+    action: STORE_SETTINGS_UPDATE_ACTION,
+    entityType: "store",
+    entityId: storeId,
+    metadata: {
+      channel: "json",
+      fields: Object.keys(updateValues),
+    },
+    before: {
+      name: targetStore.name,
+      address: targetStore.address,
+      phoneNumber: targetStore.phoneNumber,
       logoName: targetStore.logoName,
       logoUrl: targetStore.logoUrl,
-      currency: updateValues.currency ?? currentBaseCurrency,
-      supportedCurrencies:
-        updateValues.supportedCurrencies !== undefined
-          ? nextSupportedCurrencies
-          : parseSupportedCurrencies(targetStore.supportedCurrencies, currentBaseCurrency),
-      vatEnabled: updateValues.vatEnabled ?? Boolean(targetStore.vatEnabled),
-      vatRate: updateValues.vatRate ?? targetStore.vatRate,
-      vatMode: updateValues.vatMode ?? parseStoreVatMode(targetStore.vatMode),
-      outStockThreshold:
-        updateValues.outStockThreshold ?? targetStore.outStockThreshold,
-      lowStockThreshold:
-        updateValues.lowStockThreshold ?? targetStore.lowStockThreshold,
+      currency: currentBaseCurrency,
+      supportedCurrencies: parseSupportedCurrencies(
+        targetStore.supportedCurrencies,
+        currentBaseCurrency,
+      ),
+      vatEnabled: Boolean(targetStore.vatEnabled),
+      vatRate: targetStore.vatRate,
+      vatMode: parseStoreVatMode(targetStore.vatMode),
+      outStockThreshold: targetStore.outStockThreshold,
+      lowStockThreshold: targetStore.lowStockThreshold,
     },
+    after: nextStore,
+    request,
+  });
+
+  return NextResponse.json({
+    ok: true,
+    store: nextStore,
   });
 }
 
@@ -481,16 +629,42 @@ export async function GET() {
 }
 
 export async function PATCH(request: Request) {
+  let auditContext: StoreSettingsAuditContext | null = null;
+
   try {
     const { storeId, session } = await enforcePermission("settings.update");
+    auditContext = {
+      storeId,
+      userId: session.userId,
+      actorName: session.displayName,
+      actorRole: session.activeRoleName,
+    };
     const contentType = request.headers.get("content-type") ?? "";
 
     if (contentType.includes("multipart/form-data")) {
-      return patchByMultipartForm(storeId, request);
+      return patchByMultipartForm(storeId, request, auditContext);
     }
 
-    return patchByJsonBody(storeId, request, session.userId);
+    return patchByJsonBody(storeId, request, auditContext);
   } catch (error) {
+    if (auditContext) {
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId: auditContext.storeId,
+        actorUserId: auditContext.userId,
+        actorName: auditContext.actorName,
+        actorRole: auditContext.actorRole,
+        action: STORE_SETTINGS_UPDATE_ACTION,
+        entityType: "store",
+        entityId: auditContext.storeId,
+        result: "FAIL",
+        reasonCode: error instanceof RBACError ? "FORBIDDEN" : "INTERNAL_ERROR",
+        metadata: {
+          message: error instanceof Error ? error.message : "unknown",
+        },
+        request,
+      });
+    }
     return toRBACErrorResponse(error);
   }
 }

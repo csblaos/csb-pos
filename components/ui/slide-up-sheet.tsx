@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 type SlideUpSheetProps = {
@@ -9,6 +10,7 @@ type SlideUpSheetProps = {
   title: string;
   description?: string;
   children: ReactNode;
+  footer?: ReactNode;
   /** Prevent closing while an async operation is in progress */
   disabled?: boolean;
 };
@@ -31,10 +33,12 @@ export function SlideUpSheet({
   title,
   description,
   children,
+  footer,
   disabled = false,
 }: SlideUpSheetProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [dragY, setDragY] = useState(0);
+  const [mounted, setMounted] = useState(false);
 
   const startYRef = useRef<number | null>(null);
   const canDragRef = useRef(false);
@@ -56,6 +60,10 @@ export function SlideUpSheet({
     canDragRef.current = false;
     onClose();
   }, [disabled, onClose]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // ── Body scroll lock + Escape key ──
   useEffect(() => {
@@ -142,9 +150,11 @@ export function SlideUpSheet({
   const sheetTranslateStyle: React.CSSProperties =
     isDragging ? { transform: `translateY(${cappedDragY}px)` } : {};
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <div
-      className={`fixed inset-0 z-50 ${isOpen ? "" : "pointer-events-none"}`}
+      className={`fixed inset-0 z-[80] ${isOpen ? "" : "pointer-events-none"}`}
       aria-hidden={!isOpen}
       role="dialog"
       aria-modal={isOpen}
@@ -154,7 +164,7 @@ export function SlideUpSheet({
       <button
         type="button"
         aria-label="ปิด"
-        className={`absolute inset-0 bg-slate-900/45 backdrop-blur-[1px] transition-opacity duration-200 ${
+        className={`absolute inset-0 bg-slate-900/55 backdrop-blur-[1px] transition-opacity duration-200 ${
           isOpen ? "opacity-100" : "opacity-0"
         }`}
         style={{ opacity: backdropOpacity }}
@@ -164,7 +174,7 @@ export function SlideUpSheet({
 
       {/* Sheet panel */}
       <div
-        className={`absolute inset-x-0 bottom-0 mx-auto flex w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-2xl sm:inset-auto sm:left-1/2 sm:top-1/2 sm:max-h-[90dvh] sm:w-full sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl ${
+        className={`absolute inset-x-0 bottom-0 mx-auto flex max-h-[92dvh] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-2xl sm:inset-auto sm:left-1/2 sm:top-1/2 sm:max-h-[90dvh] sm:w-full sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl ${
           isDragging ? "transition-none" : "transition-all duration-300 ease-out"
         } ${
           isOpen
@@ -185,7 +195,7 @@ export function SlideUpSheet({
         </div>
 
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+        <div className="shrink-0 flex items-center justify-between border-b border-slate-100 px-4 py-3">
           <div className="min-w-0 flex-1">
             <p className="text-sm font-semibold text-slate-900">{title}</p>
             {description ? (
@@ -204,10 +214,19 @@ export function SlideUpSheet({
         </div>
 
         {/* Content */}
-        <div className="max-h-[82dvh] overflow-y-auto px-4 pb-4 pt-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-4">
           {children}
         </div>
+        {footer ? (
+          <div
+            className="shrink-0 border-t border-slate-200 bg-white px-4 pt-3"
+            style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 0.5rem)" }}
+          >
+            {footer}
+          </div>
+        ) : null}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

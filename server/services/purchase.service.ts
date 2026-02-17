@@ -22,11 +22,26 @@ import {
   updatePurchaseOrderStatus,
 } from "@/server/repositories/purchase.repo";
 import type {
+  PurchaseRepoTx,
   PurchaseOrderListItem,
   PurchaseOrderView,
 } from "@/server/repositories/purchase.repo";
+import { db } from "@/lib/db/client";
+import { auditEvents } from "@/lib/db/schema";
+import { buildAuditEventValues } from "@/server/services/audit.service";
+import { markIdempotencySucceeded } from "@/server/services/idempotency.service";
 
 export { type PurchaseOrderListItem, type PurchaseOrderView };
+
+type PurchaseAuditContext = {
+  actorName: string | null;
+  actorRole: string | null;
+  request?: Request;
+};
+
+type PurchaseIdempotencyContext = {
+  recordId: string;
+};
 
 export class PurchaseServiceError extends Error {
   status: number;
@@ -76,9 +91,10 @@ export async function createPurchaseOrder(params: {
   userId: string;
   storeCurrency: string;
   payload: CreatePurchaseOrderInput;
+  audit?: PurchaseAuditContext;
+  idempotency?: PurchaseIdempotencyContext;
 }): Promise<PurchaseOrderView> {
-  const { storeId, userId, storeCurrency, payload } = params;
-  const poNumber = await getNextPoNumber(storeId);
+  const { storeId, userId, storeCurrency, payload, audit, idempotency } = params;
 
   const exchangeRate = payload.purchaseCurrency === storeCurrency
     ? 1
@@ -87,66 +103,111 @@ export async function createPurchaseOrder(params: {
   const initialStatus = payload.receiveImmediately ? "RECEIVED" : "DRAFT";
   const now = new Date().toISOString();
 
-  const po = await insertPurchaseOrder({
-    storeId,
-    poNumber,
-    supplierName: payload.supplierName || null,
-    supplierContact: payload.supplierContact || null,
-    purchaseCurrency: payload.purchaseCurrency,
-    exchangeRate: Math.round(exchangeRate),
-    shippingCost: payload.shippingCost,
-    otherCost: payload.otherCost,
-    otherCostNote: payload.otherCostNote || null,
-    note: payload.note || null,
-    expectedAt: payload.expectedAt || null,
-    status: initialStatus,
-    orderedAt: payload.receiveImmediately ? now : null,
-    receivedAt: payload.receiveImmediately ? now : null,
-    createdBy: userId,
-  });
-
-  // Compute unitCostBase for each item
-  const items = payload.items.map((item) => ({
-    purchaseOrderId: po.id,
-    productId: item.productId,
-    qtyOrdered: item.qtyOrdered,
-    qtyReceived: payload.receiveImmediately ? item.qtyOrdered : 0,
-    unitCostPurchase: item.unitCostPurchase,
-    unitCostBase: Math.round(item.unitCostPurchase * exchangeRate),
-    landedCostPerUnit: 0, // will calculate below
-  }));
-
-  // Calculate landed cost per unit (proportional allocation of shipping + other)
-  const totalExtraCost = payload.shippingCost + payload.otherCost;
-  if (totalExtraCost > 0) {
-    const totalItemsCostBase = items.reduce(
-      (sum, it) => sum + it.unitCostBase * it.qtyOrdered,
-      0,
+  return db.transaction(async (tx) => {
+    const poNumber = await getNextPoNumber(storeId, tx);
+    const po = await insertPurchaseOrder(
+      {
+        storeId,
+        poNumber,
+        supplierName: payload.supplierName || null,
+        supplierContact: payload.supplierContact || null,
+        purchaseCurrency: payload.purchaseCurrency,
+        exchangeRate: Math.round(exchangeRate),
+        shippingCost: payload.shippingCost,
+        otherCost: payload.otherCost,
+        otherCostNote: payload.otherCostNote || null,
+        note: payload.note || null,
+        expectedAt: payload.expectedAt || null,
+        status: initialStatus,
+        orderedAt: payload.receiveImmediately ? now : null,
+        receivedAt: payload.receiveImmediately ? now : null,
+        createdBy: userId,
+      },
+      tx,
     );
 
-    for (const item of items) {
-      const itemTotalCostBase = item.unitCostBase * item.qtyOrdered;
-      const proportion =
-        totalItemsCostBase > 0 ? itemTotalCostBase / totalItemsCostBase : 0;
-      const allocatedExtra = Math.round(totalExtraCost * proportion);
-      item.landedCostPerUnit = Math.round(
-        (itemTotalCostBase + allocatedExtra) / item.qtyOrdered,
+    // Compute unitCostBase for each item
+    const items = payload.items.map((item) => ({
+      purchaseOrderId: po.id,
+      productId: item.productId,
+      qtyOrdered: item.qtyOrdered,
+      qtyReceived: payload.receiveImmediately ? item.qtyOrdered : 0,
+      unitCostPurchase: item.unitCostPurchase,
+      unitCostBase: Math.round(item.unitCostPurchase * exchangeRate),
+      landedCostPerUnit: 0, // will calculate below
+    }));
+
+    // Calculate landed cost per unit (proportional allocation of shipping + other)
+    const totalExtraCost = payload.shippingCost + payload.otherCost;
+    if (totalExtraCost > 0) {
+      const totalItemsCostBase = items.reduce(
+        (sum, it) => sum + it.unitCostBase * it.qtyOrdered,
+        0,
+      );
+
+      for (const item of items) {
+        const itemTotalCostBase = item.unitCostBase * item.qtyOrdered;
+        const proportion =
+          totalItemsCostBase > 0 ? itemTotalCostBase / totalItemsCostBase : 0;
+        const allocatedExtra = Math.round(totalExtraCost * proportion);
+        item.landedCostPerUnit = Math.round(
+          (itemTotalCostBase + allocatedExtra) / item.qtyOrdered,
+        );
+      }
+    } else {
+      for (const item of items) {
+        item.landedCostPerUnit = item.unitCostBase;
+      }
+    }
+
+    await insertPurchaseOrderItems(items, tx);
+
+    // If receiveImmediately, post stock movements + update cost
+    if (payload.receiveImmediately) {
+      await receiveStockAndUpdateCost(storeId, userId, po.id, items, tx);
+    }
+
+    if (audit) {
+      await tx.insert(auditEvents).values(
+        buildAuditEventValues({
+          scope: "STORE",
+          storeId,
+          actorUserId: userId,
+          actorName: audit.actorName,
+          actorRole: audit.actorRole,
+          action: "po.create",
+          entityType: "purchase_order",
+          entityId: po.id,
+          metadata: {
+            poNumber: po.poNumber,
+            status: po.status,
+            receiveImmediately: payload.receiveImmediately,
+            itemCount: payload.items.length,
+          },
+          request: audit.request,
+        }),
       );
     }
-  } else {
-    for (const item of items) {
-      item.landedCostPerUnit = item.unitCostBase;
+
+    const createdPo = await getPurchaseOrderById(po.id, storeId, tx);
+    if (!createdPo) {
+      throw new PurchaseServiceError(404, "ไม่พบใบสั่งซื้อ");
     }
-  }
 
-  await insertPurchaseOrderItems(items);
+    if (idempotency) {
+      await markIdempotencySucceeded({
+        recordId: idempotency.recordId,
+        statusCode: 200,
+        body: {
+          ok: true,
+          purchaseOrder: createdPo,
+        },
+        tx,
+      });
+    }
 
-  // If receiveImmediately, post stock movements + update cost
-  if (payload.receiveImmediately) {
-    await receiveStockAndUpdateCost(storeId, userId, po.id, items);
-  }
-
-  return getPurchaseOrderDetail(po.id, storeId);
+    return createdPo;
+  });
 }
 
 /* ────────────────────────────────────────────────
@@ -158,248 +219,350 @@ export async function updatePurchaseOrderStatusFlow(params: {
   storeId: string;
   userId: string;
   payload: UpdatePOStatusInput;
+  audit?: PurchaseAuditContext;
+  idempotency?: PurchaseIdempotencyContext;
 }): Promise<PurchaseOrderView> {
-  const { poId, storeId, userId, payload } = params;
-  const po = await getPurchaseOrderById(poId, storeId);
-
-  if (!po) {
-    throw new PurchaseServiceError(404, "ไม่พบใบสั่งซื้อ");
-  }
+  const { poId, storeId, userId, payload, audit, idempotency } = params;
 
   const now = new Date().toISOString();
 
-  // Validate status transitions
-  const validTransitions: Record<string, string[]> = {
-    DRAFT: ["ORDERED", "RECEIVED", "CANCELLED"],
-    ORDERED: ["SHIPPED", "RECEIVED", "CANCELLED"],
-    SHIPPED: ["RECEIVED", "CANCELLED"],
-    RECEIVED: [],
-    CANCELLED: [],
-  };
+  return db.transaction(async (tx) => {
+    const po = await getPurchaseOrderById(poId, storeId, tx);
 
-  const allowed = validTransitions[po.status] ?? [];
-  if (!allowed.includes(payload.status)) {
-    throw new PurchaseServiceError(
-      400,
-      `ไม่สามารถเปลี่ยนสถานะจาก "${po.status}" เป็น "${payload.status}" ได้`,
-    );
-  }
-
-  const updates: Record<string, unknown> = { status: payload.status };
-
-  if (payload.status === "ORDERED") {
-    updates.orderedAt = now;
-  } else if (payload.status === "SHIPPED") {
-    updates.shippedAt = now;
-    if (payload.trackingInfo) {
-      updates.trackingInfo = payload.trackingInfo;
+    if (!po) {
+      throw new PurchaseServiceError(404, "ไม่พบใบสั่งซื้อ");
     }
-  } else if (payload.status === "RECEIVED") {
-    updates.receivedAt = now;
 
-    // Update received quantities
-    const receivedMap = new Map(
-      (payload.receivedItems ?? []).map((ri) => [ri.itemId, ri.qtyReceived]),
-    );
+    // Validate status transitions
+    const validTransitions: Record<string, string[]> = {
+      DRAFT: ["ORDERED", "RECEIVED", "CANCELLED"],
+      ORDERED: ["SHIPPED", "RECEIVED", "CANCELLED"],
+      SHIPPED: ["RECEIVED", "CANCELLED"],
+      RECEIVED: [],
+      CANCELLED: [],
+    };
 
-    // Recalculate landed cost based on actual received quantities
-    const totalExtraCost = po.shippingCost + po.otherCost;
-    const itemsToReceive = po.items.map((item) => {
-      const qtyReceived = receivedMap.get(item.id) ?? item.qtyOrdered;
-      return { ...item, qtyReceived };
-    });
-
-    const totalReceivedCostBase = itemsToReceive.reduce(
-      (sum, it) => sum + it.unitCostBase * it.qtyReceived,
-      0,
-    );
-
-    for (const item of itemsToReceive) {
-      const qtyReceived = item.qtyReceived;
-      if (qtyReceived <= 0) {
-        await updatePurchaseOrderItemReceived(item.id, 0, 0);
-        continue;
-      }
-
-      let landedCostPerUnit = item.unitCostBase;
-      if (totalExtraCost > 0 && totalReceivedCostBase > 0) {
-        const itemTotalCostBase = item.unitCostBase * qtyReceived;
-        const proportion = itemTotalCostBase / totalReceivedCostBase;
-        const allocatedExtra = Math.round(totalExtraCost * proportion);
-        landedCostPerUnit = Math.round(
-          (itemTotalCostBase + allocatedExtra) / qtyReceived,
-        );
-      }
-
-      await updatePurchaseOrderItemReceived(
-        item.id,
-        qtyReceived,
-        landedCostPerUnit,
+    const allowed = validTransitions[po.status] ?? [];
+    if (!allowed.includes(payload.status)) {
+      throw new PurchaseServiceError(
+        400,
+        `ไม่สามารถเปลี่ยนสถานะจาก "${po.status}" เป็น "${payload.status}" ได้`,
       );
     }
 
-    // Stock in + update weighted average cost
-    const finalItems = itemsToReceive
-      .filter((it) => it.qtyReceived > 0)
-      .map((it) => {
-        let landedCostPerUnit = it.unitCostBase;
+    const updates: Record<string, unknown> = {
+      status: payload.status,
+      updatedBy: userId,
+      updatedAt: now,
+    };
+
+    if (payload.status === "ORDERED") {
+      updates.orderedAt = now;
+    } else if (payload.status === "SHIPPED") {
+      updates.shippedAt = now;
+      if (payload.trackingInfo) {
+        updates.trackingInfo = payload.trackingInfo;
+      }
+    } else if (payload.status === "RECEIVED") {
+      updates.receivedAt = now;
+
+      // Update received quantities
+      const receivedMap = new Map(
+        (payload.receivedItems ?? []).map((ri) => [ri.itemId, ri.qtyReceived]),
+      );
+
+      // Recalculate landed cost based on actual received quantities
+      const totalExtraCost = po.shippingCost + po.otherCost;
+      const itemsToReceive = po.items.map((item) => {
+        const qtyReceived = receivedMap.get(item.id) ?? item.qtyOrdered;
+        return { ...item, qtyReceived };
+      });
+
+      const totalReceivedCostBase = itemsToReceive.reduce(
+        (sum, it) => sum + it.unitCostBase * it.qtyReceived,
+        0,
+      );
+
+      for (const item of itemsToReceive) {
+        const qtyReceived = item.qtyReceived;
+        if (qtyReceived <= 0) {
+          await updatePurchaseOrderItemReceived(item.id, 0, 0, tx);
+          continue;
+        }
+
+        let landedCostPerUnit = item.unitCostBase;
         if (totalExtraCost > 0 && totalReceivedCostBase > 0) {
-          const itemTotalCostBase = it.unitCostBase * it.qtyReceived;
+          const itemTotalCostBase = item.unitCostBase * qtyReceived;
           const proportion = itemTotalCostBase / totalReceivedCostBase;
           const allocatedExtra = Math.round(totalExtraCost * proportion);
           landedCostPerUnit = Math.round(
-            (itemTotalCostBase + allocatedExtra) / it.qtyReceived,
+            (itemTotalCostBase + allocatedExtra) / qtyReceived,
           );
         }
-        return {
-          purchaseOrderId: poId,
-          productId: it.productId,
-          qtyOrdered: it.qtyOrdered,
-          qtyReceived: it.qtyReceived,
-          unitCostPurchase: it.unitCostPurchase,
-          unitCostBase: it.unitCostBase,
+
+        await updatePurchaseOrderItemReceived(
+          item.id,
+          qtyReceived,
           landedCostPerUnit,
-        };
+          tx,
+        );
+      }
+
+      // Stock in + update weighted average cost
+      const finalItems = itemsToReceive
+        .filter((it) => it.qtyReceived > 0)
+        .map((it) => {
+          let landedCostPerUnit = it.unitCostBase;
+          if (totalExtraCost > 0 && totalReceivedCostBase > 0) {
+            const itemTotalCostBase = it.unitCostBase * it.qtyReceived;
+            const proportion = itemTotalCostBase / totalReceivedCostBase;
+            const allocatedExtra = Math.round(totalExtraCost * proportion);
+            landedCostPerUnit = Math.round(
+              (itemTotalCostBase + allocatedExtra) / it.qtyReceived,
+            );
+          }
+          return {
+            purchaseOrderId: poId,
+            productId: it.productId,
+            qtyOrdered: it.qtyOrdered,
+            qtyReceived: it.qtyReceived,
+            unitCostPurchase: it.unitCostPurchase,
+            unitCostBase: it.unitCostBase,
+            landedCostPerUnit,
+          };
+        });
+
+      await receiveStockAndUpdateCost(storeId, userId, poId, finalItems, tx);
+    } else if (payload.status === "CANCELLED") {
+      updates.cancelledAt = now;
+    }
+
+    await updatePurchaseOrderStatus(poId, updates, tx);
+
+    if (audit) {
+      await tx.insert(auditEvents).values(
+        buildAuditEventValues({
+          scope: "STORE",
+          storeId,
+          actorUserId: userId,
+          actorName: audit.actorName,
+          actorRole: audit.actorRole,
+          action: "po.status.change",
+          entityType: "purchase_order",
+          entityId: poId,
+          metadata: {
+            poNumber: po.poNumber,
+            status: payload.status,
+          },
+          request: audit.request,
+        }),
+      );
+    }
+
+    const updatedPo = await getPurchaseOrderById(poId, storeId, tx);
+    if (!updatedPo) {
+      throw new PurchaseServiceError(404, "ไม่พบใบสั่งซื้อ");
+    }
+
+    if (idempotency) {
+      await markIdempotencySucceeded({
+        recordId: idempotency.recordId,
+        statusCode: 200,
+        body: {
+          ok: true,
+          purchaseOrder: updatedPo,
+        },
+        tx,
       });
+    }
 
-    await receiveStockAndUpdateCost(storeId, userId, poId, finalItems);
-  } else if (payload.status === "CANCELLED") {
-    updates.cancelledAt = now;
-  }
-
-  await updatePurchaseOrderStatus(poId, updates);
-  return getPurchaseOrderDetail(poId, storeId);
+    return updatedPo;
+  });
 }
 
 export async function updatePurchaseOrderFlow(params: {
   poId: string;
   storeId: string;
+  userId: string;
   storeCurrency: string;
   payload: UpdatePurchaseOrderInput;
+  audit?: PurchaseAuditContext;
+  idempotency?: PurchaseIdempotencyContext;
 }): Promise<PurchaseOrderView> {
-  const { poId, storeId, storeCurrency, payload } = params;
-  const po = await getPurchaseOrderById(poId, storeId);
+  const { poId, storeId, userId, storeCurrency, payload, audit, idempotency } = params;
+  const now = new Date().toISOString();
 
-  if (!po) {
-    throw new PurchaseServiceError(404, "ไม่พบใบสั่งซื้อ");
-  }
+  return db.transaction(async (tx) => {
+    const po = await getPurchaseOrderById(poId, storeId, tx);
 
-  if (po.status === "RECEIVED" || po.status === "CANCELLED") {
-    throw new PurchaseServiceError(
-      400,
-      "PO ที่รับสินค้าแล้วหรือยกเลิกแล้ว ไม่สามารถแก้ไขได้",
-    );
-  }
+    if (!po) {
+      throw new PurchaseServiceError(404, "ไม่พบใบสั่งซื้อ");
+    }
 
-  const isDraft = po.status === "DRAFT";
-  const restrictedKeys = [
-    "supplierName",
-    "supplierContact",
-    "purchaseCurrency",
-    "exchangeRate",
-    "shippingCost",
-    "otherCost",
-    "otherCostNote",
-    "items",
-  ] as const;
-
-  if (!isDraft) {
-    const hasRestrictedChange = restrictedKeys.some(
-      (key) => payload[key] !== undefined,
-    );
-    if (hasRestrictedChange) {
+    if (po.status === "RECEIVED" || po.status === "CANCELLED") {
       throw new PurchaseServiceError(
         400,
-        "สถานะนี้แก้ได้เฉพาะหมายเหตุ วันที่คาดรับ และข้อมูล Tracking",
+        "PO ที่รับสินค้าแล้วหรือยกเลิกแล้ว ไม่สามารถแก้ไขได้",
       );
     }
-  }
 
-  const updates: Record<string, unknown> = {};
+    const isDraft = po.status === "DRAFT";
+    const restrictedKeys = [
+      "supplierName",
+      "supplierContact",
+      "purchaseCurrency",
+      "exchangeRate",
+      "shippingCost",
+      "otherCost",
+      "otherCostNote",
+      "items",
+    ] as const;
 
-  if (payload.note !== undefined) updates.note = payload.note || null;
-  if (payload.expectedAt !== undefined) updates.expectedAt = payload.expectedAt || null;
-  if (payload.trackingInfo !== undefined) {
-    updates.trackingInfo = payload.trackingInfo || null;
-  }
-
-  if (isDraft) {
-    if (payload.supplierName !== undefined) updates.supplierName = payload.supplierName || null;
-    if (payload.supplierContact !== undefined) {
-      updates.supplierContact = payload.supplierContact || null;
-    }
-    if (payload.shippingCost !== undefined) updates.shippingCost = payload.shippingCost;
-    if (payload.otherCost !== undefined) updates.otherCost = payload.otherCost;
-    if (payload.otherCostNote !== undefined) {
-      updates.otherCostNote = payload.otherCostNote || null;
-    }
-
-    const nextCurrency = payload.purchaseCurrency ?? po.purchaseCurrency;
-    const nextRate =
-      nextCurrency === storeCurrency ? 1 : Math.round(payload.exchangeRate ?? po.exchangeRate);
-
-    if (payload.purchaseCurrency !== undefined || payload.exchangeRate !== undefined) {
-      updates.purchaseCurrency = nextCurrency;
-      updates.exchangeRate = nextRate;
-    }
-
-    const costAffectingChanged =
-      payload.items !== undefined ||
-      payload.purchaseCurrency !== undefined ||
-      payload.exchangeRate !== undefined ||
-      payload.shippingCost !== undefined ||
-      payload.otherCost !== undefined;
-
-    if (costAffectingChanged) {
-      const sourceItems =
-        payload.items ??
-        po.items.map((item) => ({
-          productId: item.productId,
-          qtyOrdered: item.qtyOrdered,
-          unitCostPurchase: item.unitCostPurchase,
-        }));
-
-      const shippingCost = payload.shippingCost ?? po.shippingCost;
-      const otherCost = payload.otherCost ?? po.otherCost;
-      const totalExtraCost = shippingCost + otherCost;
-
-      const items = sourceItems.map((item) => ({
-        purchaseOrderId: po.id,
-        productId: item.productId,
-        qtyOrdered: item.qtyOrdered,
-        qtyReceived: 0,
-        unitCostPurchase: item.unitCostPurchase,
-        unitCostBase: Math.round(item.unitCostPurchase * nextRate),
-        landedCostPerUnit: 0,
-      }));
-
-      if (totalExtraCost > 0) {
-        const totalItemsCostBase = items.reduce(
-          (sum, it) => sum + it.unitCostBase * it.qtyOrdered,
-          0,
+    if (!isDraft) {
+      const hasRestrictedChange = restrictedKeys.some(
+        (key) => payload[key] !== undefined,
+      );
+      if (hasRestrictedChange) {
+        throw new PurchaseServiceError(
+          400,
+          "สถานะนี้แก้ได้เฉพาะหมายเหตุ วันที่คาดรับ และข้อมูล Tracking",
         );
+      }
+    }
 
-        for (const item of items) {
-          const itemTotalCostBase = item.unitCostBase * item.qtyOrdered;
-          const proportion =
-            totalItemsCostBase > 0 ? itemTotalCostBase / totalItemsCostBase : 0;
-          const allocatedExtra = Math.round(totalExtraCost * proportion);
-          item.landedCostPerUnit = Math.round(
-            (itemTotalCostBase + allocatedExtra) / item.qtyOrdered,
-          );
-        }
-      } else {
-        for (const item of items) {
-          item.landedCostPerUnit = item.unitCostBase;
-        }
+    const updates: Record<string, unknown> = {
+      updatedBy: userId,
+      updatedAt: now,
+    };
+
+    if (payload.note !== undefined) updates.note = payload.note || null;
+    if (payload.expectedAt !== undefined) {
+      updates.expectedAt = payload.expectedAt || null;
+    }
+    if (payload.trackingInfo !== undefined) {
+      updates.trackingInfo = payload.trackingInfo || null;
+    }
+
+    if (isDraft) {
+      if (payload.supplierName !== undefined) {
+        updates.supplierName = payload.supplierName || null;
+      }
+      if (payload.supplierContact !== undefined) {
+        updates.supplierContact = payload.supplierContact || null;
+      }
+      if (payload.shippingCost !== undefined) updates.shippingCost = payload.shippingCost;
+      if (payload.otherCost !== undefined) updates.otherCost = payload.otherCost;
+      if (payload.otherCostNote !== undefined) {
+        updates.otherCostNote = payload.otherCostNote || null;
       }
 
-      await replacePurchaseOrderItems(po.id, items);
-    }
-  }
+      const nextCurrency = payload.purchaseCurrency ?? po.purchaseCurrency;
+      const nextRate =
+        nextCurrency === storeCurrency
+          ? 1
+          : Math.round(payload.exchangeRate ?? po.exchangeRate);
 
-  await updatePurchaseOrderFields(po.id, updates);
-  return getPurchaseOrderDetail(po.id, storeId);
+      if (payload.purchaseCurrency !== undefined || payload.exchangeRate !== undefined) {
+        updates.purchaseCurrency = nextCurrency;
+        updates.exchangeRate = nextRate;
+      }
+
+      const costAffectingChanged =
+        payload.items !== undefined ||
+        payload.purchaseCurrency !== undefined ||
+        payload.exchangeRate !== undefined ||
+        payload.shippingCost !== undefined ||
+        payload.otherCost !== undefined;
+
+      if (costAffectingChanged) {
+        const sourceItems =
+          payload.items ??
+          po.items.map((item) => ({
+            productId: item.productId,
+            qtyOrdered: item.qtyOrdered,
+            unitCostPurchase: item.unitCostPurchase,
+          }));
+
+        const shippingCost = payload.shippingCost ?? po.shippingCost;
+        const otherCost = payload.otherCost ?? po.otherCost;
+        const totalExtraCost = shippingCost + otherCost;
+
+        const items = sourceItems.map((item) => ({
+          purchaseOrderId: po.id,
+          productId: item.productId,
+          qtyOrdered: item.qtyOrdered,
+          qtyReceived: 0,
+          unitCostPurchase: item.unitCostPurchase,
+          unitCostBase: Math.round(item.unitCostPurchase * nextRate),
+          landedCostPerUnit: 0,
+        }));
+
+        if (totalExtraCost > 0) {
+          const totalItemsCostBase = items.reduce(
+            (sum, it) => sum + it.unitCostBase * it.qtyOrdered,
+            0,
+          );
+
+          for (const item of items) {
+            const itemTotalCostBase = item.unitCostBase * item.qtyOrdered;
+            const proportion =
+              totalItemsCostBase > 0 ? itemTotalCostBase / totalItemsCostBase : 0;
+            const allocatedExtra = Math.round(totalExtraCost * proportion);
+            item.landedCostPerUnit = Math.round(
+              (itemTotalCostBase + allocatedExtra) / item.qtyOrdered,
+            );
+          }
+        } else {
+          for (const item of items) {
+            item.landedCostPerUnit = item.unitCostBase;
+          }
+        }
+
+        await replacePurchaseOrderItems(po.id, items, tx);
+      }
+    }
+
+    await updatePurchaseOrderFields(po.id, updates, tx);
+
+    if (audit) {
+      await tx.insert(auditEvents).values(
+        buildAuditEventValues({
+          scope: "STORE",
+          storeId,
+          actorUserId: userId,
+          actorName: audit.actorName,
+          actorRole: audit.actorRole,
+          action: "po.update",
+          entityType: "purchase_order",
+          entityId: po.id,
+          metadata: {
+            poNumber: po.poNumber,
+            updatedFields: Object.keys(payload),
+          },
+          request: audit.request,
+        }),
+      );
+    }
+
+    const updatedPo = await getPurchaseOrderById(po.id, storeId, tx);
+    if (!updatedPo) {
+      throw new PurchaseServiceError(404, "ไม่พบใบสั่งซื้อ");
+    }
+
+    if (idempotency) {
+      await markIdempotencySucceeded({
+        recordId: idempotency.recordId,
+        statusCode: 200,
+        body: {
+          ok: true,
+          purchaseOrder: updatedPo,
+        },
+        tx,
+      });
+    }
+
+    return updatedPo;
+  });
 }
 
 /* ────────────────────────────────────────────────
@@ -416,6 +579,7 @@ async function receiveStockAndUpdateCost(
     qtyOrdered: number;
     landedCostPerUnit: number;
   }[],
+  tx: PurchaseRepoTx,
 ) {
   const movements = items.map((item) => ({
     storeId,
@@ -428,15 +592,15 @@ async function receiveStockAndUpdateCost(
     createdBy: userId,
   }));
 
-  await insertInventoryMovementsForPO(movements);
+  await insertInventoryMovementsForPO(movements, tx);
 
   // Update weighted average cost for each product
   for (const item of items) {
     const qtyReceived = item.qtyReceived ?? item.qtyOrdered;
     if (qtyReceived <= 0) continue;
 
-    const currentOnHand = await getProductCurrentStock(storeId, item.productId);
-    const currentCostBase = await getProductCostBase(item.productId);
+    const currentOnHand = await getProductCurrentStock(storeId, item.productId, tx);
+    const currentCostBase = await getProductCostBase(item.productId, tx);
 
     // Stock BEFORE this receipt (subtract just-added qty)
     const previousOnHand = currentOnHand - qtyReceived;
@@ -454,6 +618,6 @@ async function receiveStockAndUpdateCost(
       );
     }
 
-    await updateProductCostBase(item.productId, newCostBase);
+    await updateProductCostBase(item.productId, newCostBase, tx);
   }
 }

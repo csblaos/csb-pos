@@ -32,7 +32,7 @@ export type OrderListItem = {
   contactDisplayName: string | null;
   total: number;
   paymentCurrency: "LAK" | "THB" | "USD";
-  paymentMethod: "CASH" | "LAO_QR";
+  paymentMethod: "CASH" | "LAO_QR" | "COD" | "BANK_TRANSFER";
   createdAt: string;
   paidAt: string | null;
   shippedAt: string | null;
@@ -58,6 +58,13 @@ export type OrderDetail = {
   orderNo: string;
   channel: "WALK_IN" | "FACEBOOK" | "WHATSAPP";
   status: "DRAFT" | "PENDING_PAYMENT" | "PAID" | "PACKED" | "SHIPPED" | "CANCELLED";
+  paymentStatus:
+    | "UNPAID"
+    | "PENDING_PROOF"
+    | "PAID"
+    | "COD_PENDING_SETTLEMENT"
+    | "COD_SETTLED"
+    | "FAILED";
   contactId: string | null;
   contactDisplayName: string | null;
   contactPhone: string | null;
@@ -71,7 +78,7 @@ export type OrderDetail = {
   shippingFeeCharged: number;
   total: number;
   paymentCurrency: "LAK" | "THB" | "USD";
-  paymentMethod: "CASH" | "LAO_QR";
+  paymentMethod: "CASH" | "LAO_QR" | "COD" | "BANK_TRANSFER";
   paymentAccountId: string | null;
   paymentAccountDisplayName: string | null;
   paymentAccountBankName: string | null;
@@ -79,9 +86,17 @@ export type OrderDetail = {
   paymentAccountQrImageUrl: string | null;
   paymentSlipUrl: string | null;
   paymentProofSubmittedAt: string | null;
+  shippingProvider: string | null;
+  shippingLabelStatus: "NONE" | "REQUESTED" | "READY" | "FAILED";
+  shippingLabelUrl: string | null;
+  shippingLabelFileKey: string | null;
+  shippingRequestId: string | null;
   shippingCarrier: string | null;
   trackingNo: string | null;
   shippingCost: number;
+  codAmount: number;
+  codFee: number;
+  codSettledAt: string | null;
   paidAt: string | null;
   shippedAt: string | null;
   createdBy: string;
@@ -103,6 +118,7 @@ export type OrderCatalogProductUnit = {
 export type OrderCatalogProduct = {
   productId: string;
   sku: string;
+  barcode: string | null;
   name: string;
   priceBase: number;
   costBase: number;
@@ -318,6 +334,7 @@ export async function getOrderDetail(storeId: string, orderId: string): Promise<
         orderNo: orders.orderNo,
         channel: orders.channel,
         status: orders.status,
+        paymentStatus: orders.paymentStatus,
         contactId: orders.contactId,
         contactDisplayName: contacts.displayName,
         contactPhone: contacts.phone,
@@ -339,9 +356,17 @@ export async function getOrderDetail(storeId: string, orderId: string): Promise<
         paymentAccountQrImageUrl: paymentAccounts.qrImageUrl,
         paymentSlipUrl: orders.paymentSlipUrl,
         paymentProofSubmittedAt: orders.paymentProofSubmittedAt,
+        shippingProvider: orders.shippingProvider,
+        shippingLabelStatus: orders.shippingLabelStatus,
+        shippingLabelUrl: orders.shippingLabelUrl,
+        shippingLabelFileKey: orders.shippingLabelFileKey,
+        shippingRequestId: orders.shippingRequestId,
         shippingCarrier: orders.shippingCarrier,
         trackingNo: orders.trackingNo,
         shippingCost: orders.shippingCost,
+        codAmount: orders.codAmount,
+        codFee: orders.codFee,
+        codSettledAt: orders.codSettledAt,
         paidAt: orders.paidAt,
         shippedAt: orders.shippedAt,
         createdBy: orders.createdBy,
@@ -365,6 +390,7 @@ export async function getOrderDetail(storeId: string, orderId: string): Promise<
         orderNo: orders.orderNo,
         channel: orders.channel,
         status: orders.status,
+        paymentStatus: sql<"UNPAID">`'UNPAID'`,
         contactId: orders.contactId,
         contactDisplayName: contacts.displayName,
         contactPhone: contacts.phone,
@@ -386,9 +412,17 @@ export async function getOrderDetail(storeId: string, orderId: string): Promise<
         paymentAccountQrImageUrl: sql<string | null>`null`,
         paymentSlipUrl: sql<string | null>`null`,
         paymentProofSubmittedAt: sql<string | null>`null`,
+        shippingProvider: sql<string | null>`null`,
+        shippingLabelStatus: sql<"NONE">`'NONE'`,
+        shippingLabelUrl: sql<string | null>`null`,
+        shippingLabelFileKey: sql<string | null>`null`,
+        shippingRequestId: sql<string | null>`null`,
         shippingCarrier: orders.shippingCarrier,
         trackingNo: orders.trackingNo,
         shippingCost: orders.shippingCost,
+        codAmount: sql<number>`0`,
+        codFee: sql<number>`0`,
+        codSettledAt: sql<string | null>`null`,
         paidAt: orders.paidAt,
         shippedAt: orders.shippedAt,
         createdBy: orders.createdBy,
@@ -457,6 +491,7 @@ export async function getOrderCatalogForStore(storeId: string): Promise<OrderCat
         .select({
           productId: products.id,
           sku: products.sku,
+          barcode: products.barcode,
           name: products.name,
           priceBase: products.priceBase,
           costBase: products.costBase,
@@ -558,6 +593,7 @@ export async function getOrderCatalogForStore(storeId: string): Promise<OrderCat
     return {
       productId: product.productId,
       sku: product.sku,
+      barcode: product.barcode,
       name: product.name,
       priceBase: product.priceBase,
       costBase: product.costBase,

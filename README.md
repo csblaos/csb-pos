@@ -55,6 +55,7 @@ npm run db:migrate    # apply migration
 npm run db:repair     # ซ่อม migration history/คอลัมน์ที่เคย drift
 npm run db:push       # push schema ตรงไป DB (ใช้ด้วยความระวัง)
 npm run db:seed       # seed ข้อมูลตัวอย่าง
+npm run idempotency:cleanup # cleanup ตาราง idempotency_requests แบบ manual
 ```
 
 ## 4) Workflow ตอนแก้ฐานข้อมูล (Schema)
@@ -139,6 +140,7 @@ R2_SECRET_ACCESS_KEY=...
 R2_BUCKET=...
 R2_PUBLIC_BASE_URL=... # optional
 R2_STORE_LOGO_PREFIX=store-logos # optional
+R2_ORDER_SHIPPING_LABEL_PREFIX=order-shipping-labels # optional
 ```
 
 ## 8) แนวทางก่อน merge/push
@@ -149,3 +151,110 @@ Checklist แนะนำ:
 - migration ใหม่ apply ได้จริง
 - ไม่มีไฟล์ migration ตกหล่น
 - flow สำคัญของฟีเจอร์ที่แก้ทำงานจริง
+
+## 9) กติกา AI Context / Handoff
+
+ถ้าใช้ AI หลายตัวทำงานต่อเนื่อง ให้ใช้ไฟล์กลางเหล่านี้:
+- `AI_CONTEXT.md` (ไฟล์หลักที่ AI ต้องอ่านก่อนเริ่มงาน)
+- `docs/CONTEXT_INDEX.md` (ลำดับการอ่าน context ทั้งหมด)
+- `docs/ARCHITECTURE.md` (ภาพรวมระบบ)
+- `docs/CODEBASE_MAP.md` (แผนที่โครงสร้างโค้ดตาม domain)
+- `docs/UI_ROUTE_MAP.md` (แผนที่หน้า UI -> component -> API)
+- `docs/DECISIONS.md` (เหตุผลเชิงสถาปัตยกรรม)
+- `docs/HANDOFF.md` (สถานะงานล่าสุด + next steps)
+- `docs/API_INVENTORY.md` (รายการ API ทั้งระบบ)
+- `docs/SCHEMA_MAP.md` (แผนผัง schema และความสัมพันธ์ตาราง)
+
+กติกา:
+- ถ้าแก้ behavior/API/schema/env ต้องอัปเดต `AI_CONTEXT.md` และ `docs/HANDOFF.md`
+- ถ้าเปลี่ยน flow หน้า -> API ต้องอัปเดต `docs/UI_ROUTE_MAP.md`
+- ถ้ามี architectural decision ใหม่ ต้องเพิ่มใน `docs/DECISIONS.md`
+- แนะนำให้รวมโค้ด + context update ใน commit เดียวกัน
+
+## 10) ตั้งค่า Shipping Label Provider
+
+ระบบรองรับ 2 โหมด:
+- `STUB` (ค่าเริ่มต้น): สร้าง tracking/label ภายในระบบเพื่อทดสอบ flow
+- `HTTP`: เรียก API ผู้ให้บริการขนส่งจริง
+
+ค่า env ที่ต้องตั้ง:
+
+```bash
+SHIPPING_PROVIDER_MODE=STUB
+# ถ้าใช้ HTTP provider
+SHIPPING_PROVIDER_HTTP_ENDPOINT=https://your-provider.example.com/labels
+SHIPPING_PROVIDER_HTTP_TOKEN=...
+SHIPPING_PROVIDER_HTTP_AUTH_SCHEME=Bearer
+SHIPPING_PROVIDER_TIMEOUT_MS=8000
+```
+
+พฤติกรรม endpoint:
+- `POST /api/orders/:orderId/shipments/label`
+- `POST /api/orders/:orderId/shipments/upload-label` (multipart upload รูปบิล/ป้ายขึ้น R2)
+- `POST /api/orders/:orderId/send-shipping`
+- สิทธิ์ที่ต้องใช้:
+  - `orders.ship` สำหรับ `shipments/label` และ `send-shipping`
+  - `orders.update` สำหรับ `shipments/upload-label`
+- รองรับ `Idempotency-Key` header
+
+manual fallback:
+- ผู้ใช้สามารถกรอก `shippingLabelUrl` (ลิงก์รูปบิล/ป้ายจัดส่ง) ในหน้า order detail
+- ผู้ใช้สามารถอัปโหลดรูปจากเครื่อง/ถ่ายรูปจากกล้องมือถือได้ (ใช้ `capture=environment`)
+- กดส่งข้อมูลจัดส่งอัตโนมัติได้ และมีปุ่มคัดลอกข้อความเพื่อส่งเองใน social media
+
+รูปแบบที่ระบบส่งไปหา HTTP provider (ตัวอย่าง):
+
+```json
+{
+  "provider": "FLASH",
+  "storeId": "store_xxx",
+  "order": {
+    "id": "order_xxx",
+    "orderNo": "SO-20260217-0001",
+    "status": "PACKED"
+  },
+  "recipient": {
+    "name": "Customer Name",
+    "address": "Customer Address",
+    "phone": "020xxxxxxx"
+  },
+  "forceRegenerate": false
+}
+```
+
+รูปแบบที่ provider ต้องตอบกลับ:
+
+```json
+{
+  "provider": "FLASH",
+  "providerRequestId": "req_xxx",
+  "trackingNo": "FLAS-260217-ABC123",
+  "labelUrl": "https://provider.example.com/labels/xxx.pdf",
+  "shippingCarrier": "FLASH"
+}
+```
+
+## 11) ตั้งงาน Cleanup Idempotency อัตโนมัติ
+
+ระบบมี endpoint สำหรับ cron:
+- `GET /api/internal/cron/idempotency-cleanup`
+
+เงื่อนไข auth:
+- ต้องส่ง secret ผ่าน `Authorization: Bearer <CRON_SECRET>` (หรือ `x-cron-secret`)
+
+ค่า env ที่ต้องตั้ง:
+
+```bash
+CRON_SECRET=...
+IDEMPOTENCY_RETENTION_DAYS=14
+IDEMPOTENCY_STALE_PROCESSING_MINUTES=15
+```
+
+ถ้า deploy บน Vercel:
+- มี `vercel.json` ตั้ง cron ไว้แล้วที่ `0 19 * * *` (เท่ากับ 02:00 เวลาไทย/ลาว ICT)
+
+ทดสอบ manual ได้ด้วย:
+
+```bash
+npm run idempotency:cleanup
+```

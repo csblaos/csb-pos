@@ -21,6 +21,10 @@ import type {
   StockProductOption,
 } from "@/lib/inventory/queries";
 import { invalidateDashboardSummaryCache } from "@/server/services/dashboard.service";
+import { db } from "@/server/db/client";
+import { buildAuditEventValues } from "@/server/services/audit.service";
+import { auditEvents } from "@/lib/db/schema";
+import { markIdempotencySucceeded } from "@/server/services/idempotency.service";
 
 const STOCK_OVERVIEW_TTL_SECONDS = 15;
 
@@ -142,6 +146,14 @@ export async function postStockMovement(params: {
   storeId: string;
   sessionUserId: string;
   payload: StockMovementInput;
+  audit?: {
+    actorName: string | null;
+    actorRole: string | null;
+    request?: Request;
+  };
+  idempotency?: {
+    recordId: string;
+  };
 }) {
   const { storeId, sessionUserId, payload } = params;
 
@@ -188,29 +200,89 @@ export async function postStockMovement(params: {
           ? -qtyBaseAbs
           : qtyBaseAbs;
 
-      await scope.step("repo.insertMovement", async () =>
-        createInventoryMovementRecord({
-          storeId,
-          productId: payload.productId,
-          type: payload.movementType,
-          qtyBase,
-          note: payload.note?.trim() ? payload.note.trim() : null,
-          createdBy: sessionUserId,
-        }),
+      const { movementId, balance } = await scope.step(
+        "repo.writeAndAuditTx",
+        async () =>
+          db.transaction(async (tx) => {
+            const movementId = await createInventoryMovementRecord({
+              storeId,
+              productId: payload.productId,
+              type: payload.movementType,
+              qtyBase,
+              note: payload.note?.trim() ? payload.note.trim() : null,
+              createdBy: sessionUserId,
+              tx,
+            });
+
+            const balance = await getStockBalanceByProduct(
+              storeId,
+              payload.productId,
+              tx,
+            );
+
+            if (params.audit) {
+              await tx.insert(auditEvents).values(
+                buildAuditEventValues({
+                  scope: "STORE",
+                  storeId,
+                  actorUserId: sessionUserId,
+                  actorName: params.audit.actorName,
+                  actorRole: params.audit.actorRole,
+                  action: "stock.movement.create",
+                  entityType: "inventory_movement",
+                  entityId: movementId,
+                  metadata: {
+                    movementType: payload.movementType,
+                    productId: payload.productId,
+                    qty: payload.qty,
+                    unitId: payload.unitId,
+                    adjustMode: payload.adjustMode ?? null,
+                  },
+                  request: params.audit.request,
+                }),
+              );
+            }
+
+            if (params.idempotency) {
+              await markIdempotencySucceeded({
+                recordId: params.idempotency.recordId,
+                statusCode: 200,
+                body: { ok: true, balance },
+                tx,
+              });
+            }
+
+            return { movementId, balance };
+          }),
       );
 
-      const balance = await scope.step("repo.readBalance", async () =>
-        getStockBalanceByProduct(storeId, payload.productId),
-      );
-
-      await scope.step("cache.invalidate", async () =>
-        Promise.all([
+      await scope.step("cache.invalidate", async () => {
+        const [stockCacheResult, dashboardCacheResult] = await Promise.allSettled([
           invalidateStockOverviewCache(storeId),
           invalidateDashboardSummaryCache(storeId),
-        ]).then(() => undefined),
-      );
+        ]);
 
-      return { balance };
+        if (
+          stockCacheResult.status === "rejected" ||
+          dashboardCacheResult.status === "rejected"
+        ) {
+          console.error(
+            `[stock] cache invalidate failed storeId=${storeId} movementId=${movementId}`,
+            {
+              stockError:
+                stockCacheResult.status === "rejected"
+                  ? stockCacheResult.reason
+                  : null,
+              dashboardError:
+                dashboardCacheResult.status === "rejected"
+                  ? dashboardCacheResult.reason
+                  : null,
+            },
+          );
+        }
+      });
+
+      return { balance, movementId };
     } finally {
       scope.end();
     }

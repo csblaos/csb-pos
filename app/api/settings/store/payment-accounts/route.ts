@@ -13,8 +13,19 @@ import {
   uploadPaymentQrImageToR2,
 } from "@/lib/storage/r2";
 import { getGlobalPaymentPolicy } from "@/lib/system-config/policy";
+import { safeLogAuditEvent } from "@/server/services/audit.service";
 
 const PAYMENT_QR_MAX_SIZE_MB = 4;
+const PAYMENT_ACCOUNT_CREATE_ACTION = "store.payment_account.create";
+const PAYMENT_ACCOUNT_UPDATE_ACTION = "store.payment_account.update";
+const PAYMENT_ACCOUNT_DELETE_ACTION = "store.payment_account.delete";
+
+type PaymentAuditContext = {
+  storeId: string;
+  userId: string;
+  actorName: string | null;
+  actorRole: string | null;
+};
 
 const createPaymentAccountSchema = z.object({
   displayName: z.string().trim().min(1).max(80),
@@ -219,6 +230,19 @@ function toQrUploadErrorResponse(error: unknown) {
   }
 
   return NextResponse.json({ message: "อัปโหลดรูป QR ไม่สำเร็จ" }, { status: 500 });
+}
+
+function maskAccountNumber(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length <= 4) {
+    return "*".repeat(trimmed.length);
+  }
+
+  return `${"*".repeat(trimmed.length - 4)}${trimmed.slice(-4)}`;
 }
 
 async function parseCreatePayload(request: Request) {
@@ -456,10 +480,31 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  let auditContext: PaymentAuditContext | null = null;
+
   try {
-    const { storeId } = await enforcePermission("stores.update");
+    const { storeId, session } = await enforcePermission("stores.update");
+    auditContext = {
+      storeId,
+      userId: session.userId,
+      actorName: session.displayName,
+      actorRole: session.activeRoleName,
+    };
     const parsedPayload = await parseCreatePayload(request);
     if (!parsedPayload.ok) {
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        action: PAYMENT_ACCOUNT_CREATE_ACTION,
+        entityType: "store_payment_account",
+        entityId: null,
+        result: "FAIL",
+        reasonCode: "VALIDATION_ERROR",
+        request,
+      });
       return parsedPayload.response;
     }
 
@@ -574,9 +619,39 @@ export async function POST(request: Request) {
 
       await ensureDefaultAccount(storeId);
       const accounts = await listPaymentAccounts(storeId);
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        action: PAYMENT_ACCOUNT_CREATE_ACTION,
+        entityType: "store_payment_account",
+        metadata: {
+          displayName: payload.displayName.trim(),
+          accountType: payload.accountType,
+          bankName,
+          accountName: payload.accountName.trim(),
+          accountNumberMasked: maskAccountNumber(accountNumber),
+          isDefault: nextIsDefault,
+          isActive: nextIsActive,
+          hasQrImage: Boolean(nextQrImageUrl),
+        },
+        after: {
+          displayName: payload.displayName.trim(),
+          accountType: payload.accountType,
+          bankName,
+          accountName: payload.accountName.trim(),
+          accountNumberMasked: maskAccountNumber(accountNumber),
+          isDefault: nextIsDefault,
+          isActive: nextIsActive,
+          hasQrImage: Boolean(nextQrImageUrl),
+        },
+        request,
+      });
 
       return NextResponse.json({ ok: true, accounts, policy });
-    } catch {
+    } catch (error) {
       if (uploadedQrImageUrl) {
         try {
           await deletePaymentQrImageFromR2({ qrImageUrl: uploadedQrImageUrl });
@@ -585,18 +660,76 @@ export async function POST(request: Request) {
         }
       }
 
+      if (auditContext) {
+        await safeLogAuditEvent({
+          scope: "STORE",
+          storeId: auditContext.storeId,
+          actorUserId: auditContext.userId,
+          actorName: auditContext.actorName,
+          actorRole: auditContext.actorRole,
+          action: PAYMENT_ACCOUNT_CREATE_ACTION,
+          entityType: "store_payment_account",
+          entityId: null,
+          result: "FAIL",
+          reasonCode: "INTERNAL_ERROR",
+          metadata: {
+            message: error instanceof Error ? error.message : "unknown",
+          },
+          request,
+        });
+      }
+
       return toSchemaOutdatedResponse();
     }
   } catch (error) {
+    if (auditContext) {
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId: auditContext.storeId,
+        actorUserId: auditContext.userId,
+        actorName: auditContext.actorName,
+        actorRole: auditContext.actorRole,
+        action: PAYMENT_ACCOUNT_CREATE_ACTION,
+        entityType: "store_payment_account",
+        entityId: null,
+        result: "FAIL",
+        reasonCode: "INTERNAL_ERROR",
+        metadata: {
+          message: error instanceof Error ? error.message : "unknown",
+        },
+        request,
+      });
+    }
     return toRBACErrorResponse(error);
   }
 }
 
 export async function PATCH(request: Request) {
+  let auditContext: PaymentAuditContext | null = null;
+
   try {
-    const { storeId } = await enforcePermission("stores.update");
+    const { storeId, session } = await enforcePermission("stores.update");
+    auditContext = {
+      storeId,
+      userId: session.userId,
+      actorName: session.displayName,
+      actorRole: session.activeRoleName,
+    };
     const parsedPayload = await parseUpdatePayload(request);
     if (!parsedPayload.ok) {
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        action: PAYMENT_ACCOUNT_UPDATE_ACTION,
+        entityType: "store_payment_account",
+        entityId: null,
+        result: "FAIL",
+        reasonCode: "VALIDATION_ERROR",
+        request,
+      });
       return parsedPayload.response;
     }
 
@@ -628,6 +761,19 @@ export async function PATCH(request: Request) {
         .limit(1);
 
       if (!target) {
+        await safeLogAuditEvent({
+          scope: "STORE",
+          storeId,
+          actorUserId: session.userId,
+          actorName: session.displayName,
+          actorRole: session.activeRoleName,
+          action: PAYMENT_ACCOUNT_UPDATE_ACTION,
+          entityType: "store_payment_account",
+          entityId: payload.id,
+          result: "FAIL",
+          reasonCode: "NOT_FOUND",
+          request,
+        });
         return NextResponse.json({ message: "ไม่พบบัญชีรับเงินที่ต้องการแก้ไข" }, { status: 404 });
       }
 
@@ -755,8 +901,42 @@ export async function PATCH(request: Request) {
         listPaymentAccounts(storeId),
         getGlobalPaymentPolicy(),
       ]);
+
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        action: PAYMENT_ACCOUNT_UPDATE_ACTION,
+        entityType: "store_payment_account",
+        entityId: target.id,
+        before: {
+          id: target.id,
+          displayName: target.displayName,
+          accountType: normalizeAccountType(target.accountType),
+          bankName: target.bankName,
+          accountName: target.accountName,
+          accountNumberMasked: maskAccountNumber(target.accountNumber),
+          qrImageUrl: target.qrImageUrl ?? target.promptpayId ?? null,
+          isDefault: target.isDefault,
+          isActive: target.isActive,
+        },
+        after: {
+          id: target.id,
+          displayName: payload.displayName?.trim() ?? target.displayName,
+          accountType: nextAccountType,
+          bankName: nextBankName,
+          accountName: nextAccountName,
+          accountNumberMasked: maskAccountNumber(nextAccountNumber),
+          qrImageUrl: nextQrImageUrl,
+          isDefault: nextIsDefault,
+          isActive: nextIsActive,
+        },
+        request,
+      });
       return NextResponse.json({ ok: true, accounts, policy });
-    } catch {
+    } catch (error) {
       if (uploadedQrImageUrl && !didPersistUpdate) {
         try {
           await deletePaymentQrImageFromR2({ qrImageUrl: uploadedQrImageUrl });
@@ -765,19 +945,77 @@ export async function PATCH(request: Request) {
         }
       }
 
+      if (auditContext) {
+        await safeLogAuditEvent({
+          scope: "STORE",
+          storeId: auditContext.storeId,
+          actorUserId: auditContext.userId,
+          actorName: auditContext.actorName,
+          actorRole: auditContext.actorRole,
+          action: PAYMENT_ACCOUNT_UPDATE_ACTION,
+          entityType: "store_payment_account",
+          entityId: payload.id,
+          result: "FAIL",
+          reasonCode: "INTERNAL_ERROR",
+          metadata: {
+            message: error instanceof Error ? error.message : "unknown",
+          },
+          request,
+        });
+      }
+
       return toSchemaOutdatedResponse();
     }
   } catch (error) {
+    if (auditContext) {
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId: auditContext.storeId,
+        actorUserId: auditContext.userId,
+        actorName: auditContext.actorName,
+        actorRole: auditContext.actorRole,
+        action: PAYMENT_ACCOUNT_UPDATE_ACTION,
+        entityType: "store_payment_account",
+        entityId: null,
+        result: "FAIL",
+        reasonCode: "INTERNAL_ERROR",
+        metadata: {
+          message: error instanceof Error ? error.message : "unknown",
+        },
+        request,
+      });
+    }
     return toRBACErrorResponse(error);
   }
 }
 
 export async function DELETE(request: Request) {
+  let auditContext: PaymentAuditContext | null = null;
+
   try {
-    const { storeId } = await enforcePermission("stores.update");
+    const { storeId, session } = await enforcePermission("stores.update");
+    auditContext = {
+      storeId,
+      userId: session.userId,
+      actorName: session.displayName,
+      actorRole: session.activeRoleName,
+    };
     const url = new URL(request.url);
     const accountId = url.searchParams.get("id")?.trim() ?? "";
     if (!accountId) {
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        action: PAYMENT_ACCOUNT_DELETE_ACTION,
+        entityType: "store_payment_account",
+        entityId: null,
+        result: "FAIL",
+        reasonCode: "VALIDATION_ERROR",
+        request,
+      });
       return NextResponse.json({ message: "ไม่พบรหัสบัญชีรับเงิน" }, { status: 400 });
     }
 
@@ -794,6 +1032,19 @@ export async function DELETE(request: Request) {
       .limit(1);
 
     if (!target) {
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        action: PAYMENT_ACCOUNT_DELETE_ACTION,
+        entityType: "store_payment_account",
+        entityId: accountId,
+        result: "FAIL",
+        reasonCode: "NOT_FOUND",
+        request,
+      });
       return NextResponse.json({ message: "ไม่พบบัญชีรับเงินที่ต้องการลบ" }, { status: 404 });
     }
 
@@ -810,6 +1061,26 @@ export async function DELETE(request: Request) {
       }
     }
 
+    await safeLogAuditEvent({
+      scope: "STORE",
+      storeId,
+      actorUserId: session.userId,
+      actorName: session.displayName,
+      actorRole: session.activeRoleName,
+      action: PAYMENT_ACCOUNT_DELETE_ACTION,
+      entityType: "store_payment_account",
+      entityId: target.id,
+      before: {
+        id: target.id,
+        qrImageUrl: targetQrImageUrl,
+      },
+      after: {
+        id: target.id,
+        deleted: true,
+      },
+      request,
+    });
+
     try {
       const [accounts, policy] = await Promise.all([
         listPaymentAccounts(storeId),
@@ -820,6 +1091,24 @@ export async function DELETE(request: Request) {
       return toSchemaOutdatedResponse();
     }
   } catch (error) {
+    if (auditContext) {
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId: auditContext.storeId,
+        actorUserId: auditContext.userId,
+        actorName: auditContext.actorName,
+        actorRole: auditContext.actorRole,
+        action: PAYMENT_ACCOUNT_DELETE_ACTION,
+        entityType: "store_payment_account",
+        entityId: null,
+        result: "FAIL",
+        reasonCode: "INTERNAL_ERROR",
+        metadata: {
+          message: error instanceof Error ? error.message : "unknown",
+        },
+        request,
+      });
+    }
     return toRBACErrorResponse(error);
   }
 }

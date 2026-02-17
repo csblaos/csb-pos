@@ -8,6 +8,7 @@ import { permissions, rolePermissions, roles, storeMembers } from "@/lib/db/sche
 import { timeDbQuery } from "@/lib/perf/server";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { getPermissionCatalog } from "@/lib/rbac/queries";
+import { safeLogAuditEvent } from "@/server/services/audit.service";
 
 const updateRolePermissionSchema = z.object({
   permissionKeys: z.array(z.string().min(1)).max(1000),
@@ -70,13 +71,45 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ roleId: string }> },
 ) {
+  const auditAction = "store.role.permissions.update";
+  let auditContext: {
+    storeId: string;
+    actorUserId: string;
+    actorName: string | null;
+    actorRole: string | null;
+    roleId: string | null;
+  } | null = null;
+
   try {
-    const { storeId } = await enforcePermission("rbac.roles.update");
+    const { storeId, session } = await enforcePermission("rbac.roles.update");
 
     const { roleId } = await context.params;
+    auditContext = {
+      storeId,
+      actorUserId: session.userId,
+      actorName: session.displayName,
+      actorRole: session.activeRoleName,
+      roleId,
+    };
     const payload = updateRolePermissionSchema.safeParse(await request.json());
 
     if (!payload.success) {
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        action: auditAction,
+        entityType: "role",
+        entityId: roleId,
+        result: "FAIL",
+        reasonCode: "VALIDATION_ERROR",
+        metadata: {
+          issues: payload.error.issues.map((issue) => issue.path.join(".")).slice(0, 5),
+        },
+        request,
+      });
       return NextResponse.json({ message: "ข้อมูลสิทธิ์ไม่ถูกต้อง" }, { status: 400 });
     }
 
@@ -93,10 +126,39 @@ export async function PATCH(
     );
 
     if (!role) {
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        action: auditAction,
+        entityType: "role",
+        entityId: roleId,
+        result: "FAIL",
+        reasonCode: "NOT_FOUND",
+        request,
+      });
       return NextResponse.json({ message: "ไม่พบบทบาท" }, { status: 404 });
     }
 
     if (Boolean(role.isSystem) && role.name === "Owner") {
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        action: auditAction,
+        entityType: "role",
+        entityId: role.id,
+        result: "FAIL",
+        reasonCode: "BUSINESS_RULE",
+        metadata: {
+          message: "owner_role_locked",
+        },
+        request,
+      });
       return NextResponse.json(
         { message: "ไม่สามารถแก้ไขสิทธิ์ของ Owner ได้" },
         { status: 400 },
@@ -106,6 +168,7 @@ export async function PATCH(
     const uniqueKeys = [...new Set(payload.data.permissionKeys)];
     const permissionCatalog = await getPermissionCatalog();
     const permissionIdByKey = new Map(permissionCatalog.map((permission) => [permission.key, permission.id]));
+    const permissionKeyById = new Map(permissionCatalog.map((permission) => [permission.id, permission.key]));
 
     const selectedIdSet = new Set(
       uniqueKeys
@@ -121,6 +184,14 @@ export async function PATCH(
     );
 
     const currentIdSet = new Set(currentRows.map((item) => item.permissionId));
+    const currentPermissionKeys = [...currentIdSet]
+      .map((permissionId) => permissionKeyById.get(permissionId))
+      .filter((permissionKey): permissionKey is string => Boolean(permissionKey))
+      .sort();
+    const selectedPermissionKeys = [...selectedIdSet]
+      .map((permissionId) => permissionKeyById.get(permissionId))
+      .filter((permissionKey): permissionKey is string => Boolean(permissionKey))
+      .sort();
 
     const toInsert = [...selectedIdSet].filter((permissionId) => !currentIdSet.has(permissionId));
     const toDelete = [...currentIdSet].filter((permissionId) => !selectedIdSet.has(permissionId));
@@ -157,8 +228,50 @@ export async function PATCH(
       await Promise.all(userIds.map((userId) => invalidateUserSessions(userId)));
     }
 
+    await safeLogAuditEvent({
+      scope: "STORE",
+      storeId,
+      actorUserId: session.userId,
+      actorName: session.displayName,
+      actorRole: session.activeRoleName,
+      action: auditAction,
+      entityType: "role",
+      entityId: role.id,
+      metadata: {
+        roleName: role.name,
+        addedCount: toInsert.length,
+        removedCount: toDelete.length,
+        unknownPermissionKeys: uniqueKeys.filter((key) => !permissionIdByKey.has(key)),
+      },
+      before: {
+        permissionKeys: currentPermissionKeys,
+      },
+      after: {
+        permissionKeys: selectedPermissionKeys,
+      },
+      request,
+    });
+
     return NextResponse.json({ ok: true });
   } catch (error) {
+    if (auditContext) {
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId: auditContext.storeId,
+        actorUserId: auditContext.actorUserId,
+        actorName: auditContext.actorName,
+        actorRole: auditContext.actorRole,
+        action: auditAction,
+        entityType: "role",
+        entityId: auditContext.roleId,
+        result: "FAIL",
+        reasonCode: "INTERNAL_ERROR",
+        metadata: {
+          message: error instanceof Error ? error.message : "unknown",
+        },
+        request,
+      });
+    }
     return toRBACErrorResponse(error);
   }
 }

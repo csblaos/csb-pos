@@ -131,9 +131,72 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     set \`payment_method\` = 'CASH'
     where \`payment_method\` is null
       or trim(\`payment_method\`) = ''
-      or \`payment_method\` not in ('CASH', 'LAO_QR')
+      or \`payment_method\` not in ('CASH', 'LAO_QR', 'COD', 'BANK_TRANSFER')
   `);
   console.info("[db:repair] normalized orders.payment_method");
+
+  if (!(await columnExists("orders", "payment_status"))) {
+    await client.execute(
+      "alter table `orders` add `payment_status` text not null default 'UNPAID'",
+    );
+    console.info("[db:repair] added column orders.payment_status");
+  }
+
+  if (!(await columnExists("orders", "shipping_provider"))) {
+    await client.execute("alter table `orders` add `shipping_provider` text");
+    console.info("[db:repair] added column orders.shipping_provider");
+  }
+
+  if (!(await columnExists("orders", "shipping_label_status"))) {
+    await client.execute(
+      "alter table `orders` add `shipping_label_status` text not null default 'NONE'",
+    );
+    console.info("[db:repair] added column orders.shipping_label_status");
+  }
+
+  if (!(await columnExists("orders", "shipping_label_url"))) {
+    await client.execute("alter table `orders` add `shipping_label_url` text");
+    console.info("[db:repair] added column orders.shipping_label_url");
+  }
+
+  if (!(await columnExists("orders", "shipping_label_file_key"))) {
+    await client.execute("alter table `orders` add `shipping_label_file_key` text");
+    console.info("[db:repair] added column orders.shipping_label_file_key");
+  }
+
+  if (!(await columnExists("orders", "shipping_request_id"))) {
+    await client.execute("alter table `orders` add `shipping_request_id` text");
+    console.info("[db:repair] added column orders.shipping_request_id");
+  }
+
+  if (!(await columnExists("orders", "cod_amount"))) {
+    await client.execute("alter table `orders` add `cod_amount` integer not null default 0");
+    console.info("[db:repair] added column orders.cod_amount");
+  }
+
+  if (!(await columnExists("orders", "cod_fee"))) {
+    await client.execute("alter table `orders` add `cod_fee` integer not null default 0");
+    console.info("[db:repair] added column orders.cod_fee");
+  }
+
+  if (!(await columnExists("orders", "cod_settled_at"))) {
+    await client.execute("alter table `orders` add `cod_settled_at` text");
+    console.info("[db:repair] added column orders.cod_settled_at");
+  }
+
+  await client.execute(`
+    update \`orders\`
+    set \`payment_status\` = case
+      when \`payment_method\` = 'COD' then 'COD_PENDING_SETTLEMENT'
+      when \`status\` in ('PAID', 'PACKED', 'SHIPPED') then 'PAID'
+      when \`payment_method\` in ('LAO_QR', 'BANK_TRANSFER') and \`payment_slip_url\` is not null and trim(\`payment_slip_url\`) <> '' then 'PENDING_PROOF'
+      else 'UNPAID'
+    end
+    where \`payment_status\` is null
+       or trim(\`payment_status\`) = ''
+       or \`payment_status\` not in ('UNPAID', 'PENDING_PROOF', 'PAID', 'COD_PENDING_SETTLEMENT', 'COD_SETTLED', 'FAILED')
+  `);
+  console.info("[db:repair] normalized orders.payment_status");
 
   await client.execute(
     "create index if not exists `orders_store_created_at_idx` on `orders` (`store_id`,`created_at`)",
@@ -146,6 +209,12 @@ async function ensureSchemaCompatForLatestAuthChanges() {
   );
   await client.execute(
     "create index if not exists `orders_store_payment_method_idx` on `orders` (`store_id`,`payment_method`)",
+  );
+  await client.execute(
+    "create index if not exists `orders_store_payment_status_created_at_idx` on `orders` (`store_id`,`payment_status`,`created_at`)",
+  );
+  await client.execute(
+    "create index if not exists `orders_store_shipping_label_status_updated_idx` on `orders` (`store_id`,`shipping_label_status`,`created_at`)",
   );
   console.info("[db:repair] ensured orders indexes from migration 0002 and payment flow");
 
@@ -219,6 +288,51 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     "update `stores` set `low_stock_threshold` = 10 where `low_stock_threshold` is null",
   );
   console.info("[db:repair] backfilled stores stock thresholds");
+
+  // ── PDF config columns on stores ──
+
+  if (!(await columnExists("stores", "pdf_show_logo"))) {
+    await client.execute(
+      "alter table `stores` add `pdf_show_logo` integer not null default 1",
+    );
+    console.info("[db:repair] added column stores.pdf_show_logo");
+  }
+
+  if (!(await columnExists("stores", "pdf_show_signature"))) {
+    await client.execute(
+      "alter table `stores` add `pdf_show_signature` integer not null default 1",
+    );
+    console.info("[db:repair] added column stores.pdf_show_signature");
+  }
+
+  if (!(await columnExists("stores", "pdf_show_note"))) {
+    await client.execute(
+      "alter table `stores` add `pdf_show_note` integer not null default 1",
+    );
+    console.info("[db:repair] added column stores.pdf_show_note");
+  }
+
+  if (!(await columnExists("stores", "pdf_header_color"))) {
+    await client.execute(
+      "alter table `stores` add `pdf_header_color` text not null default '#f1f5f9'",
+    );
+    console.info("[db:repair] added column stores.pdf_header_color");
+  }
+
+  if (!(await columnExists("stores", "pdf_company_name"))) {
+    await client.execute("alter table `stores` add `pdf_company_name` text");
+    console.info("[db:repair] added column stores.pdf_company_name");
+  }
+
+  if (!(await columnExists("stores", "pdf_company_address"))) {
+    await client.execute("alter table `stores` add `pdf_company_address` text");
+    console.info("[db:repair] added column stores.pdf_company_address");
+  }
+
+  if (!(await columnExists("stores", "pdf_company_phone"))) {
+    await client.execute("alter table `stores` add `pdf_company_phone` text");
+    console.info("[db:repair] added column stores.pdf_company_phone");
+  }
 
   if (!(await columnExists("products", "out_stock_threshold"))) {
     await client.execute("alter table `products` add `out_stock_threshold` integer");
@@ -710,6 +824,248 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     "create index if not exists `po_items_product_id_idx` on `purchase_order_items` (`product_id`)",
   );
   console.info("[db:repair] ensured table purchase_order_items + indexes");
+
+  // ── idempotency_requests (migration 0026) ──
+
+  await client.execute(`
+    create table if not exists \`idempotency_requests\` (
+      \`id\` text primary key not null,
+      \`store_id\` text not null references \`stores\`(\`id\`) on delete cascade,
+      \`action\` text not null,
+      \`idempotency_key\` text not null,
+      \`request_hash\` text not null,
+      \`status\` text not null default 'PROCESSING',
+      \`response_status\` integer,
+      \`response_body\` text,
+      \`created_by\` text references \`users\`(\`id\`) on delete set null,
+      \`created_at\` text not null default (CURRENT_TIMESTAMP),
+      \`completed_at\` text
+    )
+  `);
+
+  if (!(await columnExists("idempotency_requests", "response_status"))) {
+    await client.execute("alter table `idempotency_requests` add `response_status` integer");
+    console.info("[db:repair] added column idempotency_requests.response_status");
+  }
+
+  if (!(await columnExists("idempotency_requests", "response_body"))) {
+    await client.execute("alter table `idempotency_requests` add `response_body` text");
+    console.info("[db:repair] added column idempotency_requests.response_body");
+  }
+
+  if (!(await columnExists("idempotency_requests", "created_by"))) {
+    await client.execute("alter table `idempotency_requests` add `created_by` text");
+    console.info("[db:repair] added column idempotency_requests.created_by");
+  }
+
+  if (!(await columnExists("idempotency_requests", "completed_at"))) {
+    await client.execute("alter table `idempotency_requests` add `completed_at` text");
+    console.info("[db:repair] added column idempotency_requests.completed_at");
+  }
+
+  await client.execute(`
+    update \`idempotency_requests\`
+    set \`status\` = 'PROCESSING'
+    where \`status\` is null
+      or trim(\`status\`) = ''
+      or \`status\` not in ('PROCESSING', 'SUCCEEDED', 'FAILED')
+  `);
+
+  await client.execute(`
+    update \`idempotency_requests\`
+    set \`completed_at\` = coalesce(\`completed_at\`, \`created_at\`, CURRENT_TIMESTAMP)
+    where \`status\` in ('SUCCEEDED', 'FAILED')
+      and (\`completed_at\` is null or trim(\`completed_at\`) = '')
+  `);
+
+  await client.execute(
+    "create unique index if not exists `idempotency_requests_store_action_key_unique` on `idempotency_requests` (`store_id`, `action`, `idempotency_key`)",
+  );
+  await client.execute(
+    "create index if not exists `idempotency_requests_store_created_at_idx` on `idempotency_requests` (`store_id`, `created_at`)",
+  );
+  await client.execute(
+    "create index if not exists `idempotency_requests_status_created_at_idx` on `idempotency_requests` (`status`, `created_at`)",
+  );
+  console.info("[db:repair] ensured table idempotency_requests + indexes");
+
+  // ── order_shipments (migration 0027) ──
+
+  await client.execute(`
+    create table if not exists \`order_shipments\` (
+      \`id\` text primary key not null,
+      \`order_id\` text not null references \`orders\`(\`id\`) on delete cascade,
+      \`store_id\` text not null references \`stores\`(\`id\`) on delete cascade,
+      \`provider\` text not null,
+      \`status\` text not null default 'REQUESTED',
+      \`tracking_no\` text,
+      \`label_url\` text,
+      \`label_file_key\` text,
+      \`provider_request_id\` text,
+      \`provider_response\` text,
+      \`last_error\` text,
+      \`created_by\` text references \`users\`(\`id\`) on delete set null,
+      \`created_at\` text not null default (CURRENT_TIMESTAMP),
+      \`updated_at\` text not null default (CURRENT_TIMESTAMP)
+    )
+  `);
+
+  await client.execute(`
+    update \`order_shipments\`
+    set \`status\` = 'REQUESTED'
+    where \`status\` is null
+      or trim(\`status\`) = ''
+      or \`status\` not in ('REQUESTED', 'READY', 'FAILED', 'VOID')
+  `);
+
+  await client.execute(
+    "create index if not exists `order_shipments_order_id_idx` on `order_shipments` (`order_id`)",
+  );
+  await client.execute(
+    "create index if not exists `order_shipments_store_status_created_at_idx` on `order_shipments` (`store_id`, `status`, `created_at`)",
+  );
+  await client.execute(
+    "create index if not exists `order_shipments_provider_request_id_idx` on `order_shipments` (`provider_request_id`)",
+  );
+  console.info("[db:repair] ensured table order_shipments + indexes");
+
+  // ── audit_events (migration 0025) ──
+
+  await client.execute(`
+    create table if not exists \`audit_events\` (
+      \`id\` text primary key not null,
+      \`scope\` text not null,
+      \`store_id\` text references \`stores\`(\`id\`) on delete set null,
+      \`actor_user_id\` text references \`users\`(\`id\`) on delete set null,
+      \`actor_name\` text,
+      \`actor_role\` text,
+      \`action\` text not null,
+      \`entity_type\` text not null,
+      \`entity_id\` text,
+      \`result\` text not null default 'SUCCESS',
+      \`reason_code\` text,
+      \`ip_address\` text,
+      \`user_agent\` text,
+      \`request_id\` text,
+      \`metadata\` text,
+      \`before\` text,
+      \`after\` text,
+      \`occurred_at\` text not null default (CURRENT_TIMESTAMP)
+    )
+  `);
+
+  if (!(await columnExists("audit_events", "scope"))) {
+    await client.execute("alter table `audit_events` add `scope` text not null default 'STORE'");
+    console.info("[db:repair] added column audit_events.scope");
+  }
+
+  if (!(await columnExists("audit_events", "store_id"))) {
+    await client.execute("alter table `audit_events` add `store_id` text");
+    console.info("[db:repair] added column audit_events.store_id");
+  }
+
+  if (!(await columnExists("audit_events", "actor_user_id"))) {
+    await client.execute("alter table `audit_events` add `actor_user_id` text");
+    console.info("[db:repair] added column audit_events.actor_user_id");
+  }
+
+  if (!(await columnExists("audit_events", "actor_name"))) {
+    await client.execute("alter table `audit_events` add `actor_name` text");
+    console.info("[db:repair] added column audit_events.actor_name");
+  }
+
+  if (!(await columnExists("audit_events", "actor_role"))) {
+    await client.execute("alter table `audit_events` add `actor_role` text");
+    console.info("[db:repair] added column audit_events.actor_role");
+  }
+
+  if (!(await columnExists("audit_events", "result"))) {
+    await client.execute(
+      "alter table `audit_events` add `result` text not null default 'SUCCESS'",
+    );
+    console.info("[db:repair] added column audit_events.result");
+  }
+
+  if (!(await columnExists("audit_events", "reason_code"))) {
+    await client.execute("alter table `audit_events` add `reason_code` text");
+    console.info("[db:repair] added column audit_events.reason_code");
+  }
+
+  if (!(await columnExists("audit_events", "ip_address"))) {
+    await client.execute("alter table `audit_events` add `ip_address` text");
+    console.info("[db:repair] added column audit_events.ip_address");
+  }
+
+  if (!(await columnExists("audit_events", "user_agent"))) {
+    await client.execute("alter table `audit_events` add `user_agent` text");
+    console.info("[db:repair] added column audit_events.user_agent");
+  }
+
+  if (!(await columnExists("audit_events", "request_id"))) {
+    await client.execute("alter table `audit_events` add `request_id` text");
+    console.info("[db:repair] added column audit_events.request_id");
+  }
+
+  if (!(await columnExists("audit_events", "metadata"))) {
+    await client.execute("alter table `audit_events` add `metadata` text");
+    console.info("[db:repair] added column audit_events.metadata");
+  }
+
+  if (!(await columnExists("audit_events", "before"))) {
+    await client.execute("alter table `audit_events` add `before` text");
+    console.info("[db:repair] added column audit_events.before");
+  }
+
+  if (!(await columnExists("audit_events", "after"))) {
+    await client.execute("alter table `audit_events` add `after` text");
+    console.info("[db:repair] added column audit_events.after");
+  }
+
+  if (!(await columnExists("audit_events", "occurred_at"))) {
+    await client.execute(
+      "alter table `audit_events` add `occurred_at` text not null default (CURRENT_TIMESTAMP)",
+    );
+    console.info("[db:repair] added column audit_events.occurred_at");
+  }
+
+  await client.execute(`
+    update \`audit_events\`
+    set \`scope\` = 'STORE'
+    where \`scope\` is null
+      or trim(\`scope\`) = ''
+      or \`scope\` not in ('STORE', 'SYSTEM')
+  `);
+
+  await client.execute(`
+    update \`audit_events\`
+    set \`result\` = 'SUCCESS'
+    where \`result\` is null
+      or trim(\`result\`) = ''
+      or \`result\` not in ('SUCCESS', 'FAIL')
+  `);
+
+  await client.execute(`
+    update \`audit_events\`
+    set \`occurred_at\` = coalesce(\`occurred_at\`, CURRENT_TIMESTAMP)
+    where \`occurred_at\` is null or trim(\`occurred_at\`) = ''
+  `);
+
+  await client.execute(
+    "create index if not exists `audit_events_scope_occurred_at_idx` on `audit_events` (`scope`, `occurred_at`)",
+  );
+  await client.execute(
+    "create index if not exists `audit_events_store_occurred_at_idx` on `audit_events` (`store_id`, `occurred_at`)",
+  );
+  await client.execute(
+    "create index if not exists `audit_events_actor_occurred_at_idx` on `audit_events` (`actor_user_id`, `occurred_at`)",
+  );
+  await client.execute(
+    "create index if not exists `audit_events_entity_occurred_at_idx` on `audit_events` (`entity_type`, `entity_id`, `occurred_at`)",
+  );
+  await client.execute(
+    "create index if not exists `audit_events_action_occurred_at_idx` on `audit_events` (`action`, `occurred_at`)",
+  );
+  console.info("[db:repair] ensured table audit_events + indexes");
 }
 
 async function ensureMigrationTable() {

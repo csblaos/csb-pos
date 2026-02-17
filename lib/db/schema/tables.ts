@@ -34,7 +34,26 @@ export const movementTypeEnum = [
 ] as const;
 export const movementRefTypeEnum = ["ORDER", "MANUAL", "RETURN", "PURCHASE"] as const;
 export const orderChannelEnum = ["WALK_IN", "FACEBOOK", "WHATSAPP"] as const;
-export const orderPaymentMethodEnum = ["CASH", "LAO_QR"] as const;
+export const orderPaymentMethodEnum = [
+  "CASH",
+  "LAO_QR",
+  "COD",
+  "BANK_TRANSFER",
+] as const;
+export const orderPaymentStatusEnum = [
+  "UNPAID",
+  "PENDING_PROOF",
+  "PAID",
+  "COD_PENDING_SETTLEMENT",
+  "COD_SETTLED",
+  "FAILED",
+] as const;
+export const orderShippingLabelStatusEnum = [
+  "NONE",
+  "REQUESTED",
+  "READY",
+  "FAILED",
+] as const;
 export const orderStatusEnum = [
   "DRAFT",
   "PENDING_PAYMENT",
@@ -56,7 +75,15 @@ export const purchaseOrderStatusEnum = [
   "RECEIVED",
   "CANCELLED",
 ] as const;
+export const idempotencyStatusEnum = [
+  "PROCESSING",
+  "SUCCEEDED",
+  "FAILED",
+] as const;
+export const auditScopeEnum = ["STORE", "SYSTEM"] as const;
+export const auditResultEnum = ["SUCCESS", "FAIL"] as const;
 export const unitScopeEnum = ["SYSTEM", "STORE"] as const;
+export const orderShipmentStatusEnum = ["REQUESTED", "READY", "FAILED", "VOID"] as const;
 export const memberBranchAccessModeEnum = ["ALL", "SELECTED"] as const;
 export const branchSharingModeEnum = [
   "MAIN",
@@ -128,6 +155,14 @@ export const stores = sqliteTable(
     outStockThreshold: integer("out_stock_threshold").notNull().default(0),
     lowStockThreshold: integer("low_stock_threshold").notNull().default(10),
     maxBranchesOverride: integer("max_branches_override"),
+    /* ── PDF document config ── */
+    pdfShowLogo: integer("pdf_show_logo", { mode: "boolean" }).notNull().default(true),
+    pdfShowSignature: integer("pdf_show_signature", { mode: "boolean" }).notNull().default(true),
+    pdfShowNote: integer("pdf_show_note", { mode: "boolean" }).notNull().default(true),
+    pdfHeaderColor: text("pdf_header_color").notNull().default("#f1f5f9"),
+    pdfCompanyName: text("pdf_company_name"),
+    pdfCompanyAddress: text("pdf_company_address"),
+    pdfCompanyPhone: text("pdf_company_phone"),
     createdAt: text("created_at").notNull().default(createdAtDefault),
   },
   (table) => ({
@@ -535,14 +570,27 @@ export const orders = sqliteTable(
     paymentMethod: text("payment_method", { enum: orderPaymentMethodEnum })
       .notNull()
       .default("CASH"),
+    paymentStatus: text("payment_status", { enum: orderPaymentStatusEnum })
+      .notNull()
+      .default("UNPAID"),
     paymentAccountId: text("payment_account_id").references(() => storePaymentAccounts.id, {
       onDelete: "set null",
     }),
     paymentSlipUrl: text("payment_slip_url"),
     paymentProofSubmittedAt: text("payment_proof_submitted_at"),
+    shippingProvider: text("shipping_provider"),
+    shippingLabelStatus: text("shipping_label_status", { enum: orderShippingLabelStatusEnum })
+      .notNull()
+      .default("NONE"),
+    shippingLabelUrl: text("shipping_label_url"),
+    shippingLabelFileKey: text("shipping_label_file_key"),
+    shippingRequestId: text("shipping_request_id"),
     shippingCarrier: text("shipping_carrier"),
     trackingNo: text("tracking_no"),
     shippingCost: integer("shipping_cost").notNull().default(0),
+    codAmount: integer("cod_amount").notNull().default(0),
+    codFee: integer("cod_fee").notNull().default(0),
+    codSettledAt: text("cod_settled_at"),
     paidAt: text("paid_at"),
     shippedAt: text("shipped_at"),
     createdBy: text("created_by")
@@ -570,6 +618,12 @@ export const orders = sqliteTable(
       table.storeId,
       table.paymentMethod,
     ),
+    ordersStorePaymentStatusCreatedAtIdx: index(
+      "orders_store_payment_status_created_at_idx",
+    ).on(table.storeId, table.paymentStatus, table.createdAt),
+    ordersStoreShippingLabelStatusUpdatedIdx: index(
+      "orders_store_shipping_label_status_updated_idx",
+    ).on(table.storeId, table.shippingLabelStatus, table.createdAt),
     ordersStoreStatusChannelIdx: index("orders_store_status_channel_idx").on(
       table.storeId,
       table.status,
@@ -607,6 +661,41 @@ export const orderItems = sqliteTable(
   }),
 );
 
+export const orderShipments = sqliteTable(
+  "order_shipments",
+  {
+    id: id(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    storeId: text("store_id")
+      .notNull()
+      .references(() => stores.id, { onDelete: "cascade" }),
+    provider: text("provider").notNull(),
+    status: text("status", { enum: orderShipmentStatusEnum })
+      .notNull()
+      .default("REQUESTED"),
+    trackingNo: text("tracking_no"),
+    labelUrl: text("label_url"),
+    labelFileKey: text("label_file_key"),
+    providerRequestId: text("provider_request_id"),
+    providerResponse: text("provider_response"),
+    lastError: text("last_error"),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: text("created_at").notNull().default(createdAtDefault),
+    updatedAt: text("updated_at").notNull().default(createdAtDefault),
+  },
+  (table) => ({
+    orderShipmentsOrderIdIdx: index("order_shipments_order_id_idx").on(table.orderId),
+    orderShipmentsStoreStatusCreatedAtIdx: index(
+      "order_shipments_store_status_created_at_idx",
+    ).on(table.storeId, table.status, table.createdAt),
+    orderShipmentsProviderRequestIdIdx: index("order_shipments_provider_request_id_idx").on(
+      table.providerRequestId,
+    ),
+  }),
+);
+
 export const purchaseOrders = sqliteTable(
   "purchase_orders",
   {
@@ -635,12 +724,17 @@ export const purchaseOrders = sqliteTable(
     trackingInfo: text("tracking_info"),
     note: text("note"),
     createdBy: text("created_by").references(() => users.id),
+    updatedBy: text("updated_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
     createdAt: text("created_at").notNull().default(createdAtDefault),
+    updatedAt: text("updated_at").notNull().default(createdAtDefault),
   },
   (table) => ({
     poStoreIdIdx: index("po_store_id_idx").on(table.storeId),
     poStatusIdx: index("po_status_idx").on(table.storeId, table.status),
     poCreatedAtIdx: index("po_created_at_idx").on(table.storeId, table.createdAt),
+    poUpdatedAtIdx: index("po_updated_at_idx").on(table.storeId, table.updatedAt),
     poStorePoNumberUnique: uniqueIndex("po_store_po_number_unique").on(
       table.storeId,
       table.poNumber,
@@ -667,6 +761,91 @@ export const purchaseOrderItems = sqliteTable(
   (table) => ({
     poItemsPoIdIdx: index("po_items_po_id_idx").on(table.purchaseOrderId),
     poItemsProductIdIdx: index("po_items_product_id_idx").on(table.productId),
+  }),
+);
+
+export const idempotencyRequests = sqliteTable(
+  "idempotency_requests",
+  {
+    id: id(),
+    storeId: text("store_id")
+      .notNull()
+      .references(() => stores.id, { onDelete: "cascade" }),
+    action: text("action").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    status: text("status", { enum: idempotencyStatusEnum })
+      .notNull()
+      .default("PROCESSING"),
+    responseStatus: integer("response_status"),
+    responseBody: text("response_body"),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: text("created_at").notNull().default(createdAtDefault),
+    completedAt: text("completed_at"),
+  },
+  (table) => ({
+    idempotencyRequestsStoreActionKeyUnique: uniqueIndex(
+      "idempotency_requests_store_action_key_unique",
+    ).on(table.storeId, table.action, table.idempotencyKey),
+    idempotencyRequestsStoreCreatedAtIdx: index(
+      "idempotency_requests_store_created_at_idx",
+    ).on(table.storeId, table.createdAt),
+    idempotencyRequestsStatusCreatedAtIdx: index(
+      "idempotency_requests_status_created_at_idx",
+    ).on(table.status, table.createdAt),
+  }),
+);
+
+export const auditEvents = sqliteTable(
+  "audit_events",
+  {
+    id: id(),
+    scope: text("scope", { enum: auditScopeEnum }).notNull(),
+    storeId: text("store_id").references(() => stores.id, {
+      onDelete: "set null",
+    }),
+    actorUserId: text("actor_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    actorName: text("actor_name"),
+    actorRole: text("actor_role"),
+    action: text("action").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id"),
+    result: text("result", { enum: auditResultEnum }).notNull().default("SUCCESS"),
+    reasonCode: text("reason_code"),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    requestId: text("request_id"),
+    metadata: text("metadata"),
+    before: text("before"),
+    after: text("after"),
+    occurredAt: text("occurred_at").notNull().default(createdAtDefault),
+  },
+  (table) => ({
+    auditEventsScopeOccurredAtIdx: index("audit_events_scope_occurred_at_idx").on(
+      table.scope,
+      table.occurredAt,
+    ),
+    auditEventsStoreOccurredAtIdx: index("audit_events_store_occurred_at_idx").on(
+      table.storeId,
+      table.occurredAt,
+    ),
+    auditEventsActorOccurredAtIdx: index("audit_events_actor_occurred_at_idx").on(
+      table.actorUserId,
+      table.occurredAt,
+    ),
+    auditEventsEntityOccurredAtIdx: index("audit_events_entity_occurred_at_idx").on(
+      table.entityType,
+      table.entityId,
+      table.occurredAt,
+    ),
+    auditEventsActionOccurredAtIdx: index("audit_events_action_occurred_at_idx").on(
+      table.action,
+      table.occurredAt,
+    ),
   }),
 );
 

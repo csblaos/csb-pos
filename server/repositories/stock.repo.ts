@@ -1,11 +1,10 @@
 import "server-only";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/server/db/client";
 import { timeDb } from "@/server/perf/perf";
 import {
-  getInventoryBalanceForProduct,
   getRecentInventoryMovements,
   getStockProductsForStore,
   getStockProductsForStorePage,
@@ -13,6 +12,8 @@ import {
   type StockProductOption,
 } from "@/lib/inventory/queries";
 import { inventoryMovements, productUnits, products } from "@/lib/db/schema";
+type StockRepoTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type StockRepoExecutor = typeof db | StockRepoTx;
 
 export type StockMutationProduct = {
   id: string;
@@ -50,9 +51,11 @@ export async function listRecentStockMovementsByStore(
 export async function findStockMutationProduct(
   storeId: string,
   productId: string,
+  tx?: StockRepoTx,
 ): Promise<StockMutationProduct | null> {
-  const [product] = await timeDb("stock.repo.findProduct", async () =>
-    db
+  const executor: StockRepoExecutor = tx ?? db;
+  const load = async () =>
+    executor
       .select({
         id: products.id,
         baseUnitId: products.baseUnitId,
@@ -60,8 +63,11 @@ export async function findStockMutationProduct(
       })
       .from(products)
       .where(and(eq(products.id, productId), eq(products.storeId, storeId)))
-      .limit(1),
-  );
+      .limit(1);
+
+  const [product] = tx
+    ? await load()
+    : await timeDb("stock.repo.findProduct", async () => load());
 
   return product ?? null;
 }
@@ -69,16 +75,21 @@ export async function findStockMutationProduct(
 export async function findUnitMultiplierToBase(
   productId: string,
   unitId: string,
+  tx?: StockRepoTx,
 ): Promise<number | null> {
-  const [conversion] = await timeDb("stock.repo.findUnitMultiplier", async () =>
-    db
+  const executor: StockRepoExecutor = tx ?? db;
+  const load = async () =>
+    executor
       .select({ multiplierToBase: productUnits.multiplierToBase })
       .from(productUnits)
       .where(
         and(eq(productUnits.productId, productId), eq(productUnits.unitId, unitId)),
       )
-      .limit(1),
-  );
+      .limit(1);
+
+  const [conversion] = tx
+    ? await load()
+    : await timeDb("stock.repo.findUnitMultiplier", async () => load());
 
   return conversion?.multiplierToBase ?? null;
 }
@@ -90,23 +101,74 @@ export async function createInventoryMovementRecord(input: {
   qtyBase: number;
   note: string | null;
   createdBy: string;
+  tx?: StockRepoTx;
 }) {
-  await timeDb("stock.repo.insertMovement", async () =>
-    db.insert(inventoryMovements).values({
-      storeId: input.storeId,
-      productId: input.productId,
-      type: input.type,
-      qtyBase: input.qtyBase,
-      refType: input.type === "RETURN" ? "RETURN" : "MANUAL",
-      refId: null,
-      note: input.note,
-      createdBy: input.createdBy,
-    }),
-  );
+  const executor: StockRepoExecutor = input.tx ?? db;
+  const insert = async () =>
+    executor
+      .insert(inventoryMovements)
+      .values({
+        storeId: input.storeId,
+        productId: input.productId,
+        type: input.type,
+        qtyBase: input.qtyBase,
+        refType: input.type === "RETURN" ? "RETURN" : "MANUAL",
+        refId: null,
+        note: input.note,
+        createdBy: input.createdBy,
+      })
+      .returning({ id: inventoryMovements.id });
+
+  const [inserted] = input.tx
+    ? await insert()
+    : await timeDb("stock.repo.insertMovement", async () => insert());
+
+  return inserted?.id ?? null;
 }
 
-export async function getStockBalanceByProduct(storeId: string, productId: string) {
-  return timeDb("stock.repo.getBalanceByProduct", async () =>
-    getInventoryBalanceForProduct(storeId, productId),
-  );
+export async function getStockBalanceByProduct(
+  storeId: string,
+  productId: string,
+  tx?: StockRepoTx,
+) {
+  const executor: StockRepoExecutor = tx ?? db;
+  const load = async () => {
+    const [row] = await executor
+      .select({
+        onHand: sql<number>`
+          coalesce(sum(case
+            when ${inventoryMovements.type} = 'IN' then ${inventoryMovements.qtyBase}
+            when ${inventoryMovements.type} = 'RETURN' then ${inventoryMovements.qtyBase}
+            when ${inventoryMovements.type} = 'OUT' then -${inventoryMovements.qtyBase}
+            when ${inventoryMovements.type} = 'ADJUST' then ${inventoryMovements.qtyBase}
+            else 0
+          end), 0)
+        `,
+        reserved: sql<number>`
+          coalesce(sum(case
+            when ${inventoryMovements.type} = 'RESERVE' then ${inventoryMovements.qtyBase}
+            when ${inventoryMovements.type} = 'RELEASE' then -${inventoryMovements.qtyBase}
+            else 0
+          end), 0)
+        `,
+      })
+      .from(inventoryMovements)
+      .where(
+        and(
+          eq(inventoryMovements.storeId, storeId),
+          eq(inventoryMovements.productId, productId),
+        ),
+      );
+
+    const onHand = Number(row?.onHand ?? 0);
+    const reserved = Number(row?.reserved ?? 0);
+    return {
+      productId,
+      onHand,
+      reserved,
+      available: onHand - reserved,
+    };
+  };
+
+  return tx ? load() : timeDb("stock.repo.getBalanceByProduct", async () => load());
 }

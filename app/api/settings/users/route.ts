@@ -9,6 +9,7 @@ import { generateTemporaryPassword, hashPassword } from "@/lib/auth/password";
 import { db } from "@/lib/db/client";
 import { roles, storeMembers, users } from "@/lib/db/schema";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
+import { safeLogAuditEvent } from "@/server/services/audit.service";
 
 const createNewStoreUserSchema = z.object({
   action: z.literal("create_new"),
@@ -248,23 +249,71 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  let auditContext: {
+    storeId: string;
+    userId: string;
+    actorName: string | null;
+    actorRole: string | null;
+  } | null = null;
+  let auditAction = "store.member.create";
+
   try {
     const { storeId, session } = await enforcePermission("members.create");
+    auditContext = {
+      storeId,
+      userId: session.userId,
+      actorName: session.displayName,
+      actorRole: session.activeRoleName,
+    };
+
+    const logFail = async (params: {
+      reasonCode: "VALIDATION_ERROR" | "NOT_FOUND" | "FORBIDDEN" | "BUSINESS_RULE" | "CONFLICT";
+      metadata?: Record<string, unknown>;
+      entityId?: string | null;
+    }) =>
+      safeLogAuditEvent({
+        scope: "STORE",
+        storeId,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        action: auditAction,
+        entityType: "store_member",
+        entityId: params.entityId ?? null,
+        result: "FAIL",
+        reasonCode: params.reasonCode,
+        metadata: params.metadata,
+        request,
+      });
 
     const payload = parseCreateStoreUserPayload(await request.json());
     if (!payload.success) {
+      await logFail({ reasonCode: "VALIDATION_ERROR" });
       return NextResponse.json({ message: "ข้อมูลผู้ใช้ไม่ถูกต้อง" }, { status: 400 });
     }
+
+    auditAction =
+      payload.data.action === "add_existing"
+        ? "store.member.add_existing"
+        : "store.member.create_new";
 
     const role = await getRoleForStore(storeId, payload.data.roleId);
 
     if (!role) {
+      await logFail({
+        reasonCode: "NOT_FOUND",
+        metadata: { roleId: payload.data.roleId },
+      });
       return NextResponse.json({ message: "ไม่พบบทบาทที่เลือก" }, { status: 404 });
     }
 
     if (payload.data.action === "add_existing") {
       const actorSystemRole = await getUserSystemRole(session.userId);
       if (actorSystemRole !== "SUPERADMIN") {
+        await logFail({
+          reasonCode: "FORBIDDEN",
+          metadata: { actorSystemRole },
+        });
         return NextResponse.json(
           { message: "เฉพาะบัญชี SUPERADMIN เท่านั้นที่เพิ่มผู้ใช้เดิมข้ามร้านได้" },
           { status: 403 },
@@ -292,6 +341,13 @@ export async function POST(request: Request) {
       const [existingUser] = existingUserLookup;
 
       if (!existingUser) {
+        await logFail({
+          reasonCode: "NOT_FOUND",
+          metadata: {
+            userId: payload.data.userId ?? null,
+            email: payload.data.email ?? null,
+          },
+        });
         return NextResponse.json(
           { message: "ไม่พบบัญชีผู้ใช้นี้ กรุณาใช้เมนูสร้างผู้ใช้ใหม่" },
           { status: 404 },
@@ -299,6 +355,11 @@ export async function POST(request: Request) {
       }
 
       if (existingUser.systemRole === "SYSTEM_ADMIN") {
+        await logFail({
+          reasonCode: "BUSINESS_RULE",
+          entityId: existingUser.id,
+          metadata: { message: "cannot_link_system_admin" },
+        });
         return NextResponse.json(
           { message: "ไม่สามารถเพิ่มบัญชี SYSTEM_ADMIN เป็นสมาชิกของร้านได้" },
           { status: 400 },
@@ -310,6 +371,11 @@ export async function POST(request: Request) {
         existingUser.id,
       );
       if (!canLink) {
+        await logFail({
+          reasonCode: "FORBIDDEN",
+          entityId: existingUser.id,
+          metadata: { message: "cross_owner_guard_failed" },
+        });
         return NextResponse.json(
           {
             message:
@@ -329,6 +395,11 @@ export async function POST(request: Request) {
         });
       } catch (error) {
         if (error instanceof Error && error.message === "LAST_OWNER_ROLE_GUARD") {
+          await logFail({
+            reasonCode: "BUSINESS_RULE",
+            entityId: existingUser.id,
+            metadata: { message: "last_owner_guard" },
+          });
           return NextResponse.json(
             { message: "ไม่สามารถถอด Owner คนสุดท้ายออกได้" },
             { status: 400 },
@@ -338,6 +409,28 @@ export async function POST(request: Request) {
       }
 
       const members = await listUsers(storeId);
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        action: auditAction,
+        entityType: "store_member",
+        entityId: existingUser.id,
+        metadata: {
+          mode: "add_existing",
+          roleId: role.id,
+          roleName: role.name,
+        },
+        after: {
+          userId: existingUser.id,
+          roleId: role.id,
+          roleName: role.name,
+          status: "ACTIVE",
+        },
+        request,
+      });
       return NextResponse.json({ ok: true, members });
     }
 
@@ -346,10 +439,15 @@ export async function POST(request: Request) {
     const [existingUser] = await db
       .select({ id: users.id })
       .from(users)
-      .where(eq(users.email, normalizedEmail))
-      .limit(1);
+    .where(eq(users.email, normalizedEmail))
+    .limit(1);
 
     if (existingUser) {
+      await logFail({
+        reasonCode: "CONFLICT",
+        entityId: existingUser.id,
+        metadata: { email: normalizedEmail },
+      });
       return NextResponse.json(
         {
           message:
@@ -382,8 +480,50 @@ export async function POST(request: Request) {
     });
 
     const members = await listUsers(storeId);
+    await safeLogAuditEvent({
+      scope: "STORE",
+      storeId,
+      actorUserId: session.userId,
+      actorName: session.displayName,
+      actorRole: session.activeRoleName,
+      action: auditAction,
+      entityType: "store_member",
+      entityId: userId,
+      metadata: {
+        mode: "create_new",
+        roleId: role.id,
+        roleName: role.name,
+        email: normalizedEmail,
+      },
+      after: {
+        userId,
+        email: normalizedEmail,
+        name: payload.data.name,
+        roleId: role.id,
+        roleName: role.name,
+        status: "ACTIVE",
+      },
+      request,
+    });
     return NextResponse.json({ ok: true, members, temporaryPassword });
   } catch (error) {
+    if (auditContext) {
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId: auditContext.storeId,
+        actorUserId: auditContext.userId,
+        actorName: auditContext.actorName,
+        actorRole: auditContext.actorRole,
+        action: auditAction,
+        entityType: "store_member",
+        result: "FAIL",
+        reasonCode: "INTERNAL_ERROR",
+        metadata: {
+          message: error instanceof Error ? error.message : "unknown",
+        },
+        request,
+      });
+    }
     return toRBACErrorResponse(error);
   }
 }

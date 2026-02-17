@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type ColumnDef,
   flexRender,
@@ -13,6 +13,7 @@ import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import { Button } from "@/components/ui/button";
+import { SlideUpSheet } from "@/components/ui/slide-up-sheet";
 import { authFetch } from "@/lib/auth/client-token";
 import { currencyLabel, parseStoreCurrency, vatModeLabel } from "@/lib/finance/store-financial";
 import { resolveLaosBankDisplayName } from "@/lib/payments/laos-banks";
@@ -49,6 +50,13 @@ const channelLabel: Record<"WALK_IN" | "FACEBOOK" | "WHATSAPP", string> = {
   WALK_IN: "Walk-in",
   FACEBOOK: "Facebook",
   WHATSAPP: "WhatsApp",
+};
+
+const paymentMethodLabel: Record<OrderListItem["paymentMethod"], string> = {
+  CASH: "เงินสด",
+  LAO_QR: "QR โอน",
+  COD: "COD",
+  BANK_TRANSFER: "โอนเงิน",
 };
 
 const statusLabel: Record<OrderListItem["status"], string> = {
@@ -101,10 +109,14 @@ export function OrdersManagement({
 }: OrdersManagementProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [showCreate, setShowCreate] = useState(false);
+  const [createFormOpen, setCreateFormOpen] = useState(false);
+  const [showScannerSheet, setShowScannerSheet] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [scanMessage, setScanMessage] = useState<string | null>(null);
+  const [notFoundBarcode, setNotFoundBarcode] = useState<string | null>(null);
+  const [manualSearchKeyword, setManualSearchKeyword] = useState("");
 
   const form = useForm<CreateOrderFormInput, unknown, CreateOrderInput>({
     resolver: zodResolver(createOrderSchema),
@@ -131,6 +143,19 @@ export function OrdersManagement({
     () => catalog.paymentAccounts.filter((account) => account.accountType === "LAO_QR"),
     [catalog.paymentAccounts],
   );
+  const bankPaymentAccounts = useMemo(
+    () => catalog.paymentAccounts.filter((account) => account.accountType === "BANK"),
+    [catalog.paymentAccounts],
+  );
+  const paymentAccountsForMethod = useMemo(() => {
+    if (watchedPaymentMethod === "LAO_QR") {
+      return qrPaymentAccounts;
+    }
+    if (watchedPaymentMethod === "BANK_TRANSFER") {
+      return bankPaymentAccounts;
+    }
+    return [];
+  }, [bankPaymentAccounts, qrPaymentAccounts, watchedPaymentMethod]);
 
   const productsById = useMemo(
     () => new Map(catalog.products.map((product) => [product.productId, product])),
@@ -141,6 +166,23 @@ export function OrdersManagement({
     () => new Map(catalog.contacts.map((contact) => [contact.id, contact])),
     [catalog.contacts],
   );
+  const manualSearchResults = useMemo(() => {
+    const keyword = manualSearchKeyword.trim().toLowerCase();
+    if (!keyword) {
+      return [];
+    }
+
+    return catalog.products
+      .filter((product) => {
+        const barcode = product.barcode?.toLowerCase() ?? "";
+        return (
+          product.sku.toLowerCase().includes(keyword) ||
+          product.name.toLowerCase().includes(keyword) ||
+          barcode.includes(keyword)
+        );
+      })
+      .slice(0, 8);
+  }, [catalog.products, manualSearchKeyword]);
 
   const visibleOrders = ordersPage.rows;
 
@@ -185,6 +227,70 @@ export function OrdersManagement({
         form.setValue("customerPhone", contact.phone);
       }
     }
+  };
+
+  const addProductFromCatalog = (productId: string) => {
+    const product = productsById.get(productId);
+    if (!product) {
+      return null;
+    }
+
+    const existingIndex = watchedItems.findIndex((item) => item.productId === productId);
+    if (existingIndex >= 0) {
+      const currentQty = Number(form.getValues(`items.${existingIndex}.qty`) ?? 0);
+      form.setValue(`items.${existingIndex}.qty`, Math.max(1, currentQty + 1), {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+    } else {
+      append({
+        productId,
+        unitId: product.units[0]?.unitId ?? "",
+        qty: 1,
+      });
+    }
+
+    return product;
+  };
+
+  const onScanBarcodeResult = (rawCode: string) => {
+    const barcode = rawCode.trim();
+    if (!barcode) {
+      return;
+    }
+
+    const keyword = barcode.toLowerCase();
+    const matched = catalog.products.find(
+      (product) =>
+        product.barcode?.toLowerCase() === keyword || product.sku.toLowerCase() === keyword,
+    );
+
+    if (matched) {
+      const addedProduct = addProductFromCatalog(matched.productId);
+      if (addedProduct) {
+        setScanMessage(`เพิ่มสินค้า ${addedProduct.sku} - ${addedProduct.name} แล้ว`);
+      }
+      setNotFoundBarcode(null);
+      setManualSearchKeyword("");
+      setShowScannerSheet(false);
+      return;
+    }
+
+    setScanMessage(null);
+    setNotFoundBarcode(barcode);
+    setManualSearchKeyword(barcode);
+    setShowScannerSheet(false);
+  };
+
+  const pickProductFromManualSearch = (productId: string) => {
+    const addedProduct = addProductFromCatalog(productId);
+    if (!addedProduct) {
+      return;
+    }
+
+    setScanMessage(`เพิ่มสินค้า ${addedProduct.sku} - ${addedProduct.name} แล้ว`);
+    setNotFoundBarcode(null);
+    setManualSearchKeyword("");
   };
 
   const buildOrdersUrl = (tab: TabKey, page: number) => {
@@ -232,7 +338,7 @@ export function OrdersManagement({
         header: "ยอดรวม",
         cell: ({ row }) =>
           `${row.original.total.toLocaleString("th-TH")} ${catalog.storeCurrency} • จ่าย ${row.original.paymentCurrency} • ${
-            row.original.paymentMethod === "LAO_QR" ? "QR โอน" : "เงินสด"
+            paymentMethodLabel[row.original.paymentMethod]
           }`,
       },
     ],
@@ -273,6 +379,7 @@ export function OrdersManagement({
     }
 
     setSuccessMessage(`สร้างออเดอร์ ${data?.orderNo ?? ""} เรียบร้อย`);
+    setCreateFormOpen(false);
     setLoading(false);
 
     if (data?.orderId) {
@@ -283,6 +390,420 @@ export function OrdersManagement({
     router.refresh();
   });
 
+  const openCreateForm = () => {
+    setCreateFormOpen(true);
+  };
+
+  const closeCreateForm = () => {
+    setCreateFormOpen(false);
+  };
+
+  const isCreateFormOpen = createFormOpen;
+
+  const renderCreateOrderForm = (options?: { inSheet?: boolean }) => {
+    const inSheet = options?.inSheet ?? false;
+
+    return (
+      <form className="space-y-3" onSubmit={submitOrder}>
+        <div className="space-y-2">
+          <label className="text-xs text-muted-foreground" htmlFor="order-channel">
+            ช่องทาง
+          </label>
+          <select
+            id="order-channel"
+            className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+            disabled={loading}
+            {...form.register("channel")}
+          >
+            <option value="WALK_IN">Walk-in</option>
+            <option value="FACEBOOK">Facebook</option>
+            <option value="WHATSAPP">WhatsApp</option>
+          </select>
+        </div>
+
+        {watchedChannel !== "WALK_IN" ? (
+          <div className="space-y-2">
+            <label className="text-xs text-muted-foreground" htmlFor="order-contact">
+              เลือกลูกค้า
+            </label>
+            <select
+              id="order-contact"
+              className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+              disabled={loading}
+              value={form.watch("contactId") ?? ""}
+              onChange={(event) => onPickContact(event.target.value)}
+            >
+              <option value="">เลือกจากรายชื่อลูกค้า</option>
+              {catalog.contacts
+                .filter((contact) =>
+                  watchedChannel === "FACEBOOK"
+                    ? contact.channel === "FACEBOOK"
+                    : contact.channel === "WHATSAPP",
+                )
+                .map((contact) => (
+                  <option key={contact.id} value={contact.id}>
+                    {contact.displayName}
+                  </option>
+                ))}
+            </select>
+            <p className="text-xs text-red-600">{form.formState.errors.contactId?.message}</p>
+          </div>
+        ) : null}
+
+        <div className="space-y-2">
+          <label className="text-xs text-muted-foreground" htmlFor="order-customer-name">
+            ชื่อลูกค้า
+          </label>
+          <input
+            id="order-customer-name"
+            className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+            disabled={loading}
+            {...form.register("customerName")}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-xs text-muted-foreground" htmlFor="order-customer-phone">
+            เบอร์โทร
+          </label>
+          <input
+            id="order-customer-phone"
+            className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+            disabled={loading}
+            {...form.register("customerPhone")}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-xs text-muted-foreground" htmlFor="order-address">
+            ที่อยู่
+          </label>
+          <textarea
+            id="order-address"
+            className="min-h-20 w-full rounded-md border px-3 py-2 text-sm outline-none ring-primary focus:ring-2"
+            disabled={loading}
+            {...form.register("customerAddress")}
+          />
+        </div>
+
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-medium">รายการสินค้า</p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="text-xs font-medium text-blue-700"
+                disabled={loading || catalog.products.length === 0}
+                onClick={() => setShowScannerSheet(true)}
+              >
+                สแกนเพิ่มสินค้า
+              </button>
+              <button
+                type="button"
+                className="text-xs font-medium text-blue-700"
+                disabled={loading || catalog.products.length === 0}
+                onClick={() =>
+                  append({
+                    productId: catalog.products[0]?.productId ?? "",
+                    unitId: catalog.products[0]?.units[0]?.unitId ?? "",
+                    qty: 1,
+                  })
+                }
+              >
+                + เพิ่มรายการ
+              </button>
+            </div>
+          </div>
+
+          {scanMessage ? <p className="text-xs text-emerald-700">{scanMessage}</p> : null}
+
+          {notFoundBarcode ? (
+            <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-2">
+              <p className="text-xs text-amber-700">
+                ไม่พบบาร์โค้ด <span className="font-semibold">{notFoundBarcode}</span> กรุณาค้นหาเอง
+              </p>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="text"
+                  className="h-10 flex-1 rounded-md border border-amber-300 bg-white px-3 text-sm outline-none ring-primary focus:ring-2"
+                  placeholder="ค้นหาด้วยชื่อสินค้า, SKU หรือบาร์โค้ด"
+                  value={manualSearchKeyword}
+                  onChange={(event) => setManualSearchKeyword(event.target.value)}
+                  disabled={loading}
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="h-10 rounded-md border border-amber-300 px-3 text-xs font-medium text-amber-700"
+                    onClick={() => setShowScannerSheet(true)}
+                    disabled={loading}
+                  >
+                    สแกนใหม่
+                  </button>
+                  <button
+                    type="button"
+                    className="h-10 rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-600"
+                    onClick={() => {
+                      setNotFoundBarcode(null);
+                      setManualSearchKeyword("");
+                    }}
+                    disabled={loading}
+                  >
+                    ปิด
+                  </button>
+                </div>
+              </div>
+
+              {manualSearchKeyword.trim() ? (
+                manualSearchResults.length > 0 ? (
+                  <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-amber-200 bg-white p-1">
+                    {manualSearchResults.map((product) => (
+                      <button
+                        key={product.productId}
+                        type="button"
+                        className="flex w-full items-center justify-between rounded px-2 py-2 text-left text-xs hover:bg-amber-100"
+                        onClick={() => pickProductFromManualSearch(product.productId)}
+                        disabled={loading}
+                      >
+                        <span className="font-medium text-slate-800">
+                          {product.sku} - {product.name}
+                        </span>
+                        <span className="text-slate-500">{product.barcode ?? "—"}</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-amber-700">ไม่พบสินค้าจากคำค้นนี้</p>
+                )
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="space-y-2">
+            {fields.map((field, index) => {
+              const selectedProduct = productsById.get(watchedItems[index]?.productId ?? "");
+              const selectedUnit = selectedProduct?.units.find(
+                (unit) => unit.unitId === watchedItems[index]?.unitId,
+              );
+              const lineQtyBase =
+                (Number(watchedItems[index]?.qty ?? 0) || 0) * (selectedUnit?.multiplierToBase ?? 0);
+              const lineTotal = lineQtyBase * (selectedProduct?.priceBase ?? 0);
+
+              return (
+                <div key={field.id} className="space-y-2 rounded-lg border p-2">
+                  <div className="grid grid-cols-1 gap-2">
+                    <select
+                      className="h-10 rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+                      value={watchedItems[index]?.productId ?? ""}
+                      onChange={(event) => onChangeProduct(index, event.target.value)}
+                      disabled={loading}
+                    >
+                      {catalog.products.map((product) => (
+                        <option key={product.productId} value={product.productId}>
+                          {product.sku} - {product.name}
+                        </option>
+                      ))}
+                    </select>
+
+                    <div className="grid grid-cols-[1fr_1fr_90px_auto] gap-2">
+                      <select
+                        className="h-10 rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+                        disabled={loading}
+                        {...form.register(`items.${index}.unitId`)}
+                      >
+                        {selectedProduct?.units.map((unit) => (
+                          <option key={unit.unitId} value={unit.unitId}>
+                            {unit.unitCode}
+                          </option>
+                        ))}
+                      </select>
+
+                      <input
+                        type="number"
+                        min={1}
+                        step={1}
+                        className="h-10 rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+                        disabled={loading}
+                        {...form.register(`items.${index}.qty`)}
+                      />
+
+                      <div className="h-10 rounded-md border bg-slate-50 px-2 py-2 text-xs text-slate-600">
+                        คงเหลือ {selectedProduct?.available.toLocaleString("th-TH") ?? 0}
+                      </div>
+
+                      <button
+                        type="button"
+                        className="text-xs text-red-600"
+                        onClick={() => remove(index)}
+                        disabled={loading || fields.length <= 1}
+                      >
+                        ลบ
+                      </button>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-blue-700">
+                    รวมรายการ {lineTotal.toLocaleString("th-TH")} {catalog.storeCurrency}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-xs text-red-600">{form.formState.errors.items?.message}</p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          <div className="space-y-2">
+            <label className="text-xs text-muted-foreground">ส่วนลด</label>
+            <input
+              type="number"
+              min={0}
+              step={1}
+              className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+              disabled={loading}
+              {...form.register("discount")}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs text-muted-foreground">ค่าส่งที่เรียกเก็บ</label>
+            <input
+              type="number"
+              min={0}
+              step={1}
+              className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+              disabled={loading}
+              {...form.register("shippingFeeCharged")}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs text-muted-foreground">ต้นทุนค่าส่ง</label>
+            <input
+              type="number"
+              min={0}
+              step={1}
+              className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+              disabled={loading}
+              {...form.register("shippingCost")}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-xs text-muted-foreground" htmlFor="payment-method">
+            วิธีรับชำระ
+          </label>
+          <select
+            id="payment-method"
+            className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+            disabled={loading}
+            value={watchedPaymentMethod}
+            onChange={(event) => {
+              const rawMethod = event.target.value;
+              const nextMethod =
+                rawMethod === "LAO_QR" || rawMethod === "COD" || rawMethod === "BANK_TRANSFER"
+                  ? rawMethod
+                  : "CASH";
+              form.setValue("paymentMethod", nextMethod, { shouldValidate: true });
+              if (nextMethod === "LAO_QR") {
+                const defaultQrAccount = qrPaymentAccounts[0]?.id ?? "";
+                form.setValue("paymentAccountId", defaultQrAccount, { shouldValidate: true });
+              } else if (nextMethod === "BANK_TRANSFER") {
+                const defaultBankAccount = bankPaymentAccounts[0]?.id ?? "";
+                form.setValue("paymentAccountId", defaultBankAccount, { shouldValidate: true });
+              } else {
+                form.setValue("paymentAccountId", "", { shouldValidate: true });
+              }
+            }}
+          >
+            <option value="CASH">เงินสด</option>
+            <option value="LAO_QR">QR โอนเงิน (ลาว)</option>
+            <option value="BANK_TRANSFER">โอนเงินผ่านบัญชี</option>
+            <option value="COD">COD (เก็บเงินปลายทาง)</option>
+          </select>
+        </div>
+
+        {watchedPaymentMethod === "LAO_QR" || watchedPaymentMethod === "BANK_TRANSFER" ? (
+          <div className="space-y-2">
+            <label className="text-xs text-muted-foreground" htmlFor="payment-account">
+              บัญชีรับเงิน
+            </label>
+            <select
+              id="payment-account"
+              className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+              disabled={loading}
+              value={form.watch("paymentAccountId") ?? ""}
+              onChange={(event) =>
+                form.setValue("paymentAccountId", event.target.value, { shouldValidate: true })
+              }
+            >
+              <option value="">
+                {watchedPaymentMethod === "LAO_QR" ? "เลือกบัญชี QR" : "เลือกบัญชีโอน"}
+              </option>
+              {paymentAccountsForMethod.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.displayName} ({resolveLaosBankDisplayName(account.bankName)})
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-red-600">{form.formState.errors.paymentAccountId?.message}</p>
+            <p className="text-xs text-slate-500">
+              {watchedPaymentMethod === "LAO_QR" && catalog.requireSlipForLaoQr
+                ? "นโยบายร้าน: ต้องแนบสลิปก่อนยืนยันชำระ"
+                : watchedPaymentMethod === "LAO_QR"
+                  ? "นโยบายร้าน: ไม่บังคับแนบสลิป"
+                  : "โหมดโอนเงินผ่านบัญชี: แนะนำแนบหลักฐานก่อนยืนยันชำระ"}
+            </p>
+          </div>
+        ) : null}
+
+        <div className="space-y-2">
+          <label className="text-xs text-muted-foreground" htmlFor="payment-currency">
+            สกุลที่รับชำระในออเดอร์นี้
+          </label>
+          <select
+            id="payment-currency"
+            className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+            disabled={loading}
+            {...form.register("paymentCurrency")}
+          >
+            {catalog.supportedCurrencies.map((currency) => (
+              <option key={currency} value={currency}>
+                {currencyLabel(currency)}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-slate-500">
+            Base currency: {catalog.storeCurrency} • รองรับ {catalog.supportedCurrencies.join(", ")}
+          </p>
+        </div>
+
+        <div className="rounded-lg bg-slate-50 p-3 text-sm">
+          <p>ยอดสินค้า: {subtotal.toLocaleString("th-TH")} {catalog.storeCurrency}</p>
+          <p>ส่วนลด: {totals.discount.toLocaleString("th-TH")} {catalog.storeCurrency}</p>
+          <p>
+            VAT ({vatModeLabel(catalog.vatMode)}): {totals.vatAmount.toLocaleString("th-TH")}{" "}
+            {catalog.storeCurrency}
+          </p>
+          <p className="font-semibold">
+            ยอดรวม: {totals.total.toLocaleString("th-TH")} {catalog.storeCurrency}
+          </p>
+          <p className="text-xs text-slate-500">
+            สกุลชำระที่เลือก: {currencyLabel(selectedPaymentCurrency)}
+          </p>
+          <p className="text-xs text-slate-500">วิธีชำระ: {paymentMethodLabel[watchedPaymentMethod]}</p>
+        </div>
+
+        <div className={inSheet ? "sticky bottom-0 border-t border-slate-200 bg-white pt-3" : ""}>
+          <Button type="submit" className="h-10 w-full" disabled={loading || !canCreate}>
+            {loading ? "กำลังบันทึก..." : "สร้างออเดอร์"}
+          </Button>
+        </div>
+      </form>
+    );
+  };
+
   return (
     <section className="space-y-4">
       <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
@@ -290,10 +811,10 @@ export function OrdersManagement({
           <h2 className="text-sm font-semibold">รายการออเดอร์</h2>
           <Button
             className="h-9"
-            onClick={() => setShowCreate((prev) => !prev)}
+            onClick={() => (isCreateFormOpen ? closeCreateForm() : openCreateForm())}
             disabled={!canCreate || loading}
           >
-            {showCreate ? "ปิดฟอร์ม" : "สร้างออเดอร์"}
+            {isCreateFormOpen ? "ปิดฟอร์ม" : "สร้างออเดอร์"}
           </Button>
         </div>
 
@@ -304,9 +825,7 @@ export function OrdersManagement({
               type="button"
               onClick={() => router.push(buildOrdersUrl(tab.key, 1))}
               className={`rounded-lg px-2 py-2 text-xs ${
-                activeTab === tab.key
-                  ? "bg-blue-600 text-white"
-                  : "border bg-white text-slate-600"
+                activeTab === tab.key ? "bg-blue-600 text-white" : "border bg-white text-slate-600"
               }`}
             >
               {tab.label}
@@ -314,327 +833,6 @@ export function OrdersManagement({
           ))}
         </div>
       </article>
-
-      {showCreate ? (
-        <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
-          <h2 className="text-sm font-semibold">สร้างออเดอร์ใหม่</h2>
-
-          <form className="space-y-3" onSubmit={submitOrder}>
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground" htmlFor="order-channel">
-                ช่องทาง
-              </label>
-              <select
-                id="order-channel"
-                className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
-                disabled={loading}
-                {...form.register("channel")}
-              >
-                <option value="WALK_IN">Walk-in</option>
-                <option value="FACEBOOK">Facebook</option>
-                <option value="WHATSAPP">WhatsApp</option>
-              </select>
-            </div>
-
-            {watchedChannel !== "WALK_IN" ? (
-              <div className="space-y-2">
-                <label className="text-xs text-muted-foreground" htmlFor="order-contact">
-                  เลือกลูกค้า
-                </label>
-                <select
-                  id="order-contact"
-                  className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
-                  disabled={loading}
-                  value={form.watch("contactId") ?? ""}
-                  onChange={(event) => onPickContact(event.target.value)}
-                >
-                  <option value="">เลือกจากรายชื่อลูกค้า</option>
-                  {catalog.contacts
-                    .filter((contact) =>
-                      watchedChannel === "FACEBOOK"
-                        ? contact.channel === "FACEBOOK"
-                        : contact.channel === "WHATSAPP",
-                    )
-                    .map((contact) => (
-                      <option key={contact.id} value={contact.id}>
-                        {contact.displayName}
-                      </option>
-                    ))}
-                </select>
-                <p className="text-xs text-red-600">{form.formState.errors.contactId?.message}</p>
-              </div>
-            ) : null}
-
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground" htmlFor="order-customer-name">
-                ชื่อลูกค้า
-              </label>
-              <input
-                id="order-customer-name"
-                className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
-                disabled={loading}
-                {...form.register("customerName")}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground" htmlFor="order-customer-phone">
-                เบอร์โทร
-              </label>
-              <input
-                id="order-customer-phone"
-                className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
-                disabled={loading}
-                {...form.register("customerPhone")}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground" htmlFor="order-address">
-                ที่อยู่
-              </label>
-              <textarea
-                id="order-address"
-                className="min-h-20 w-full rounded-md border px-3 py-2 text-sm outline-none ring-primary focus:ring-2"
-                disabled={loading}
-                {...form.register("customerAddress")}
-              />
-            </div>
-
-            <div className="space-y-2 rounded-lg border p-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-medium">รายการสินค้า</p>
-                <button
-                  type="button"
-                  className="text-xs font-medium text-blue-700"
-                  disabled={loading || catalog.products.length === 0}
-                  onClick={() =>
-                    append({
-                      productId: catalog.products[0]?.productId ?? "",
-                      unitId: catalog.products[0]?.units[0]?.unitId ?? "",
-                      qty: 1,
-                    })
-                  }
-                >
-                  + เพิ่มรายการ
-                </button>
-              </div>
-
-              <div className="space-y-2">
-                {fields.map((field, index) => {
-                  const selectedProduct = productsById.get(watchedItems[index]?.productId ?? "");
-                  const selectedUnit = selectedProduct?.units.find(
-                    (unit) => unit.unitId === watchedItems[index]?.unitId,
-                  );
-                  const lineQtyBase =
-                    (Number(watchedItems[index]?.qty ?? 0) || 0) *
-                    (selectedUnit?.multiplierToBase ?? 0);
-                  const lineTotal =
-                    lineQtyBase * (selectedProduct?.priceBase ?? 0);
-
-                  return (
-                    <div key={field.id} className="space-y-2 rounded-lg border p-2">
-                      <div className="grid grid-cols-1 gap-2">
-                        <select
-                          className="h-10 rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
-                          value={watchedItems[index]?.productId ?? ""}
-                          onChange={(event) => onChangeProduct(index, event.target.value)}
-                          disabled={loading}
-                        >
-                          {catalog.products.map((product) => (
-                            <option key={product.productId} value={product.productId}>
-                              {product.sku} - {product.name}
-                            </option>
-                          ))}
-                        </select>
-
-                        <div className="grid grid-cols-[1fr_1fr_90px_auto] gap-2">
-                          <select
-                            className="h-10 rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
-                            disabled={loading}
-                            {...form.register(`items.${index}.unitId`)}
-                          >
-                            {selectedProduct?.units.map((unit) => (
-                              <option key={unit.unitId} value={unit.unitId}>
-                                {unit.unitCode}
-                              </option>
-                            ))}
-                          </select>
-
-                          <input
-                            type="number"
-                            min={1}
-                            step={1}
-                            className="h-10 rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
-                            disabled={loading}
-                            {...form.register(`items.${index}.qty`)}
-                          />
-
-                          <div className="h-10 rounded-md border bg-slate-50 px-2 py-2 text-xs text-slate-600">
-                            คงเหลือ {selectedProduct?.available.toLocaleString("th-TH") ?? 0}
-                          </div>
-
-                          <button
-                            type="button"
-                            className="text-xs text-red-600"
-                            onClick={() => remove(index)}
-                            disabled={loading || fields.length <= 1}
-                          >
-                            ลบ
-                          </button>
-                        </div>
-                      </div>
-
-                      <p className="text-xs text-blue-700">
-                        รวมรายการ {lineTotal.toLocaleString("th-TH")} {catalog.storeCurrency}
-                      </p>
-                    </div>
-                  );
-                })}
-              </div>
-              <p className="text-xs text-red-600">{form.formState.errors.items?.message}</p>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2">
-              <div className="space-y-2">
-                <label className="text-xs text-muted-foreground">ส่วนลด</label>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
-                  disabled={loading}
-                  {...form.register("discount")}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs text-muted-foreground">ค่าส่งที่เรียกเก็บ</label>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
-                  disabled={loading}
-                  {...form.register("shippingFeeCharged")}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs text-muted-foreground">ต้นทุนค่าส่ง</label>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
-                  disabled={loading}
-                  {...form.register("shippingCost")}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground" htmlFor="payment-method">
-                วิธีรับชำระ
-              </label>
-              <select
-                id="payment-method"
-                className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
-                disabled={loading}
-                value={watchedPaymentMethod}
-                onChange={(event) => {
-                  const nextMethod = event.target.value === "LAO_QR" ? "LAO_QR" : "CASH";
-                  form.setValue("paymentMethod", nextMethod, { shouldValidate: true });
-                  if (nextMethod === "LAO_QR") {
-                    const defaultQrAccount = qrPaymentAccounts[0]?.id ?? "";
-                    form.setValue("paymentAccountId", defaultQrAccount, { shouldValidate: true });
-                  } else {
-                    form.setValue("paymentAccountId", "", { shouldValidate: true });
-                  }
-                }}
-              >
-                <option value="CASH">เงินสด</option>
-                <option value="LAO_QR">QR โอนเงิน (ลาว)</option>
-              </select>
-            </div>
-
-            {watchedPaymentMethod === "LAO_QR" ? (
-              <div className="space-y-2">
-                <label className="text-xs text-muted-foreground" htmlFor="payment-account">
-                  บัญชี QR ที่ใช้รับเงิน
-                </label>
-                <select
-                  id="payment-account"
-                  className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
-                  disabled={loading}
-                  value={form.watch("paymentAccountId") ?? ""}
-                  onChange={(event) =>
-                    form.setValue("paymentAccountId", event.target.value, { shouldValidate: true })
-                  }
-                >
-                  <option value="">เลือกบัญชี QR</option>
-                  {qrPaymentAccounts.map((account) => (
-                  <option key={account.id} value={account.id}>
-                      {account.displayName} ({resolveLaosBankDisplayName(account.bankName)})
-                  </option>
-                ))}
-                </select>
-                <p className="text-xs text-red-600">
-                  {form.formState.errors.paymentAccountId?.message}
-                </p>
-                <p className="text-xs text-slate-500">
-                  {catalog.requireSlipForLaoQr
-                    ? "นโยบายร้าน: ต้องแนบสลิปก่อนยืนยันชำระ"
-                    : "นโยบายร้าน: ไม่บังคับแนบสลิป"}
-                </p>
-              </div>
-            ) : null}
-
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground" htmlFor="payment-currency">
-                สกุลที่รับชำระในออเดอร์นี้
-              </label>
-              <select
-                id="payment-currency"
-                className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
-                disabled={loading}
-                {...form.register("paymentCurrency")}
-              >
-                {catalog.supportedCurrencies.map((currency) => (
-                  <option key={currency} value={currency}>
-                    {currencyLabel(currency)}
-                  </option>
-                ))}
-              </select>
-              <p className="text-xs text-slate-500">
-                Base currency: {catalog.storeCurrency} • รองรับ {catalog.supportedCurrencies.join(", ")}
-              </p>
-            </div>
-
-            <div className="rounded-lg bg-slate-50 p-3 text-sm">
-              <p>ยอดสินค้า: {subtotal.toLocaleString("th-TH")} {catalog.storeCurrency}</p>
-              <p>ส่วนลด: {totals.discount.toLocaleString("th-TH")} {catalog.storeCurrency}</p>
-              <p>
-                VAT ({vatModeLabel(catalog.vatMode)}): {totals.vatAmount.toLocaleString("th-TH")}{" "}
-                {catalog.storeCurrency}
-              </p>
-              <p className="font-semibold">
-                ยอดรวม: {totals.total.toLocaleString("th-TH")} {catalog.storeCurrency}
-              </p>
-              <p className="text-xs text-slate-500">
-                สกุลชำระที่เลือก: {currencyLabel(selectedPaymentCurrency)}
-              </p>
-              <p className="text-xs text-slate-500">
-                วิธีชำระ: {watchedPaymentMethod === "LAO_QR" ? "QR โอนเงิน" : "เงินสด"}
-              </p>
-            </div>
-
-            <Button type="submit" className="h-10 w-full" disabled={loading || !canCreate}>
-              {loading ? "กำลังบันทึก..." : "สร้างออเดอร์"}
-            </Button>
-          </form>
-        </article>
-      ) : null}
 
       <section className="space-y-2">
         {visibleOrders.length === 0 ? (
@@ -658,7 +856,7 @@ export function OrdersManagement({
                       </h3>
                       <p className="text-xs text-muted-foreground">
                         ช่องทาง {channelLabel[order.channel]} • จ่าย {order.paymentCurrency} •{" "}
-                        {order.paymentMethod === "LAO_QR" ? "QR โอน" : "เงินสด"}
+                        {paymentMethodLabel[order.paymentMethod]}
                       </p>
                     </div>
                     <span className={`rounded-full px-2 py-1 text-xs ${statusClass[order.status]}`}>
@@ -743,8 +941,276 @@ export function OrdersManagement({
         )}
       </section>
 
+      <SlideUpSheet
+        isOpen={createFormOpen}
+        onClose={closeCreateForm}
+        title="สร้างออเดอร์ใหม่"
+        description="มือถือ: Slide-up / เดสก์ท็อป: Modal"
+        disabled={loading}
+      >
+        {renderCreateOrderForm({ inSheet: true })}
+      </SlideUpSheet>
+      <SlideUpSheet
+        isOpen={showScannerSheet}
+        onClose={() => setShowScannerSheet(false)}
+        title="สแกนบาร์โค้ดสินค้า"
+        description="สแกนแล้วเพิ่มสินค้าเข้าออเดอร์อัตโนมัติ"
+        disabled={loading}
+      >
+        <OrderBarcodeScanner
+          isOpen={showScannerSheet}
+          onResult={onScanBarcodeResult}
+          onClose={() => setShowScannerSheet(false)}
+          disabled={loading}
+        />
+      </SlideUpSheet>
+
       {successMessage ? <p className="text-sm text-emerald-700">{successMessage}</p> : null}
       {errorMessage ? <p className="text-sm text-red-600">{errorMessage}</p> : null}
     </section>
+  );
+}
+
+function OrderBarcodeScanner({
+  isOpen,
+  onResult,
+  onClose,
+  disabled,
+}: {
+  isOpen: boolean;
+  onResult: (barcode: string) => void;
+  onClose: () => void;
+  disabled: boolean;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const controlsRef = useRef<import("@zxing/browser").IScannerControls | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const [status, setStatus] = useState<
+    "opening" | "scanning" | "paused" | "no-permission" | "no-camera" | "error"
+  >("opening");
+  const [error, setError] = useState<string | null>(null);
+  const [manualBarcode, setManualBarcode] = useState("");
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
+  const [activeDeviceId, setActiveDeviceId] = useState<string | null>(null);
+
+  const stopScanner = useCallback(() => {
+    if (controlsRef.current) {
+      controlsRef.current.stop();
+      controlsRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+  }, []);
+
+  const refreshDevices = useCallback(async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) {
+      setDevices([]);
+      return;
+    }
+    const deviceList = await navigator.mediaDevices.enumerateDevices();
+    const cameras = deviceList.filter((device) => device.kind === "videoinput");
+    setDevices(cameras);
+  }, []);
+
+  const startScanner = useCallback(
+    async (deviceId?: string) => {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setStatus("no-camera");
+        setError("อุปกรณ์นี้ไม่รองรับการเปิดกล้อง");
+        return;
+      }
+
+      setError(null);
+      setStatus("opening");
+
+      try {
+        const { BrowserMultiFormatReader } = await import("@zxing/browser");
+        const { BarcodeFormat, DecodeHintType } = await import("@zxing/library");
+
+        const constraints: MediaStreamConstraints = {
+          video: deviceId
+            ? { deviceId: { exact: deviceId } }
+            : { facingMode: "environment" },
+        };
+
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        streamRef.current = stream;
+        const activeTrack = stream.getVideoTracks()[0];
+        const activeCameraId = activeTrack?.getSettings?.().deviceId ?? null;
+        setActiveDeviceId(activeCameraId);
+        if (activeCameraId) {
+          window.localStorage.setItem("scanner-camera-id", activeCameraId);
+        }
+
+        await refreshDevices();
+
+        const hints = new Map();
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+          BarcodeFormat.EAN_13,
+          BarcodeFormat.EAN_8,
+          BarcodeFormat.CODE_128,
+          BarcodeFormat.CODE_39,
+          BarcodeFormat.UPC_A,
+          BarcodeFormat.UPC_E,
+          BarcodeFormat.QR_CODE,
+        ]);
+        hints.set(DecodeHintType.TRY_HARDER, true);
+
+        const reader = new BrowserMultiFormatReader(hints, {
+          delayBetweenScanAttempts: 200,
+        });
+
+        if (!videoRef.current) {
+          stopScanner();
+          return;
+        }
+
+        controlsRef.current = await reader.decodeFromStream(stream, videoRef.current, (result) => {
+          if (!result) {
+            return;
+          }
+          const code = result.getText().trim();
+          if (!code) {
+            return;
+          }
+          stopScanner();
+          onResult(code);
+        });
+
+        setStatus("scanning");
+      } catch (scanError) {
+        if (scanError instanceof DOMException && scanError.name === "NotAllowedError") {
+          setStatus("no-permission");
+          setError("ไม่ได้รับอนุญาตให้ใช้กล้อง");
+        } else if (scanError instanceof DOMException && scanError.name === "NotFoundError") {
+          setStatus("no-camera");
+          setError("ไม่พบกล้องในอุปกรณ์นี้");
+        } else {
+          setStatus("error");
+          setError("เปิดสแกนเนอร์ไม่สำเร็จ กรุณาพิมพ์บาร์โค้ดเอง");
+        }
+        stopScanner();
+      }
+    },
+    [onResult, refreshDevices, stopScanner],
+  );
+
+  useEffect(() => {
+    if (!isOpen) {
+      stopScanner();
+      setStatus("paused");
+      return;
+    }
+
+    const savedCameraId = window.localStorage.getItem("scanner-camera-id");
+    void startScanner(savedCameraId || undefined);
+
+    return () => {
+      stopScanner();
+    };
+  }, [isOpen, startScanner, stopScanner]);
+
+  const submitManualBarcode = () => {
+    const code = manualBarcode.trim();
+    if (!code) {
+      return;
+    }
+    stopScanner();
+    onResult(code);
+    setManualBarcode("");
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="relative mx-auto w-full max-w-sm">
+        <video ref={videoRef} className="mx-auto aspect-[3/2] w-full rounded-xl bg-black" muted playsInline />
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <div className="h-[46%] w-[80%] rounded-lg border-2 border-blue-400/80" />
+        </div>
+      </div>
+
+      <p className="text-center text-[11px] text-slate-500">
+        วางบาร์โค้ดให้อยู่กลางกรอบ แล้วระบบจะเพิ่มสินค้าให้อัตโนมัติ
+      </p>
+
+      {status === "opening" ? (
+        <p className="text-center text-xs text-slate-500">กำลังเปิดกล้อง...</p>
+      ) : null}
+      {status === "no-permission" ? (
+        <p className="text-center text-xs text-amber-600">ไม่ได้รับอนุญาตให้ใช้กล้อง</p>
+      ) : null}
+      {status === "no-camera" ? <p className="text-center text-xs text-amber-600">ไม่พบกล้อง</p> : null}
+      {status === "error" && error ? <p className="text-center text-xs text-amber-600">{error}</p> : null}
+
+      <div className="flex items-center gap-2">
+        {devices.length > 1 ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 flex-1"
+            disabled={disabled}
+            onClick={async () => {
+              if (devices.length <= 1) {
+                return;
+              }
+              const currentIndex = Math.max(
+                0,
+                devices.findIndex((device) => device.deviceId === activeDeviceId),
+              );
+              const nextDevice = devices[(currentIndex + 1) % devices.length];
+              stopScanner();
+              await startScanner(nextDevice?.deviceId);
+            }}
+          >
+            สลับกล้อง
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          variant="outline"
+          className="h-10 flex-1"
+          disabled={disabled}
+          onClick={async () => {
+            if (status === "paused") {
+              await startScanner(activeDeviceId ?? undefined);
+              return;
+            }
+            stopScanner();
+            setStatus("paused");
+          }}
+        >
+          {status === "paused" ? "เปิดกล้อง" : "พักกล้อง"}
+        </Button>
+      </div>
+
+      <div className="space-y-2 rounded-lg border border-slate-200 p-3">
+        <p className="text-xs text-slate-500">หรือพิมพ์บาร์โค้ดเอง</p>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            className="h-10 flex-1 rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+            value={manualBarcode}
+            onChange={(event) => setManualBarcode(event.target.value)}
+            placeholder="เช่น 8851234567890"
+            disabled={disabled}
+          />
+          <Button
+            type="button"
+            className="h-10"
+            onClick={submitManualBarcode}
+            disabled={disabled || !manualBarcode.trim()}
+          >
+            เพิ่ม
+          </Button>
+        </div>
+      </div>
+
+      <Button type="button" variant="outline" className="h-10 w-full" onClick={onClose} disabled={disabled}>
+        ปิด
+      </Button>
+    </div>
   );
 }

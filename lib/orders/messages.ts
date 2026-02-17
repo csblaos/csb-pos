@@ -31,6 +31,32 @@ export const buildOrderMessageTemplate = (payload: {
   ].join("\n");
 };
 
+export const buildShippingMessageTemplate = (payload: {
+  orderNo: string;
+  customerName?: string | null;
+  shippingCarrier?: string | null;
+  trackingNo?: string | null;
+  shippingLabelUrl?: string | null;
+}) => {
+  const customerLabel = payload.customerName?.trim() || "ลูกค้า";
+  const carrier = payload.shippingCarrier?.trim() || "ขนส่ง";
+  const tracking = payload.trackingNo?.trim() || "-";
+  const labelLine = payload.shippingLabelUrl?.trim()
+    ? `ลิงก์ป้าย/บิลจัดส่ง: ${payload.shippingLabelUrl.trim()}`
+    : null;
+
+  return [
+    `เรียน ${customerLabel}`,
+    `ออเดอร์ ${payload.orderNo} ได้จัดส่งแล้ว`,
+    `ขนส่ง: ${carrier}`,
+    `เลขพัสดุ: ${tracking}`,
+    labelLine,
+    "ขอบคุณที่ใช้บริการค่ะ",
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
+};
+
 export const buildWhatsappDeepLink = (phone: string, message: string) => {
   const digits = phone.replace(/[^0-9]/g, "");
   if (!digits) {
