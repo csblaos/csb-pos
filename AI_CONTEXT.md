@@ -71,9 +71,13 @@ npm run db:migrate
     - ใช้ `SlideUpSheet` ตัวเดียวกันทั้งสองอุปกรณ์
     - Mobile = slide-up sheet (ปัดลง/กดนอกกล่อง/กด X เพื่อปิด)
     - Desktop = centered modal (กดนอกกล่อง/กด X/Escape เพื่อปิด)
+    - Mobile/Desktop มีปุ่มไอคอน `Full Screen` แบบ toggle ที่ navbar (กดซ้ำเพื่อออก หรือกด `Esc`)
     - ในฟอร์มสร้างออเดอร์รองรับสแกนบาร์โค้ดเพิ่มสินค้าอัตโนมัติ และ fallback ค้นหาเองเมื่อไม่พบ barcode
+- Products:
+  - หน้า `/products` มีปุ่ม `รีเฟรช` แบบ manual ที่ header (ไม่มี auto-refresh)
 - Stock/Purchase:
   - stock movement และ purchase order flow ผ่าน service/repository
+  - หน้า `/stock` มีปุ่ม `รีเฟรช` แบบ manual ที่ header (ไม่มี auto-refresh)
 - Audit:
   - ใช้ `audit_events` และ `safeLogAuditEvent`
 - Idempotency:

@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { Maximize2, Minimize2 } from "lucide-react";
 
 import { MenuBackButton } from "@/components/ui/menu-back-button";
 
@@ -25,6 +26,21 @@ const navRoots = [
 
 const isInRoot = (pathname: string, root: string) =>
   pathname === root || pathname.startsWith(`${root}/`);
+
+type FullscreenDocument = Document & {
+  webkitExitFullscreen?: () => Promise<void> | void;
+  webkitFullscreenElement?: Element | null;
+  webkitFullscreenEnabled?: boolean;
+};
+
+type FullscreenElement = HTMLElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void;
+};
+
+const getFullscreenElement = () => {
+  const fullscreenDocument = document as FullscreenDocument;
+  return document.fullscreenElement ?? fullscreenDocument.webkitFullscreenElement ?? null;
+};
 
 function StoreSwitchIcon({ className }: { className?: string }) {
   return (
@@ -64,6 +80,8 @@ export function AppTopNav({
 }: AppTopNavProps) {
   const pathname = usePathname();
   const router = useRouter();
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [canUseFullscreen, setCanUseFullscreen] = useState(false);
 
   const activeRoot = useMemo(() => {
     const sortedRoots = [...navRoots].sort((a, b) => b.length - a.length);
@@ -96,6 +114,55 @@ export function AppTopNav({
 
     router.prefetch("/settings/superadmin");
   }, [pathname, router]);
+
+  useEffect(() => {
+    const fullscreenDocument = document as FullscreenDocument;
+    const rootElement = document.documentElement as FullscreenElement;
+
+    setCanUseFullscreen(
+      Boolean(
+        document.fullscreenEnabled ||
+          fullscreenDocument.webkitFullscreenEnabled ||
+          rootElement.requestFullscreen ||
+          rootElement.webkitRequestFullscreen,
+      ),
+    );
+
+    const syncFullscreenState = () => {
+      setIsFullscreen(Boolean(getFullscreenElement()));
+    };
+
+    syncFullscreenState();
+
+    document.addEventListener("fullscreenchange", syncFullscreenState);
+    document.addEventListener("webkitfullscreenchange", syncFullscreenState as EventListener);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", syncFullscreenState);
+      document.removeEventListener("webkitfullscreenchange", syncFullscreenState as EventListener);
+    };
+  }, []);
+
+  const toggleFullscreen = async () => {
+    const fullscreenDocument = document as FullscreenDocument;
+    const rootElement = document.documentElement as FullscreenElement;
+
+    try {
+      if (getFullscreenElement()) {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if (fullscreenDocument.webkitExitFullscreen) {
+          await fullscreenDocument.webkitExitFullscreen();
+        }
+      } else if (rootElement.requestFullscreen) {
+        await rootElement.requestFullscreen();
+      } else if (rootElement.webkitRequestFullscreen) {
+        await rootElement.webkitRequestFullscreen();
+      }
+    } catch {
+      // Ignore browser-level fullscreen errors to avoid noisy UI state.
+    }
+  };
 
   return (
     <div className="flex items-center justify-between gap-3">
@@ -134,7 +201,17 @@ export function AppTopNav({
           </div>
         ) : null}
       </div>
-      <div className="shrink-0">
+      <div className="flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={toggleFullscreen}
+          disabled={!canUseFullscreen}
+          title={isFullscreen ? "ออกจากโหมดเต็มจอ" : "เข้าโหมดเต็มจอ"}
+          aria-label={isFullscreen ? "ออกจากโหมดเต็มจอ" : "เข้าโหมดเต็มจอ"}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm transition-colors hover:bg-slate-50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 md:h-9 md:w-9"
+        >
+          {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+        </button>
         <Link
           href="/settings/stores"
           className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 active:scale-[0.98]"

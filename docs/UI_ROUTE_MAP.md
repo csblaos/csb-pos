@@ -19,10 +19,18 @@
 
 | Page | Main Component | API Calls |
 |---|---|---|
-| `/orders` | `components/app/orders-management.tsx` | `GET/POST /api/orders` (เปิดฟอร์มผ่าน `SlideUpSheet`: mobile = slide-up + swipe down, desktop = centered modal, รองรับสแกนบาร์โค้ดเพิ่มสินค้า + fallback ค้นหาเอง) |
+| `/orders` | `components/app/orders-management.tsx` | `GET/POST /api/orders` (เปิดฟอร์มผ่าน `SlideUpSheet`: mobile = slide-up + swipe down, desktop = centered modal, รองรับสแกนบาร์โค้ดเพิ่มสินค้า + fallback ค้นหาเอง; ปุ่มไอคอน `Full Screen` toggle อยู่ที่ navbar ทั้ง Mobile/Desktop) |
 | `/orders/[orderId]` | `components/app/order-detail-view.tsx` | `PATCH /api/orders/[orderId]`, `POST /api/orders/[orderId]/send-qr`, `POST /api/orders/[orderId]/shipments/label`, `POST /api/orders/[orderId]/shipments/upload-label`, `POST /api/orders/[orderId]/send-shipping` |
 
+## Products
+
+| Page | Main Component | API Calls |
+|---|---|---|
+| `/products` | `components/app/products-management.tsx` | `GET/POST /api/products`, `PATCH /api/products/[productId]`, `POST /api/products/generate-barcode` (มีปุ่ม `รีเฟรช` แบบ manual ที่ header) |
+
 ## Stock & Purchase
+
+- หน้า `/stock` มีปุ่ม `รีเฟรช` แบบ manual ที่ header (ไม่มี auto-refresh)
 
 | Page | Main Component | API Calls |
 |---|---|---|

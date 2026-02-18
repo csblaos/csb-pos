@@ -2,10 +2,20 @@
 
 ## Snapshot Date
 
-- February 17, 2026
+- February 18, 2026
 
 ## Changed (ล่าสุด)
 
+- ปรับ UX หน้า `/products`:
+  - เพิ่มปุ่ม `รีเฟรช` แบบ manual ในบรรทัดเดียวกับ title `สินค้า` และวางด้านขวา
+  - ปุ่มมีสถานะ `กำลังรีเฟรช...` ระหว่างโหลด และยังไม่เปิด auto-refresh
+- ปรับ UX หน้า `/stock`:
+  - เพิ่มปุ่ม `รีเฟรช` แบบ manual ในบรรทัดเดียวกับ title `สต็อก` และวางด้านขวา
+  - ปุ่มมีสถานะ `กำลังรีเฟรช...` ระหว่างโหลด และยังไม่เปิด auto-refresh
+- ปรับ UX หน้า `/orders` บน Desktop:
+  - ย้ายปุ่ม `Full Screen` ไปที่ navbar หลัก และปรับเป็นปุ่มไอคอน
+  - กดซ้ำเพื่อออกจาก Full Screen ได้ และรองรับออกด้วยปุ่ม `Esc`
+  - แสดงปุ่มทั้งบน Mobile และ Desktop (มือถือใช้ขนาดไอคอนย่อ)
 - เพิ่มระบบ context กลาง:
   - `AI_CONTEXT.md`
   - `docs/CONTEXT_INDEX.md`
@@ -41,6 +51,13 @@
 
 ## Impact
 
+- ผู้ใช้รีโหลดข้อมูลสินค้าล่าสุดได้ทันทีจาก header โดยไม่ต้องรีโหลดทั้งหน้าเอง
+- ผู้ใช้รีโหลดข้อมูลสต็อกล่าสุดได้ทันทีจาก header โดยไม่ต้องเปลี่ยนแท็บหรือรีโหลดทั้งหน้าเอง
+- ลดการกดซ้ำด้วยสถานะโหลดบนปุ่มรีเฟรช
+- ใช้พื้นที่หน้าจอเต็มบน Desktop ได้ทันที ลดสิ่งรบกวนระหว่างใช้งาน POS
+- ผู้ใช้ยังคุม UX เองได้ (ไม่บังคับเข้าเต็มจออัตโนมัติ)
+- เข้าถึงปุ่มเต็มจอได้สม่ำเสมอผ่าน navbar โดยไม่ผูกกับการ์ดเฉพาะหน้า
+- รองรับการเข้าหน้าเต็มจอบนมือถือในกรณีที่ browser รองรับ
 - รองรับการสร้าง shipping label ได้ทั้งโหมดทดสอบ (`STUB`) และโหมด provider จริง (`HTTP`)
 - ลดความเสี่ยงยิงซ้ำด้วย idempotency
 - เพิ่ม traceability ผ่าน audit log
@@ -72,9 +89,14 @@
 - `lib/shipping/provider.ts`
 - `lib/storage/r2.ts`
 - `components/app/order-detail-view.tsx`
+- `components/app/app-top-nav.tsx`
 - `components/app/orders-management.tsx`
+- `components/app/products-header-refresh-button.tsx`
+- `components/app/stock-header-refresh-button.tsx`
 - `lib/orders/messages.ts`
 - `lib/orders/validation.ts`
+- `app/(app)/products/page.tsx`
+- `app/(app)/stock/page.tsx`
 - `app/api/orders/[orderId]/route.ts`
 - `lib/db/schema/tables.ts`
 - `drizzle/0027_tough_the_renegades.sql`
@@ -105,6 +127,13 @@ npm run build
 ```
 
 4. Functional check
+- เปิดหน้า `/products` แล้วตรวจว่ามีปุ่ม `รีเฟรช` อยู่ขวาบนบรรทัดเดียวกับ title `สินค้า`
+- กดปุ่ม `รีเฟรช` และตรวจว่าปุ่มแสดง `กำลังรีเฟรช...` ระหว่างโหลด
+- เปิดหน้า `/stock` แล้วตรวจว่ามีปุ่ม `รีเฟรช` อยู่ขวาบนบรรทัดเดียวกับ title `สต็อก`
+- กดปุ่ม `รีเฟรช` และตรวจว่าปุ่มแสดง `กำลังรีเฟรช...` ระหว่างโหลด
+- เปิดหน้าในโซนแอปบน Desktop แล้วตรวจว่ามีปุ่มไอคอน `Full Screen` ที่ navbar
+- เปิดหน้าในโซนแอปบน Mobile แล้วตรวจว่ามีปุ่มไอคอน `Full Screen` ที่ navbar
+- กดปุ่มเพื่อเข้าเต็มจอ และกดซ้ำ/กด `Esc` เพื่อออก
 - เปิด order ที่สถานะ `PACKED` หรือ `SHIPPED`
 - กด `สร้าง Shipping Label`
 - ตรวจว่ามี `trackingNo`/`labelUrl` และมี audit event

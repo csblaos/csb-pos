@@ -8,6 +8,7 @@ import { getStoreFinancialConfig } from "@/lib/stores/financial";
 import { db } from "@/lib/db/client";
 import { stores } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { ProductsHeaderRefreshButton } from "@/components/app/products-header-refresh-button";
 
 const ProductsManagement = dynamic(
   () =>
@@ -73,7 +74,10 @@ export default async function ProductsPage() {
   return (
     <section className="space-y-4">
       <header className="space-y-1">
-        <h1 className="text-xl font-semibold">สินค้า</h1>
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-xl font-semibold">สินค้า</h1>
+          <ProductsHeaderRefreshButton />
+        </div>
         <p className="text-sm text-muted-foreground">ค้นหา สร้าง แก้ไข และปิดใช้งานสินค้า</p>
       </header>
 
