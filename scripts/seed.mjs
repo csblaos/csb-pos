@@ -342,10 +342,267 @@ async function insertUnitsProductsInventory(storeId, ownerUserId) {
     });
   }
 
+  const hasProductModelsTable = await db.execute({
+    sql: `
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table' AND name = 'product_models'
+      LIMIT 1
+    `,
+    args: [],
+  });
+
+  const hasProductModelIdColumn = await db.execute({
+    sql: `PRAGMA table_info('products')`,
+    args: [],
+  });
+
+  const productColumnNames = new Set(
+    hasProductModelIdColumn.rows.map((row) => String(row.name)),
+  );
+
+  const canSeedVariants =
+    hasProductModelsTable.rows.length > 0 &&
+    productColumnNames.has("model_id") &&
+    productColumnNames.has("variant_label") &&
+    productColumnNames.has("variant_options_json") &&
+    productColumnNames.has("variant_sort_order");
+
+  if (canSeedVariants) {
+    const productModels = [
+      [
+        "pmodel_food_box",
+        "กล่องอาหาร",
+        "ผลิตภัณฑ์กล่องอาหารแบบหลายขนาด",
+      ],
+      [
+        "pmodel_shirt_basic",
+        "เสื้อยืด Basic",
+        "เสื้อยืดหลายสีและไซซ์",
+      ],
+    ];
+
+    for (const [id, name, description] of productModels) {
+      await db.execute({
+        sql: `
+          INSERT OR IGNORE INTO product_models
+            (id, store_id, name, description, active)
+          VALUES (?, ?, ?, ?, ?)
+        `,
+        args: [id, storeId, name, description, 1],
+      });
+    }
+
+    const modelAttributes = [
+      ["pattr_food_box_size", "pmodel_food_box", "size", "Size", 0],
+      ["pattr_shirt_color", "pmodel_shirt_basic", "color", "Color", 0],
+      ["pattr_shirt_size", "pmodel_shirt_basic", "size", "Size", 1],
+    ];
+
+    for (const [id, modelId, code, name, sortOrder] of modelAttributes) {
+      await db.execute({
+        sql: `
+          INSERT OR IGNORE INTO product_model_attributes
+            (id, model_id, code, name, sort_order)
+          VALUES (?, ?, ?, ?, ?)
+        `,
+        args: [id, modelId, code, name, sortOrder],
+      });
+    }
+
+    const modelAttributeValues = [
+      ["pval_food_box_750", "pattr_food_box_size", "750ml", "750 ml", 0],
+      ["pval_food_box_1000", "pattr_food_box_size", "1000ml", "1000 ml", 1],
+      ["pval_shirt_color_white", "pattr_shirt_color", "white", "White", 0],
+      ["pval_shirt_color_black", "pattr_shirt_color", "black", "Black", 1],
+      ["pval_shirt_size_m", "pattr_shirt_size", "m", "M", 0],
+      ["pval_shirt_size_l", "pattr_shirt_size", "l", "L", 1],
+    ];
+
+    for (const [id, attributeId, code, name, sortOrder] of modelAttributeValues) {
+      await db.execute({
+        sql: `
+          INSERT OR IGNORE INTO product_model_attribute_values
+            (id, attribute_id, code, name, sort_order)
+          VALUES (?, ?, ?, ?, ?)
+        `,
+        args: [id, attributeId, code, name, sortOrder],
+      });
+    }
+
+    const variantProducts = [
+      [
+        "prd_food_box_750",
+        "FBX-750",
+        "กล่องอาหาร 750 ml",
+        "8850000000201",
+        "pmodel_food_box",
+        "750 ml",
+        JSON.stringify([
+          {
+            attributeCode: "size",
+            attributeName: "Size",
+            valueCode: "750ml",
+            valueName: "750 ml",
+          },
+        ]),
+        1,
+        "unit_ea",
+        3500,
+        1800,
+      ],
+      [
+        "prd_food_box_1000",
+        "FBX-1000",
+        "กล่องอาหาร 1000 ml",
+        "8850000000202",
+        "pmodel_food_box",
+        "1000 ml",
+        JSON.stringify([
+          {
+            attributeCode: "size",
+            attributeName: "Size",
+            valueCode: "1000ml",
+            valueName: "1000 ml",
+          },
+        ]),
+        2,
+        "unit_ea",
+        4200,
+        2200,
+      ],
+      [
+        "prd_shirt_white_m",
+        "SHT-WHT-M",
+        "เสื้อยืด Basic สีขาว ไซซ์ M",
+        "8850000000301",
+        "pmodel_shirt_basic",
+        "White / M",
+        JSON.stringify([
+          {
+            attributeCode: "color",
+            attributeName: "Color",
+            valueCode: "white",
+            valueName: "White",
+          },
+          {
+            attributeCode: "size",
+            attributeName: "Size",
+            valueCode: "m",
+            valueName: "M",
+          },
+        ]),
+        1,
+        "unit_ea",
+        89000,
+        45000,
+      ],
+      [
+        "prd_shirt_black_l",
+        "SHT-BLK-L",
+        "เสื้อยืด Basic สีดำ ไซซ์ L",
+        "8850000000302",
+        "pmodel_shirt_basic",
+        "Black / L",
+        JSON.stringify([
+          {
+            attributeCode: "color",
+            attributeName: "Color",
+            valueCode: "black",
+            valueName: "Black",
+          },
+          {
+            attributeCode: "size",
+            attributeName: "Size",
+            valueCode: "l",
+            valueName: "L",
+          },
+        ]),
+        2,
+        "unit_ea",
+        89000,
+        45000,
+      ],
+    ];
+
+    for (const [
+      id,
+      sku,
+      name,
+      barcode,
+      modelId,
+      variantLabel,
+      variantOptionsJson,
+      variantSortOrder,
+      baseUnitId,
+      priceBase,
+      costBase,
+    ] of variantProducts) {
+      await db.execute({
+        sql: `
+          INSERT OR IGNORE INTO products
+            (
+              id,
+              store_id,
+              sku,
+              name,
+              barcode,
+              model_id,
+              variant_label,
+              variant_options_json,
+              variant_sort_order,
+              base_unit_id,
+              price_base,
+              cost_base,
+              active
+            )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+        args: [
+          id,
+          storeId,
+          sku,
+          name,
+          barcode,
+          modelId,
+          variantLabel,
+          variantOptionsJson,
+          variantSortOrder,
+          baseUnitId,
+          priceBase,
+          costBase,
+          1,
+        ],
+      });
+    }
+
+    const variantProductUnits = [
+      ["pu_fbx750_ea", "prd_food_box_750", "unit_ea", 1],
+      ["pu_fbx1000_ea", "prd_food_box_1000", "unit_ea", 1],
+      ["pu_shirtwhtm_ea", "prd_shirt_white_m", "unit_ea", 1],
+      ["pu_shirtblkl_ea", "prd_shirt_black_l", "unit_ea", 1],
+    ];
+
+    for (const [id, productId, unitId, multiplier] of variantProductUnits) {
+      await db.execute({
+        sql: `
+          INSERT OR IGNORE INTO product_units
+            (id, product_id, unit_id, multiplier_to_base)
+          VALUES (?, ?, ?, ?)
+        `,
+        args: [id, productId, unitId, multiplier],
+      });
+    }
+  }
+
   const openingMovements = [
     ["imv_open_icd001", "prd_iced_coffee", 120],
     ["imv_open_icd002", "prd_thai_tea", 80],
     ["imv_open_snk101", "prd_tuna_sandwich", 40],
+    ["imv_open_fbx750", "prd_food_box_750", 60],
+    ["imv_open_fbx1000", "prd_food_box_1000", 45],
+    ["imv_open_shirtwhtm", "prd_shirt_white_m", 20],
+    ["imv_open_shirtblkl", "prd_shirt_black_l", 18],
   ];
 
   for (const [id, productId, qtyBase] of openingMovements) {
@@ -413,11 +670,36 @@ async function summarize(storeId) {
     sql: `SELECT COUNT(*) AS count FROM store_members WHERE store_id = ? AND status = 'ACTIVE'`,
     args: [storeId],
   });
+  const productModelsTableCheck = await db.execute({
+    sql: `
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table' AND name = 'product_models'
+      LIMIT 1
+    `,
+    args: [],
+  });
+  let productModelsCountValue = 0;
+  let variantProductsCountValue = 0;
+  if (productModelsTableCheck.rows.length > 0) {
+    const productModelsCount = await db.execute({
+      sql: `SELECT COUNT(*) AS count FROM product_models WHERE store_id = ?`,
+      args: [storeId],
+    });
+    const variantProductsCount = await db.execute({
+      sql: `SELECT COUNT(*) AS count FROM products WHERE store_id = ? AND model_id IS NOT NULL`,
+      args: [storeId],
+    });
+    productModelsCountValue = Number(productModelsCount.rows[0].count);
+    variantProductsCountValue = Number(variantProductsCount.rows[0].count);
+  }
 
   console.log("Seed completed");
   console.log(`- store_id: ${storeId}`);
   console.log(`- active_members: ${Number(activeMembersCount.rows[0].count)}`);
   console.log(`- products: ${Number(productsCount.rows[0].count)}`);
+  console.log(`- product_models: ${productModelsCountValue}`);
+  console.log(`- variant_products: ${variantProductsCountValue}`);
   console.log(`- contacts: ${Number(contactsCount.rows[0].count)}`);
 }
 

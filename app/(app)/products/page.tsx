@@ -3,12 +3,19 @@ import { redirect } from "next/navigation";
 
 import { getSession } from "@/lib/auth/session";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
-import { listCategories, listStoreProducts, listUnits } from "@/lib/products/service";
+import {
+  getStoreProductSummaryCounts,
+  listCategories,
+  listStoreProductsPage,
+  listUnits,
+} from "@/lib/products/service";
 import { getStoreFinancialConfig } from "@/lib/stores/financial";
 import { db } from "@/lib/db/client";
 import { stores } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { ProductsHeaderRefreshButton } from "@/components/app/products-header-refresh-button";
+
+const PRODUCT_PAGE_SIZE = 30;
 
 const ProductsManagement = dynamic(
   () =>
@@ -55,8 +62,15 @@ export default async function ProductsPage() {
     );
   }
 
-  const [products, units, categories, financial, storeRow] = await Promise.all([
-    listStoreProducts(session.activeStoreId),
+  const [productPage, summaryCounts, units, categories, financial, storeRow] = await Promise.all([
+    listStoreProductsPage({
+      storeId: session.activeStoreId,
+      status: "all",
+      sort: "newest",
+      page: 1,
+      pageSize: PRODUCT_PAGE_SIZE,
+    }),
+    getStoreProductSummaryCounts(session.activeStoreId),
     listUnits(session.activeStoreId),
     listCategories(session.activeStoreId),
     getStoreFinancialConfig(session.activeStoreId),
@@ -82,7 +96,9 @@ export default async function ProductsPage() {
       </header>
 
       <ProductsManagement
-        products={products}
+        products={productPage.items}
+        initialTotalCount={productPage.total}
+        initialSummaryCounts={summaryCounts}
         units={units}
         categories={categories}
         currency={financial?.currency ?? "LAK"}

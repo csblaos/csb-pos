@@ -143,6 +143,12 @@ R2_STORE_LOGO_PREFIX=store-logos # optional
 R2_ORDER_SHIPPING_LABEL_PREFIX=order-shipping-labels # optional
 ```
 
+- ถ้าต้องการให้ปุ่ม `Full Screen` แสดงบนอุปกรณ์ touch (เช่น POS tablet) ให้ตั้งค่า:
+
+```bash
+NEXT_PUBLIC_POS_ALLOW_FULLSCREEN_ON_TOUCH=true
+```
+
 ## 8) แนวทางก่อน merge/push
 
 Checklist แนะนำ:

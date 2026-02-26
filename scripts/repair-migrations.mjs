@@ -759,6 +759,105 @@ async function ensureSchemaCompatForLatestAuthChanges() {
   );
   console.info("[db:repair] ensured products.category_id index");
 
+  // ── product variants phase 1 (migration 0028) ──
+
+  await client.execute(`
+    create table if not exists \`product_models\` (
+      \`id\` text primary key not null,
+      \`store_id\` text not null references \`stores\`(\`id\`) on delete cascade,
+      \`name\` text not null,
+      \`category_id\` text references \`product_categories\`(\`id\`) on delete set null,
+      \`image_url\` text,
+      \`description\` text,
+      \`active\` integer not null default 1,
+      \`created_at\` text not null default (CURRENT_TIMESTAMP)
+    )
+  `);
+  await client.execute(
+    "create index if not exists `product_models_store_id_idx` on `product_models` (`store_id`)",
+  );
+  await client.execute(
+    "create index if not exists `product_models_created_at_idx` on `product_models` (`created_at`)",
+  );
+  await client.execute(
+    "create index if not exists `product_models_category_id_idx` on `product_models` (`category_id`)",
+  );
+  await client.execute(
+    "create unique index if not exists `product_models_store_name_unique` on `product_models` (`store_id`, `name`)",
+  );
+  console.info("[db:repair] ensured table product_models + indexes");
+
+  await client.execute(`
+    create table if not exists \`product_model_attributes\` (
+      \`id\` text primary key not null,
+      \`model_id\` text not null references \`product_models\`(\`id\`) on delete cascade,
+      \`code\` text not null,
+      \`name\` text not null,
+      \`sort_order\` integer not null default 0,
+      \`created_at\` text not null default (CURRENT_TIMESTAMP)
+    )
+  `);
+  await client.execute(
+    "create index if not exists `product_model_attributes_model_id_idx` on `product_model_attributes` (`model_id`)",
+  );
+  await client.execute(
+    "create unique index if not exists `product_model_attributes_model_code_unique` on `product_model_attributes` (`model_id`, `code`)",
+  );
+  console.info("[db:repair] ensured table product_model_attributes + indexes");
+
+  await client.execute(`
+    create table if not exists \`product_model_attribute_values\` (
+      \`id\` text primary key not null,
+      \`attribute_id\` text not null references \`product_model_attributes\`(\`id\`) on delete cascade,
+      \`code\` text not null,
+      \`name\` text not null,
+      \`sort_order\` integer not null default 0,
+      \`created_at\` text not null default (CURRENT_TIMESTAMP)
+    )
+  `);
+  await client.execute(
+    "create index if not exists `product_model_attribute_values_attribute_id_idx` on `product_model_attribute_values` (`attribute_id`)",
+  );
+  await client.execute(
+    "create unique index if not exists `product_model_attribute_values_attribute_code_unique` on `product_model_attribute_values` (`attribute_id`, `code`)",
+  );
+  console.info("[db:repair] ensured table product_model_attribute_values + indexes");
+
+  if (!(await columnExists("products", "model_id"))) {
+    await client.execute(
+      "alter table `products` add `model_id` text references `product_models`(`id`) on delete set null",
+    );
+    console.info("[db:repair] added column products.model_id");
+  }
+
+  if (!(await columnExists("products", "variant_label"))) {
+    await client.execute("alter table `products` add `variant_label` text");
+    console.info("[db:repair] added column products.variant_label");
+  }
+
+  if (!(await columnExists("products", "variant_options_json"))) {
+    await client.execute("alter table `products` add `variant_options_json` text");
+    console.info("[db:repair] added column products.variant_options_json");
+  }
+
+  if (!(await columnExists("products", "variant_sort_order"))) {
+    await client.execute(
+      "alter table `products` add `variant_sort_order` integer not null default 0",
+    );
+    console.info("[db:repair] added column products.variant_sort_order");
+  }
+
+  await client.execute(
+    "create index if not exists `products_model_id_idx` on `products` (`model_id`)",
+  );
+  await client.execute(
+    "create index if not exists `products_store_barcode_idx` on `products` (`store_id`, `barcode`)",
+  );
+  await client.execute(
+    "create unique index if not exists `products_model_variant_options_unique` on `products` (`model_id`, `variant_options_json`) where `model_id` is not null and `variant_options_json` is not null",
+  );
+  console.info("[db:repair] ensured products variant indexes");
+
   // ── purchase_orders + purchase_order_items (migration 0023) ──
 
   await client.execute(`

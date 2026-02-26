@@ -4,12 +4,14 @@
 
 ## Migration Status
 
-- journal entries: `28`
-- latest migration tag: `0027_tough_the_renegades`
+- journal entries: `29`
+- latest migration tag: `0028_bouncy_justin_hammer`
 - latest focus:
-  - `order_shipments`
-  - `orders.payment_status`
-  - `orders.shipping_label_status` และฟิลด์เกี่ยวกับ shipping/cod
+  - โครงสร้างสินค้าแบบ Variant (Phase 1):
+    - `product_models`
+    - `product_model_attributes`
+    - `product_model_attribute_values`
+    - คอลัมน์ใหม่ใน `products` (`model_id`, `variant_label`, `variant_options_json`, `variant_sort_order`)
 
 ## Table Inventory (High-level)
 
@@ -30,6 +32,9 @@
 
 - `units`
 - `product_categories`
+- `product_models`
+- `product_model_attributes`
+- `product_model_attribute_values`
 - `products`
 - `product_units`
 - `contacts`
@@ -66,6 +71,11 @@
 - `products.store_id -> stores.id`
 - `products.base_unit_id -> units.id`
 - `products.category_id -> product_categories.id`
+- `products.model_id -> product_models.id`
+- `product_models.store_id -> stores.id`
+- `product_models.category_id -> product_categories.id`
+- `product_model_attributes.model_id -> product_models.id`
+- `product_model_attribute_values.attribute_id -> product_model_attributes.id`
 - `product_units.product_id -> products.id`
 - `product_units.unit_id -> units.id`
 - `inventory_movements.store_id -> stores.id`
@@ -150,6 +160,11 @@
 - audit:
   - `audit_events_scope_occurred_at_idx`
   - `audit_events_store_occurred_at_idx`
+- product variants:
+  - `product_models_store_name_unique`
+  - `product_model_attributes_model_code_unique`
+  - `product_model_attribute_values_attribute_code_unique`
+  - `products_model_variant_options_unique`
 
 ## Schema Change Checklist
 

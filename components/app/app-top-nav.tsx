@@ -42,6 +42,8 @@ const getFullscreenElement = () => {
   return document.fullscreenElement ?? fullscreenDocument.webkitFullscreenElement ?? null;
 };
 
+const allowFullscreenOnTouch = process.env.NEXT_PUBLIC_POS_ALLOW_FULLSCREEN_ON_TOUCH === "true";
+
 function StoreSwitchIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -82,6 +84,8 @@ export function AppTopNav({
   const router = useRouter();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [canUseFullscreen, setCanUseFullscreen] = useState(false);
+  const [isDesktopViewport, setIsDesktopViewport] = useState(false);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
 
   const activeRoot = useMemo(() => {
     const sortedRoots = [...navRoots].sort((a, b) => b.length - a.length);
@@ -143,6 +147,27 @@ export function AppTopNav({
     };
   }, []);
 
+  useEffect(() => {
+    const syncViewportAndDevice = () => {
+      setIsDesktopViewport(window.innerWidth >= 1024);
+
+      const hasTouchPoints = navigator.maxTouchPoints > 0;
+      const hasCoarsePointer = window.matchMedia("(pointer: coarse)").matches;
+      const hasTouchEvent = "ontouchstart" in window;
+      setIsTouchDevice(hasTouchPoints || hasCoarsePointer || hasTouchEvent);
+    };
+
+    syncViewportAndDevice();
+
+    window.addEventListener("resize", syncViewportAndDevice);
+    return () => {
+      window.removeEventListener("resize", syncViewportAndDevice);
+    };
+  }, []);
+
+  const showFullscreenButton =
+    canUseFullscreen && (isDesktopViewport || (allowFullscreenOnTouch && isTouchDevice));
+
   const toggleFullscreen = async () => {
     const fullscreenDocument = document as FullscreenDocument;
     const rootElement = document.documentElement as FullscreenElement;
@@ -202,16 +227,17 @@ export function AppTopNav({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <button
-          type="button"
-          onClick={toggleFullscreen}
-          disabled={!canUseFullscreen}
-          title={isFullscreen ? "ออกจากโหมดเต็มจอ" : "เข้าโหมดเต็มจอ"}
-          aria-label={isFullscreen ? "ออกจากโหมดเต็มจอ" : "เข้าโหมดเต็มจอ"}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm transition-colors hover:bg-slate-50 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 md:h-9 md:w-9"
-        >
-          {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-        </button>
+        {showFullscreenButton ? (
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            title={isFullscreen ? "ออกจากโหมดเต็มจอ" : "เข้าโหมดเต็มจอ"}
+            aria-label={isFullscreen ? "ออกจากโหมดเต็มจอ" : "เข้าโหมดเต็มจอ"}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm transition-colors hover:bg-slate-50 active:scale-[0.98] md:h-9 md:w-9"
+          >
+            {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </button>
+        ) : null}
         <Link
           href="/settings/stores"
           className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 active:scale-[0.98]"

@@ -57,6 +57,22 @@
 - Consequence:
   - order detail ต้องมี UX สำหรับ manual send และบันทึกข้อมูลจัดส่งให้ครบก่อนส่ง
 
+## ADR-006: ออกแบบสินค้าแบบ Variant ด้วยโครงสร้าง Additive (Model + Sellable SKU)
+
+- Date: February 26, 2026
+- Status: Accepted
+- Decision:
+  - เพิ่มตารางใหม่ `product_models`, `product_model_attributes`, `product_model_attribute_values`
+  - ให้ `products` ยังเป็น sellable SKU/variant ที่ใช้กับ order/stock เหมือนเดิม
+  - เชื่อม `products.model_id` เพื่อจัดกลุ่มเป็นสินค้าแม่ โดยไม่รื้อ flow เดิม
+- Reason:
+  - ลดความเสี่ยงกระทบระบบ order/inventory ที่ทำงานบน `products.id` อยู่แล้ว
+  - รองรับ rollout เป็นเฟส (Phase 1 schema ก่อน, Phase 2 API, Phase 3 UX) ได้ปลอดภัยกว่า big-bang refactor
+- Consequence:
+  - ช่วงเปลี่ยนผ่านระบบรองรับทั้งสินค้าเดี่ยวและสินค้าแบบมี variant
+  - Phase 2 เริ่มใช้งานแล้ว: create/edit product รองรับ payload `variant` และ backend เติม dictionary (`attributes/values`) ให้อัตโนมัติ
+  - ยังคงต้องวาง policy เพิ่มเติมในเฟสถัดไปสำหรับ barcode/SKU ระดับ model/variant ที่ละเอียดขึ้นตามธุรกิจ
+
 ## Template สำหรับ ADR ใหม่
 
 - Date: YYYY-MM-DD

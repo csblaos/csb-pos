@@ -19,14 +19,14 @@
 
 | Page | Main Component | API Calls |
 |---|---|---|
-| `/orders` | `components/app/orders-management.tsx` | `GET/POST /api/orders` (เปิดฟอร์มผ่าน `SlideUpSheet`: mobile = slide-up + swipe down, desktop = centered modal, รองรับสแกนบาร์โค้ดเพิ่มสินค้า + fallback ค้นหาเอง; ปุ่มไอคอน `Full Screen` toggle อยู่ที่ navbar ทั้ง Mobile/Desktop) |
+| `/orders` | `components/app/orders-management.tsx` | `GET/POST /api/orders` (เปิดฟอร์มผ่าน `SlideUpSheet`: mobile = slide-up + swipe down, desktop = centered modal, รองรับสแกนบาร์โค้ดเพิ่มสินค้า + fallback ค้นหาเอง; ปุ่มไอคอน `Full Screen` toggle อยู่ที่ navbar โดย Desktop (`lg`+) แสดงเสมอเมื่อ browser รองรับ และ Touch device แสดงได้เมื่อ `NEXT_PUBLIC_POS_ALLOW_FULLSCREEN_ON_TOUCH=true`) |
 | `/orders/[orderId]` | `components/app/order-detail-view.tsx` | `PATCH /api/orders/[orderId]`, `POST /api/orders/[orderId]/send-qr`, `POST /api/orders/[orderId]/shipments/label`, `POST /api/orders/[orderId]/shipments/upload-label`, `POST /api/orders/[orderId]/send-shipping` |
 
 ## Products
 
 | Page | Main Component | API Calls |
 |---|---|---|
-| `/products` | `components/app/products-management.tsx` | `GET/POST /api/products`, `PATCH /api/products/[productId]`, `POST /api/products/generate-barcode` (มีปุ่ม `รีเฟรช` แบบ manual ที่ header) |
+| `/products` | `components/app/products-management.tsx` | `GET/POST /api/products` (หน้า list ใช้ server-side pagination/filter/sort ผ่าน query `q`,`categoryId`,`status`,`sort`,`page`,`pageSize`; response มีค่าสต็อก `stockOnHand/stockReserved/stockAvailable` สำหรับแสดงใน Product Detail, modal เพิ่ม/แก้ไขรองรับโหมด variant และมี Matrix Generator สำหรับสร้างหลายรุ่นย่อยแบบ bulk), `GET /api/products/models` (auto-suggest ช่อง `ชื่อสินค้าแม่ (Model)`, auto ตั้ง `ลำดับแสดง` จาก `nextSortOrder`, และ suggest `ชื่อ Variant` จาก `variantLabels`), `PATCH /api/products/[productId]`, `POST /api/products/generate-barcode` (ใช้ทั้งในฟอร์มปกติและเติม barcode ในตาราง matrix) (มีปุ่ม `รีเฟรช` แบบ manual ที่ header) |
 
 ## Stock & Purchase
 

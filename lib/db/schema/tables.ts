@@ -432,6 +432,77 @@ export const productCategories = sqliteTable(
   }),
 );
 
+export const productModels = sqliteTable(
+  "product_models",
+  {
+    id: id(),
+    storeId: text("store_id")
+      .notNull()
+      .references(() => stores.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    categoryId: text("category_id").references(() => productCategories.id, {
+      onDelete: "set null",
+    }),
+    imageUrl: text("image_url"),
+    description: text("description"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    createdAt: text("created_at").notNull().default(createdAtDefault),
+  },
+  (table) => ({
+    productModelsStoreIdIdx: index("product_models_store_id_idx").on(table.storeId),
+    productModelsCreatedAtIdx: index("product_models_created_at_idx").on(table.createdAt),
+    productModelsCategoryIdIdx: index("product_models_category_id_idx").on(table.categoryId),
+    productModelsStoreNameUnique: uniqueIndex("product_models_store_name_unique").on(
+      table.storeId,
+      table.name,
+    ),
+  }),
+);
+
+export const productModelAttributes = sqliteTable(
+  "product_model_attributes",
+  {
+    id: id(),
+    modelId: text("model_id")
+      .notNull()
+      .references(() => productModels.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: text("created_at").notNull().default(createdAtDefault),
+  },
+  (table) => ({
+    productModelAttributesModelIdIdx: index("product_model_attributes_model_id_idx").on(
+      table.modelId,
+    ),
+    productModelAttributesModelCodeUnique: uniqueIndex(
+      "product_model_attributes_model_code_unique",
+    ).on(table.modelId, table.code),
+  }),
+);
+
+export const productModelAttributeValues = sqliteTable(
+  "product_model_attribute_values",
+  {
+    id: id(),
+    attributeId: text("attribute_id")
+      .notNull()
+      .references(() => productModelAttributes.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: text("created_at").notNull().default(createdAtDefault),
+  },
+  (table) => ({
+    productModelAttributeValuesAttributeIdIdx: index(
+      "product_model_attribute_values_attribute_id_idx",
+    ).on(table.attributeId),
+    productModelAttributeValuesAttributeCodeUnique: uniqueIndex(
+      "product_model_attribute_values_attribute_code_unique",
+    ).on(table.attributeId, table.code),
+  }),
+);
+
 export const products = sqliteTable(
   "products",
   {
@@ -442,6 +513,10 @@ export const products = sqliteTable(
     sku: text("sku").notNull(),
     name: text("name").notNull(),
     barcode: text("barcode"),
+    modelId: text("model_id").references(() => productModels.id, { onDelete: "set null" }),
+    variantLabel: text("variant_label"),
+    variantOptionsJson: text("variant_options_json"),
+    variantSortOrder: integer("variant_sort_order").notNull().default(0),
     imageUrl: text("image_url"),
     categoryId: text("category_id").references(() => productCategories.id, { onDelete: "set null" }),
     baseUnitId: text("base_unit_id")
@@ -458,10 +533,15 @@ export const products = sqliteTable(
     productsStoreIdIdx: index("products_store_id_idx").on(table.storeId),
     productsCreatedAtIdx: index("products_created_at_idx").on(table.createdAt),
     productsCategoryIdIdx: index("products_category_id_idx").on(table.categoryId),
+    productsModelIdIdx: index("products_model_id_idx").on(table.modelId),
+    productsStoreBarcodeIdx: index("products_store_barcode_idx").on(table.storeId, table.barcode),
     productsStoreSkuUnique: uniqueIndex("products_store_sku_unique").on(
       table.storeId,
       table.sku,
     ),
+    productsModelVariantOptionsUnique: uniqueIndex("products_model_variant_options_unique")
+      .on(table.modelId, table.variantOptionsJson)
+      .where(sql`${table.modelId} is not null and ${table.variantOptionsJson} is not null`),
   }),
 );
 

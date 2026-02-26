@@ -17,6 +17,10 @@ import {
   uploadProductImageToR2,
   isProductImageR2Configured,
 } from "@/lib/storage/r2";
+import {
+  buildVariantColumns,
+  isVariantCombinationUniqueError,
+} from "@/lib/products/variant-persistence";
 
 export async function PATCH(
   request: Request,
@@ -226,35 +230,58 @@ export async function PATCH(
       return NextResponse.json({ message: "พบหน่วยสินค้าที่ไม่ถูกต้อง" }, { status: 400 });
     }
 
-    await db.transaction(async (tx) => {
-      await tx
-        .update(products)
-        .set({
-          sku: payload.sku,
-          name: payload.name,
-          barcode: payload.barcode,
-          baseUnitId: payload.baseUnitId,
-          priceBase: payload.priceBase,
-          costBase: payload.costBase,
-          outStockThreshold: payload.outStockThreshold,
-          lowStockThreshold: payload.lowStockThreshold,
+    try {
+      await db.transaction(async (tx) => {
+        const variantColumns = await buildVariantColumns(tx, {
+          storeId,
           categoryId: payload.categoryId,
-        })
-        .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
+          variant: payload.variant,
+        });
 
-      await tx.delete(productUnits).where(eq(productUnits.productId, productId));
+        await tx
+          .update(products)
+          .set({
+            sku: payload.sku,
+            name: payload.name,
+            barcode: payload.barcode,
+            modelId: variantColumns.modelId,
+            variantLabel: variantColumns.variantLabel,
+            variantOptionsJson: variantColumns.variantOptionsJson,
+            variantSortOrder: variantColumns.variantSortOrder,
+            baseUnitId: payload.baseUnitId,
+            priceBase: payload.priceBase,
+            costBase: payload.costBase,
+            outStockThreshold: payload.outStockThreshold,
+            lowStockThreshold: payload.lowStockThreshold,
+            categoryId: payload.categoryId,
+          })
+          .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
 
-      if (payload.conversions.length > 0) {
-        await tx.insert(productUnits).values(
-          payload.conversions.map((conversion) => ({
-            id: randomUUID(),
-            productId,
-            unitId: conversion.unitId,
-            multiplierToBase: conversion.multiplierToBase,
-          })),
+        await tx.delete(productUnits).where(eq(productUnits.productId, productId));
+
+        if (payload.conversions.length > 0) {
+          await tx.insert(productUnits).values(
+            payload.conversions.map((conversion) => ({
+              id: randomUUID(),
+              productId,
+              unitId: conversion.unitId,
+              multiplierToBase: conversion.multiplierToBase,
+            })),
+          );
+        }
+      });
+    } catch (error) {
+      if (isVariantCombinationUniqueError(error)) {
+        return NextResponse.json(
+          {
+            message:
+              "Variant นี้ซ้ำกับสินค้าใน Model เดียวกัน กรุณาเปลี่ยนตัวเลือก/ชื่อ Variant",
+          },
+          { status: 409 },
         );
       }
-    });
+      throw error;
+    }
 
     return NextResponse.json({ ok: true });
   } catch (error) {

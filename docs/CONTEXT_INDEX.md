@@ -14,6 +14,7 @@
 8. `docs/SCHEMA_MAP.md`
 9. `docs/drizzle-migrations.md`
 10. `docs/orders-system-design.md`
+11. `docs/product-variants-plan.md`
 
 ## What Each File Is For
 
@@ -37,6 +38,8 @@
   - วิธีทำ migration และข้อควรระวัง
 - `docs/orders-system-design.md`
   - แผนออกแบบ `/orders` ระดับระบบสำหรับ roadmap
+- `docs/product-variants-plan.md`
+  - แผนโครงสร้างสินค้าแบบ Variant (DB + UX + rollout phases)
 
 ## Maintenance Rules
 

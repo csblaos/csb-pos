@@ -50,9 +50,10 @@
 
 | Endpoint | Methods | Access Control | Notes |
 |---|---|---|---|
-| `/api/products` | `GET` | `Permission:products.view` | รายการสินค้า |
-| `/api/products` | `POST` | `Permission:products.create` | เพิ่มสินค้า |
-| `/api/products/[productId]` | `PATCH` | หลัก `Permission:products.update` | มี action ย่อยบางตัวใช้ `hasPermission` เพิ่ม |
+| `/api/products` | `GET` | `Permission:products.view` | รายการสินค้าแบบ pagination (`q`,`categoryId`,`status`,`sort`,`page`,`pageSize`) + คืน `total`,`hasMore`,`summary`, ข้อมูล variant (`modelName`,`variantLabel`,`variantOptions`) และค่าสต็อก (`stockOnHand`,`stockReserved`,`stockAvailable`) |
+| `/api/products` | `POST` | `Permission:products.create` | เพิ่มสินค้า (รองรับ payload `variant` เพื่อผูก/สร้าง model และบันทึก options) |
+| `/api/products/[productId]` | `PATCH` | หลัก `Permission:products.update` | มี action ย่อยบางตัวใช้ `hasPermission` เพิ่ม และ action `update` รองรับ payload `variant` |
+| `/api/products/models` | `GET` | `Permission:products.view` | ดึงรายการชื่อ Model สำหรับ auto-suggest (`q`,`limit`) และคืน `nextSortOrder` + `variantLabels` เมื่อส่ง `name` (รองรับ `variantQ`) เพื่อ auto ตั้ง `ลำดับแสดง` และแนะนำ `ชื่อ Variant` |
 | `/api/products/search` | `GET` | `Permission:products.view` | search |
 | `/api/products/generate-barcode` | `POST` | `Permission:products.create` | generate barcode |
 | `/api/products/categories` | `GET` | `Permission:products.view` | list categories |

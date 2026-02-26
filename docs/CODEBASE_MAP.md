@@ -45,6 +45,25 @@
   - `server/repositories/order-shipment.repo.ts`
   - `lib/shipping/provider.ts`
 
+### Products / Catalog / Variants
+
+- UI:
+  - `app/(app)/products/page.tsx`
+  - `components/app/products-management.tsx`
+- API:
+  - `app/api/products/route.ts`
+  - `app/api/products/[productId]/route.ts`
+  - `app/api/products/search/route.ts`
+  - `app/api/products/generate-barcode/route.ts`
+  - `app/api/products/categories/route.ts`
+- Core logic:
+  - `lib/products/service.ts`
+  - `lib/products/validation.ts`
+  - `lib/products/variant-options.ts`
+  - `lib/products/variant-persistence.ts`
+  - `lib/db/schema/tables.ts` (ตาราง `products` + โครงสร้าง variant phase 1:
+    `product_models`, `product_model_attributes`, `product_model_attribute_values`)
+
 ### Stock / Purchase Orders
 
 - UI:
