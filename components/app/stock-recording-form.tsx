@@ -6,7 +6,6 @@ import {
   useMemo,
   useRef,
   useState,
-  useTransition,
 } from "react";
 import { useRouter } from "next/navigation";
 import { Search, ScanBarcode, X } from "lucide-react";
@@ -14,6 +13,12 @@ import toast from "react-hot-toast";
 
 import { Button } from "@/components/ui/button";
 import { SlideUpSheet } from "@/components/ui/slide-up-sheet";
+import {
+  StockTabEmptyState,
+  StockTabErrorState,
+  StockTabLoadingState,
+  StockTabToolbar,
+} from "@/components/app/stock-tab-feedback";
 import { authFetch } from "@/lib/auth/client-token";
 import type {
   InventoryMovementView,
@@ -62,10 +67,13 @@ export function StockRecordingForm({
   canInbound,
 }: StockRecordingFormProps) {
   const router = useRouter();
-  const [, startTransition] = useTransition();
-
-  const [productItems] = useState(initialProducts);
+  const [productItems, setProductItems] = useState(initialProducts);
   const [recentMovements, setRecentMovements] = useState<InventoryMovementView[]>([]);
+  const [isRefreshingData, setIsRefreshingData] = useState(false);
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(
+    initialProducts.length > 0 ? new Date().toISOString() : null,
+  );
 
   const movementTypeOptions = useMemo(() => {
     const options: MovementType[] = [];
@@ -86,8 +94,6 @@ export function StockRecordingForm({
   const [qty, setQty] = useState<string>("1");
   const [adjustMode, setAdjustMode] = useState<AdjustMode>("INCREASE");
   const [note, setNote] = useState("");
-  const [cost, setCost] = useState<string>("");
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -109,6 +115,36 @@ export function StockRecordingForm({
   const [hasSeenScannerPermission, setHasSeenScannerPermission] = useState(false);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (initialProducts.length === 0) {
+      return;
+    }
+    if (productItems.length === 0) {
+      setProductItems(initialProducts);
+      setLastUpdatedAt(new Date().toISOString());
+    }
+  }, [initialProducts, productItems.length]);
+
+  useEffect(() => {
+    if (productItems.length === 0) {
+      setProductId("");
+      setUnitId("");
+      return;
+    }
+
+    const matchedProduct = productItems.find((item) => item.productId === productId);
+    if (!matchedProduct) {
+      setProductId(productItems[0].productId);
+      setUnitId(productItems[0].unitOptions[0]?.unitId ?? "");
+      return;
+    }
+
+    const matchedUnit = matchedProduct.unitOptions.find((item) => item.unitId === unitId);
+    if (!matchedUnit) {
+      setUnitId(matchedProduct.unitOptions[0]?.unitId ?? "");
+    }
+  }, [productId, productItems, unitId]);
 
   useEffect(() => {
     const seen = window.localStorage.getItem("scanner-permission-seen") === "1";
@@ -214,7 +250,126 @@ export function StockRecordingForm({
     };
   }, [searchQuery, handleSearch]);
 
+  const refreshRecordingData = useCallback(async () => {
+    setIsRefreshingData(true);
+    try {
+      const res = await authFetch("/api/stock/movements");
+      const data = (await res.json().catch(() => null)) as
+        | {
+            ok?: boolean;
+            products?: StockProductOption[];
+            message?: string;
+          }
+        | null;
+
+      if (!res.ok) {
+        setDataError(data?.message ?? "โหลดข้อมูลแท็บบันทึกสต็อกไม่สำเร็จ");
+        return;
+      }
+
+      if (!data?.ok || !Array.isArray(data.products)) {
+        setDataError("รูปแบบข้อมูลสินค้าไม่ถูกต้อง");
+        return;
+      }
+
+      setProductItems(data.products);
+      setDataError(null);
+      setLastUpdatedAt(new Date().toISOString());
+    } catch {
+      setDataError("เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setIsRefreshingData(false);
+    }
+  }, []);
+
+  const quickPresets = useMemo(() => {
+    const presets: {
+      id: string;
+      label: string;
+      movementType: MovementType;
+      adjustMode?: AdjustMode;
+      noteTemplate: string;
+    }[] = [];
+
+    if (canInbound) {
+      presets.push({
+        id: "inbound",
+        label: "รับเข้า",
+        movementType: "IN",
+        noteTemplate: "รับเข้าเพิ่มเติม",
+      });
+    }
+
+    if (canAdjust) {
+      presets.push({
+        id: "adjust",
+        label: "ปรับยอด",
+        movementType: "ADJUST",
+        adjustMode: "INCREASE",
+        noteTemplate: "ปรับยอดจากการตรวจนับ",
+      });
+      presets.push({
+        id: "waste",
+        label: "ของเสีย",
+        movementType: "ADJUST",
+        adjustMode: "DECREASE",
+        noteTemplate: "ตัดของเสีย/หมดอายุ",
+      });
+    }
+
+    return presets;
+  }, [canAdjust, canInbound]);
+
+  const applyPreset = useCallback(
+    (preset: {
+      movementType: MovementType;
+      adjustMode?: AdjustMode;
+      noteTemplate: string;
+    }) => {
+      setMovementType(preset.movementType);
+      if (preset.adjustMode) {
+        setAdjustMode(preset.adjustMode);
+      }
+      setNote(preset.noteTemplate);
+    },
+    [],
+  );
+
+  const buildIdempotencyKey = () => {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+    return `stock-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  };
+
   const selectProductFromSearch = (product: ProductListItem) => {
+    const exists = productItems.find((item) => item.productId === product.id);
+    if (!exists) {
+      const unitOptions = product.conversions.map((conv) => ({
+        unitId: conv.unitId,
+        unitCode: conv.unitCode,
+        unitNameTh: conv.unitNameTh,
+        multiplierToBase: conv.multiplierToBase,
+      }));
+
+      const nextProduct: StockProductOption = {
+        productId: product.id,
+        sku: product.sku,
+        name: product.name,
+        baseUnitId: product.baseUnitId,
+        baseUnitCode: product.baseUnitCode,
+        baseUnitNameTh: product.baseUnitNameTh || product.baseUnitCode,
+        unitOptions,
+        active: product.active,
+        onHand: 0,
+        reserved: 0,
+        available: 0,
+        outStockThreshold: product.outStockThreshold ?? null,
+        lowStockThreshold: product.lowStockThreshold ?? null,
+      };
+      setProductItems((prev) => [nextProduct, ...prev]);
+    }
+
     setProductId(product.id);
     setUnitId(product.baseUnitId);
     setSearchQuery("");
@@ -286,6 +441,7 @@ export function StockRecordingForm({
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Idempotency-Key": buildIdempotencyKey(),
       },
       body: JSON.stringify({
         productId,
@@ -294,7 +450,6 @@ export function StockRecordingForm({
         qty,
         adjustMode,
         note,
-        cost: cost ? Number(cost) : undefined,
       }),
     });
 
@@ -346,16 +501,21 @@ export function StockRecordingForm({
 
     setSuccessMessage("✅ บันทึกรายการสต็อกเรียบร้อย");
     setNote("");
-    setCost("");
     setQty("1");
+    setLastUpdatedAt(new Date().toISOString());
     setLoading(false);
-    startTransition(() => {
-      router.refresh();
-    });
   };
 
   return (
     <section className="space-y-4">
+      <StockTabToolbar
+        isRefreshing={isRefreshingData}
+        lastUpdatedAt={lastUpdatedAt}
+        onRefresh={() => {
+          void refreshRecordingData();
+        }}
+      />
+
       {/* Help Text Box */}
       <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">
         <p className="font-semibold text-blue-900">💡 ฟอร์มนี้ใช้สำหรับ:</p>
@@ -367,7 +527,44 @@ export function StockRecordingForm({
         </ul>
       </div>
 
-      <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
+      {quickPresets.length > 0 ? (
+        <article className="space-y-2 rounded-xl border bg-white p-3 shadow-sm">
+          <p className="text-xs font-medium text-slate-700">ทางลัดงานที่ใช้บ่อย</p>
+          <div className="flex flex-wrap gap-2">
+            {quickPresets.map((preset) => (
+              <Button
+                key={preset.id}
+                type="button"
+                variant="outline"
+                className="h-8 rounded-full px-3 text-xs"
+                onClick={() => applyPreset(preset)}
+                disabled={loading}
+              >
+                {preset.label}
+              </Button>
+            ))}
+          </div>
+        </article>
+      ) : null}
+
+      {isRefreshingData && productItems.length === 0 ? (
+        <StockTabLoadingState message="กำลังอัปเดตข้อมูลแท็บบันทึกสต็อก..." />
+      ) : dataError && productItems.length === 0 ? (
+        <StockTabErrorState
+          message={dataError}
+          onRetry={() => {
+            void refreshRecordingData();
+          }}
+        />
+      ) : productItems.length === 0 ? (
+        <StockTabEmptyState
+          title="ยังไม่มีสินค้าให้เลือกบันทึกสต็อก"
+          description="ตรวจสอบสิทธิ์หรือกดรีเฟรชอีกครั้ง"
+        />
+      ) : null}
+
+      {productItems.length > 0 ? (
+        <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
         <h2 className="text-sm font-semibold">บันทึกการเคลื่อนไหวสต็อก</h2>
 
         <div className="space-y-2">
@@ -587,42 +784,6 @@ export function StockRecordingForm({
           ) : null}
         </div>
 
-        {/* Advanced Section - Optional Cost */}
-        <div className="space-y-2">
-          <button
-            type="button"
-            onClick={() => setShowAdvanced(!showAdvanced)}
-            className="flex w-full items-center justify-between rounded-md bg-slate-50 px-3 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100"
-          >
-            <span>⚙️ ข้อมูลเพิ่มเติม (Optional)</span>
-            <span className="text-lg">{showAdvanced ? "▼" : "▶"}</span>
-          </button>
-
-          {showAdvanced && (
-            <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <div className="space-y-2">
-                <label className="text-xs text-muted-foreground" htmlFor="stock-cost">
-                  💰 ต้นทุน/ราคาซื้อ (ต่อหน่วยหลัก)
-                </label>
-                <input
-                  id="stock-cost"
-                  type="number"
-                  min={0}
-                  step={0.01}
-                  value={cost}
-                  onChange={(event) => setCost(event.target.value)}
-                  placeholder="เช่น 50.00 (ไม่บังคับ)"
-                  className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
-                  disabled={loading}
-                />
-                <p className="text-xs text-slate-600">
-                  ใช้เฉพาะกรณีที่รู้ราคาต้นทุน (เช่น เจ้าของนำของมาเพิ่ม) หากไม่แน่ใจให้เว้นว่างไว้
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-
         <div className="space-y-2">
           <label className="text-xs text-muted-foreground" htmlFor="stock-note">
             หมายเหตุ (ถ้ามี)
@@ -649,7 +810,23 @@ export function StockRecordingForm({
 
         {successMessage && <p className="text-sm text-emerald-700">{successMessage}</p>}
         {errorMessage && <p className="text-sm text-red-600">{errorMessage}</p>}
-      </article>
+        {dataError && productItems.length > 0 ? (
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+            <p className="text-xs text-red-700">{dataError}</p>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-7 border-red-200 bg-white px-2.5 text-xs text-red-700 hover:bg-red-100"
+              onClick={() => {
+                void refreshRecordingData();
+              }}
+            >
+              ลองใหม่
+            </Button>
+          </div>
+        ) : null}
+        </article>
+      ) : null}
 
       {/* รายการที่บันทึกเมื่อสักครู่ */}
       {recentMovements.length > 0 && (
@@ -661,7 +838,7 @@ export function StockRecordingForm({
               onClick={() => {
                 const params = new URLSearchParams(window.location.search);
                 params.set("tab", "history");
-                window.location.href = `?${params.toString()}`;
+                router.push(`?${params.toString()}`);
               }}
               className="text-xs text-blue-600 hover:text-blue-700"
             >

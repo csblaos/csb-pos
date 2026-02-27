@@ -1,0 +1,77 @@
+name: AP Reminders Cron
+
+on:
+  schedule:
+    - cron: "10 0 * * *"
+  workflow_dispatch:
+    inputs:
+      store_id:
+        description: "Optional storeId to run only one store"
+        required: false
+        type: string
+      limit_per_store:
+        description: "Optional max reminder rows per store"
+        required: false
+        type: string
+
+jobs:
+  trigger-ap-reminders:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate required secrets
+        env:
+          CRON_ENDPOINT: ${{ secrets.CRON_ENDPOINT }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_ENDPOINT}" ]; then
+            echo "Missing secret: CRON_ENDPOINT" >&2
+            exit 1
+          fi
+          if [ -z "${CRON_SECRET}" ]; then
+            echo "Missing secret: CRON_SECRET" >&2
+            exit 1
+          fi
+
+      - name: Trigger AP reminder sync endpoint
+        env:
+          CRON_ENDPOINT: ${{ secrets.CRON_ENDPOINT }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          STORE_ID: ${{ github.event.inputs.store_id }}
+          LIMIT_PER_STORE: ${{ github.event.inputs.limit_per_store }}
+        run: |
+          set -euo pipefail
+
+          base_url="${CRON_ENDPOINT%/}"
+          query=""
+
+          if [ -n "${STORE_ID:-}" ]; then
+            query="storeId=${STORE_ID}"
+          fi
+
+          if [ -n "${LIMIT_PER_STORE:-}" ]; then
+            if [ -n "${query}" ]; then
+              query="${query}&"
+            fi
+            query="${query}limitPerStore=${LIMIT_PER_STORE}"
+          fi
+
+          url="${base_url}/api/internal/cron/ap-reminders"
+          if [ -n "${query}" ]; then
+            url="${url}?${query}"
+          fi
+
+          echo "Calling: ${url}"
+          response="$(curl -sS -w '\n%{http_code}' \
+            -H "Authorization: Bearer ${CRON_SECRET}" \
+            -H "x-cron-secret: ${CRON_SECRET}" \
+            "${url}")"
+
+          body="$(printf '%s' "${response}" | sed '$d')"
+          status="$(printf '%s' "${response}" | tail -n1)"
+
+          echo "${body}"
+          if [ "${status}" -lt 200 ] || [ "${status}" -ge 300 ]; then
+            echo "AP reminder cron failed (HTTP ${status})" >&2
+            exit 1
+          fi

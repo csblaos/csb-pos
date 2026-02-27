@@ -240,9 +240,10 @@ manual fallback:
 }
 ```
 
-## 11) ตั้งงาน Cleanup Idempotency อัตโนมัติ
+## 11) ตั้งงาน Cron อัตโนมัติ (AP Reminder + Idempotency Cleanup)
 
 ระบบมี endpoint สำหรับ cron:
+- `GET /api/internal/cron/ap-reminders`
 - `GET /api/internal/cron/idempotency-cleanup`
 
 เงื่อนไข auth:
@@ -257,10 +258,21 @@ IDEMPOTENCY_STALE_PROCESSING_MINUTES=15
 ```
 
 ถ้า deploy บน Vercel:
-- มี `vercel.json` ตั้ง cron ไว้แล้วที่ `0 19 * * *` (เท่ากับ 02:00 เวลาไทย/ลาว ICT)
+- มี `vercel.json` ตั้ง cron ไว้แล้ว:
+  - `0 0 * * *` -> `/api/internal/cron/ap-reminders`
+  - `0 19 * * *` -> `/api/internal/cron/idempotency-cleanup`
+
+ถ้าใช้ Vercel Free แล้ว cron ไม่เพียงพอ/ไม่เสถียร:
+- ใช้ GitHub Actions ที่เพิ่มไว้ในโปรเจกต์:
+  - `.github/workflows/ap-reminders-cron.yml`
+- ตั้ง GitHub repository secrets:
+  - `CRON_ENDPOINT` เช่น `https://your-domain.com`
+  - `CRON_SECRET` ต้องตรงกับ env ในแอป
+- workflow นี้จะยิง `GET /api/internal/cron/ap-reminders` วันละครั้ง (00:10 UTC) และกดรันมือได้จาก `workflow_dispatch`
 
 ทดสอบ manual ได้ด้วย:
 
 ```bash
 npm run idempotency:cleanup
+curl -H "Authorization: Bearer <CRON_SECRET>" https://<your-domain>/api/internal/cron/ap-reminders
 ```

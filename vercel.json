@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/internal/cron/ap-reminders",
+      "schedule": "0 0 * * *"
+    },
+    {
       "path": "/api/internal/cron/idempotency-cleanup",
       "schedule": "0 19 * * *"
     }

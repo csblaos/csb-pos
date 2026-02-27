@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   useCallback,
   useDeferredValue,
@@ -63,6 +63,7 @@ type ProductsManagementProps = {
   canArchive: boolean;
   canViewCost: boolean;
   canUpdateCost: boolean;
+  initialStatusFilter: StatusFilter;
 };
 
 type StatusFilter = "all" | "active" | "inactive";
@@ -82,6 +83,19 @@ type MatrixVariantRow = {
   sortOrder: number;
   options: MatrixVariantOption[];
 };
+type ProductListCacheEntry = {
+  items: ProductListItem[];
+  total: number;
+  summary: ProductSummaryCounts;
+};
+type UnsavedCloseTarget = "CREATE_EDIT_SHEET" | "DETAIL_SHEET" | "COST_EDITOR";
+
+function parseStatusFilter(value: string | null): StatusFilter {
+  if (value === "active" || value === "inactive") {
+    return value;
+  }
+  return "all";
+}
 
 /* ─── Helpers ─── */
 
@@ -90,6 +104,23 @@ const PRODUCT_PAGE_SIZE = 30;
 const fmtNumber = (n: number) => n.toLocaleString("th-TH");
 const fmtPrice = (n: number, cur: StoreCurrency) =>
   `${currencySymbol(cur)}${n.toLocaleString("th-TH")}`;
+const fmtDateTime = (iso: string | null) => {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString("th-TH", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+const costSourceLabel: Record<ProductListItem["costTracking"]["source"], string> = {
+  MANUAL: "แก้ไขมือ",
+  PURCHASE_ORDER: "รับเข้า PO",
+  UNKNOWN: "ไม่พบประวัติ",
+};
 const LAO_TO_LATIN_MAP: Record<string, string> = {
   "ກ": "k",
   "ຂ": "kh",
@@ -220,16 +251,24 @@ export function ProductsManagement({
   canArchive,
   canViewCost,
   canUpdateCost,
+  initialStatusFilter,
 }: ProductsManagementProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   /* ── Data state ── */
   const [productItems, setProductItems] = useState(initialProducts);
   const [totalMatchingCount, setTotalMatchingCount] = useState(initialTotalCount);
   const [summaryCounts, setSummaryCounts] = useState(initialSummaryCounts);
   const [categories, setCategories] = useState(initialCategories);
-  const [isListLoading, setIsListLoading] = useState(false);
+  const [isFilterLoading, setIsFilterLoading] = useState(false);
+  const [isLoadMoreLoading, setIsLoadMoreLoading] = useState(false);
   const productListRequestIdRef = useRef(0);
+  const filterRequestIdRef = useRef(0);
+  const loadMoreRequestIdRef = useRef(0);
+  const productListAbortRef = useRef<AbortController | null>(null);
+  const productPageCacheRef = useRef<Map<string, ProductListCacheEntry>>(new Map());
   const hasInitializedListEffectRef = useRef(false);
   const submitIntentRef = useRef<"save" | "save-and-next">("save");
 
@@ -237,7 +276,7 @@ export function ProductsManagement({
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatusFilter);
   const [sortOption, setSortOption] = useState<SortOption>("newest");
   const [productPage, setProductPage] = useState(1);
 
@@ -248,15 +287,23 @@ export function ProductsManagement({
   const [showScannerPermissionSheet, setShowScannerPermissionSheet] = useState(false);
   const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
   const [isDeactivateConfirmOpen, setIsDeactivateConfirmOpen] = useState(false);
+  const [showUnsavedCloseConfirm, setShowUnsavedCloseConfirm] = useState(false);
+  const [isUnsavedCloseConfirmOpen, setIsUnsavedCloseConfirmOpen] = useState(false);
+  const [unsavedCloseTarget, setUnsavedCloseTarget] =
+    useState<UnsavedCloseTarget | null>(null);
   const [hasSeenScannerPermission, setHasSeenScannerPermission] = useState(false);
   const [scanContext, setScanContext] = useState<"search" | "form">("search");
   const deactivateConfirmCloseTimerRef = useRef<number | null>(null);
+  const unsavedCloseConfirmCloseTimerRef = useRef<number | null>(null);
   const detailImageOverlayRef = useRef<HTMLDivElement>(null);
   const detailImageCloseButtonRef = useRef<HTMLButtonElement>(null);
   const deactivateConfirmOverlayRef = useRef<HTMLDivElement>(null);
   const deactivateCancelButtonRef = useRef<HTMLButtonElement>(null);
+  const unsavedCloseConfirmOverlayRef = useRef<HTMLDivElement>(null);
+  const unsavedCloseConfirmCancelButtonRef = useRef<HTMLButtonElement>(null);
   const lastFocusedBeforeImagePreviewRef = useRef<HTMLElement | null>(null);
   const lastFocusedBeforeDeactivateConfirmRef = useRef<HTMLElement | null>(null);
+  const lastFocusedBeforeUnsavedCloseConfirmRef = useRef<HTMLElement | null>(null);
 
   /* ── Form ── */
   const [mode, setMode] = useState<"create" | "edit">("create");
@@ -296,6 +343,7 @@ export function ProductsManagement({
   const [detailTab, setDetailTab] = useState<DetailTab>("info");
   const [editingCost, setEditingCost] = useState(false);
   const [costDraft, setCostDraft] = useState(0);
+  const [costReasonDraft, setCostReasonDraft] = useState("");
   const [showDetailImagePreview, setShowDetailImagePreview] = useState(false);
   const detailContentRef = useRef<HTMLDivElement>(null);
   const [detailContentHeight, setDetailContentHeight] = useState<number | null>(null);
@@ -319,17 +367,79 @@ export function ProductsManagement({
   /* ── Units lookup ── */
   const unitById = useMemo(() => new Map(units.map((u) => [u.id, u])), [units]);
 
+  const buildProductListCacheKey = useCallback(
+    ({
+      keyword,
+      categoryId,
+      status,
+      sort,
+    }: {
+      keyword: string;
+      categoryId: string | null;
+      status: StatusFilter;
+      sort: SortOption;
+    }) =>
+      `${keyword}::${categoryId ?? ""}::${status}::${sort}`,
+    [],
+  );
+  const clearProductListCache = useCallback(() => {
+    productPageCacheRef.current.clear();
+  }, []);
+
+  const syncStatusFilterToUrl = useCallback(
+    (nextStatus: StatusFilter) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (nextStatus === "all") {
+        params.delete("status");
+      } else {
+        params.set("status", nextStatus);
+      }
+      const nextQuery = params.toString();
+      const href = nextQuery ? `${pathname}?${nextQuery}` : pathname;
+      router.replace(href, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
+
   /* ── Sync server data ── */
   useEffect(() => setProductItems(initialProducts), [initialProducts]);
   useEffect(() => setTotalMatchingCount(initialTotalCount), [initialTotalCount]);
   useEffect(() => setSummaryCounts(initialSummaryCounts), [initialSummaryCounts]);
   useEffect(() => setCategories(initialCategories), [initialCategories]);
+  useEffect(() => {
+    setStatusFilter(initialStatusFilter);
+  }, [initialStatusFilter]);
+
+  useEffect(() => {
+    const initialKey = buildProductListCacheKey({
+      keyword: "",
+      categoryId: null,
+      status: initialStatusFilter,
+      sort: "newest",
+    });
+    productPageCacheRef.current.set(initialKey, {
+      items: initialProducts,
+      total: initialTotalCount,
+      summary: initialSummaryCounts,
+    });
+  }, [
+    buildProductListCacheKey,
+    initialStatusFilter,
+    initialProducts,
+    initialSummaryCounts,
+    initialTotalCount,
+  ]);
+
+  useEffect(() => {
+    const statusFromQuery = parseStatusFilter(searchParams.get("status"));
+    setStatusFilter((prev) => (prev === statusFromQuery ? prev : statusFromQuery));
+  }, [searchParams]);
 
   useLayoutEffect(() => {
     if (!detailContentRef.current) return;
     const nextHeight = detailContentRef.current.getBoundingClientRect().height;
     setDetailContentHeight(nextHeight);
-  }, [detailTab, detailProduct, editingCost, costDraft]);
+  }, [detailTab, detailProduct, editingCost, costDraft, costReasonDraft]);
 
   useEffect(() => {
     const seen = window.localStorage.getItem("scanner-permission-seen") === "1";
@@ -340,6 +450,9 @@ export function ProductsManagement({
     return () => {
       if (deactivateConfirmCloseTimerRef.current !== null) {
         window.clearTimeout(deactivateConfirmCloseTimerRef.current);
+      }
+      if (unsavedCloseConfirmCloseTimerRef.current !== null) {
+        window.clearTimeout(unsavedCloseConfirmCloseTimerRef.current);
       }
     };
   }, []);
@@ -890,7 +1003,37 @@ export function ProductsManagement({
   const fetchProductsPage = useCallback(
     async ({ page, append }: { page: number; append: boolean }) => {
       const requestId = ++productListRequestIdRef.current;
-      setIsListLoading(true);
+      const keyword = deferredQuery.trim();
+      const cacheKey = buildProductListCacheKey({
+        keyword,
+        categoryId: selectedCategoryId,
+        status: statusFilter,
+        sort: sortOption,
+      });
+      const isLoadMoreRequest = append && page > 1;
+      const filterRequestId = !isLoadMoreRequest ? ++filterRequestIdRef.current : 0;
+      const loadMoreRequestId = isLoadMoreRequest ? ++loadMoreRequestIdRef.current : 0;
+      if (isLoadMoreRequest) {
+        setIsLoadMoreLoading(true);
+      } else {
+        setIsFilterLoading(true);
+
+        const cached = productPageCacheRef.current.get(cacheKey);
+        if (cached) {
+          setProductItems(cached.items);
+          setTotalMatchingCount(cached.total);
+          setSummaryCounts(cached.summary);
+          setProductPage(1);
+        } else {
+          // No cache for this filter yet — show skeleton immediately.
+          setProductItems([]);
+          setTotalMatchingCount(0);
+        }
+      }
+
+      productListAbortRef.current?.abort();
+      const controller = new AbortController();
+      productListAbortRef.current = controller;
 
       try {
         const params = new URLSearchParams({
@@ -899,7 +1042,6 @@ export function ProductsManagement({
           status: statusFilter,
           sort: sortOption,
         });
-        const keyword = deferredQuery.trim();
         if (keyword) {
           params.set("q", keyword);
         }
@@ -907,7 +1049,9 @@ export function ProductsManagement({
           params.set("categoryId", selectedCategoryId);
         }
 
-        const res = await authFetch(`/api/products?${params.toString()}`);
+        const res = await authFetch(`/api/products?${params.toString()}`, {
+          signal: controller.signal,
+        });
         const data = (await res.json().catch(() => null)) as
           | {
               message?: string;
@@ -934,17 +1078,43 @@ export function ProductsManagement({
         setTotalMatchingCount(
           typeof data?.total === "number" ? data.total : nextItems.length,
         );
-        if (data?.summary) {
-          setSummaryCounts(data.summary);
-        }
+        const nextSummary = data?.summary ?? initialSummaryCounts;
+        setSummaryCounts(nextSummary);
         setProductPage(page);
+        if (!append && page === 1) {
+          productPageCacheRef.current.set(cacheKey, {
+            items: nextItems,
+            total: typeof data?.total === "number" ? data.total : nextItems.length,
+            summary: nextSummary,
+          });
+        }
+      } catch (error) {
+        if (requestId !== productListRequestIdRef.current) return;
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+        toast.error("โหลดรายการสินค้าไม่สำเร็จ");
       } finally {
-        if (requestId === productListRequestIdRef.current) {
-          setIsListLoading(false);
+        if (isLoadMoreRequest) {
+          if (loadMoreRequestId === loadMoreRequestIdRef.current) {
+            setIsLoadMoreLoading(false);
+          }
+        } else if (filterRequestId === filterRequestIdRef.current) {
+          setIsFilterLoading(false);
+        }
+        if (productListAbortRef.current === controller) {
+          productListAbortRef.current = null;
         }
       }
     },
-    [deferredQuery, selectedCategoryId, sortOption, statusFilter],
+    [
+      buildProductListCacheKey,
+      deferredQuery,
+      initialSummaryCounts,
+      selectedCategoryId,
+      sortOption,
+      statusFilter,
+    ],
   );
 
   useEffect(() => {
@@ -955,6 +1125,46 @@ export function ProductsManagement({
 
     void fetchProductsPage({ page: 1, append: false });
   }, [fetchProductsPage]);
+
+  useEffect(() => {
+    return () => {
+      productListAbortRef.current?.abort();
+    };
+  }, []);
+
+  const hasCreateEditDraftChanges = useMemo(() => {
+    if (!showCreateSheet) return false;
+    if (form.formState.isDirty) return true;
+    if (imageFile || isImageMarkedForRemoval) return true;
+    if (matrixRows.length > 0) return true;
+    if (skuReferenceName.trim().length > 0) return true;
+    if (mode === "create") {
+      if (matrixAxisOneName.trim() !== "Color") return true;
+      if (matrixAxisOneValues.trim().length > 0) return true;
+      if (matrixUseSecondAxis) return true;
+      if (matrixAxisTwoName.trim() !== "Size") return true;
+      if (matrixAxisTwoValues.trim().length > 0) return true;
+    }
+    return false;
+  }, [
+    imageFile,
+    isImageMarkedForRemoval,
+    form.formState.isDirty,
+    matrixAxisOneName,
+    matrixAxisOneValues,
+    matrixAxisTwoName,
+    matrixAxisTwoValues,
+    matrixRows.length,
+    matrixUseSecondAxis,
+    mode,
+    showCreateSheet,
+    skuReferenceName,
+  ]);
+
+  const hasUnsavedCostDraft = useMemo(() => {
+    if (!showDetailSheet || !editingCost || !detailProduct) return false;
+    return costDraft !== detailProduct.costBase || costReasonDraft.trim().length > 0;
+  }, [costDraft, costReasonDraft, detailProduct, editingCost, showDetailSheet]);
 
   /* ─── Actions ─── */
 
@@ -1056,16 +1266,21 @@ export function ProductsManagement({
     setDetailTab("info");
     setEditingCost(false);
     setCostDraft(product.costBase);
+    setCostReasonDraft("");
     setShowDetailSheet(true);
   };
 
-  const closeCreateSheet = () => {
+  const closeCreateSheetImmediate = useCallback(() => {
     submitIntentRef.current = "save";
     setShowCreateSheet(false);
     setEditingProductId(null);
     setImageFile(null);
     setCurrentImageUrl(null);
     setIsImageMarkedForRemoval(false);
+    setMatrixAxisOneName("Color");
+    setMatrixAxisOneValues("");
+    setMatrixAxisTwoName("Size");
+    setMatrixAxisTwoValues("");
     setMatrixUseSecondAxis(false);
     setMatrixRows([]);
     setShowVariantCodeFields(false);
@@ -1076,7 +1291,121 @@ export function ProductsManagement({
     setIsVariantLabelSuggestOpen(false);
     setHasManualVariantSortOrder(false);
     setHasManualSku(false);
-  };
+  }, []);
+
+  const closeDetailSheetImmediate = useCallback(() => {
+    setShowDetailSheet(false);
+    setShowDetailImagePreview(false);
+    hideDeactivateConfirmImmediately();
+    setEditingCost(false);
+    setCostReasonDraft("");
+    if (detailProduct) {
+      setCostDraft(detailProduct.costBase);
+    }
+  }, [detailProduct]);
+
+  const closeUnsavedCloseConfirm = useCallback(() => {
+    setIsUnsavedCloseConfirmOpen(false);
+    if (unsavedCloseConfirmCloseTimerRef.current !== null) {
+      window.clearTimeout(unsavedCloseConfirmCloseTimerRef.current);
+    }
+    unsavedCloseConfirmCloseTimerRef.current = window.setTimeout(() => {
+      setShowUnsavedCloseConfirm(false);
+      setUnsavedCloseTarget(null);
+      unsavedCloseConfirmCloseTimerRef.current = null;
+    }, 200);
+  }, []);
+
+  const openUnsavedCloseConfirm = useCallback((target: UnsavedCloseTarget) => {
+    if (unsavedCloseConfirmCloseTimerRef.current !== null) {
+      window.clearTimeout(unsavedCloseConfirmCloseTimerRef.current);
+      unsavedCloseConfirmCloseTimerRef.current = null;
+    }
+    setUnsavedCloseTarget(target);
+    setShowUnsavedCloseConfirm(true);
+    window.requestAnimationFrame(() => setIsUnsavedCloseConfirmOpen(true));
+  }, []);
+
+  const requestCloseCreateSheet = useCallback(() => {
+    if (hasCreateEditDraftChanges) {
+      openUnsavedCloseConfirm("CREATE_EDIT_SHEET");
+      return;
+    }
+    closeCreateSheetImmediate();
+  }, [closeCreateSheetImmediate, hasCreateEditDraftChanges, openUnsavedCloseConfirm]);
+
+  const requestCloseDetailSheet = useCallback(() => {
+    if (hasUnsavedCostDraft) {
+      openUnsavedCloseConfirm("DETAIL_SHEET");
+      return;
+    }
+    closeDetailSheetImmediate();
+  }, [closeDetailSheetImmediate, hasUnsavedCostDraft, openUnsavedCloseConfirm]);
+
+  const discardCostDraft = useCallback(() => {
+    if (detailProduct) {
+      setCostDraft(detailProduct.costBase);
+    }
+    setCostReasonDraft("");
+    setEditingCost(false);
+  }, [detailProduct]);
+
+  const requestCancelCostEdit = useCallback(() => {
+    if (hasUnsavedCostDraft) {
+      openUnsavedCloseConfirm("COST_EDITOR");
+      return;
+    }
+    discardCostDraft();
+  }, [discardCostDraft, hasUnsavedCostDraft, openUnsavedCloseConfirm]);
+
+  const confirmUnsavedClose = useCallback(() => {
+    const target = unsavedCloseTarget;
+    closeUnsavedCloseConfirm();
+
+    if (target === "CREATE_EDIT_SHEET") {
+      closeCreateSheetImmediate();
+      return;
+    }
+
+    if (target === "DETAIL_SHEET") {
+      closeDetailSheetImmediate();
+      return;
+    }
+
+    if (target === "COST_EDITOR") {
+      discardCostDraft();
+    }
+  }, [
+    closeCreateSheetImmediate,
+    closeDetailSheetImmediate,
+    closeUnsavedCloseConfirm,
+    discardCostDraft,
+    unsavedCloseTarget,
+  ]);
+
+  const unsavedCloseConfirmContent = useMemo(() => {
+    if (unsavedCloseTarget === "CREATE_EDIT_SHEET") {
+      return {
+        title: mode === "create" ? "ยืนยันปิดฟอร์มเพิ่มสินค้า" : "ยืนยันยกเลิกการแก้ไขสินค้า",
+        description: "มีข้อมูลที่แก้ไขค้างอยู่ ถ้าปิดตอนนี้ข้อมูลที่ยังไม่บันทึกจะหาย",
+        confirmLabel: "ปิดและทิ้งข้อมูล",
+      };
+    }
+
+    if (unsavedCloseTarget === "DETAIL_SHEET") {
+      return {
+        title: "ยืนยันปิดหน้ารายละเอียดสินค้า",
+        description: "มีการแก้ไขต้นทุนที่ยังไม่บันทึก ถ้าปิดตอนนี้ข้อมูลจะหาย",
+        confirmLabel: "ปิดและทิ้งการแก้ไข",
+      };
+    }
+
+    return {
+      title: "ยืนยันยกเลิกการแก้ไขต้นทุน",
+      description: "มีการแก้ไขต้นทุนที่ยังไม่บันทึก ต้องการทิ้งการแก้ไขนี้หรือไม่",
+      confirmLabel: "ทิ้งการแก้ไข",
+    };
+  }, [mode, unsavedCloseTarget]);
 
   const duplicateProduct = (product: ProductListItem) => {
     if (!canCreate) return;
@@ -1393,6 +1722,7 @@ export function ProductsManagement({
       setHasManualVariantSortOrder(false);
       setHasManualSku(false);
       submitIntentRef.current = "save";
+      clearProductListCache();
       router.refresh();
       return;
     }
@@ -1400,7 +1730,8 @@ export function ProductsManagement({
     toast.success(mode === "create" ? "สร้างสินค้าเรียบร้อย" : "อัปเดตสินค้าเรียบร้อย");
     setLoadingKey(null);
     submitIntentRef.current = "save";
-    closeCreateSheet();
+    closeCreateSheetImmediate();
+    clearProductListCache();
     router.refresh();
   });
 
@@ -1442,6 +1773,7 @@ export function ProductsManagement({
       toast.success(
         nextActive ? "เปิดใช้งานสินค้าแล้ว" : "ปิดใช้งานสินค้าแล้ว",
       );
+      clearProductListCache();
       router.refresh();
     }
 
@@ -1539,30 +1871,127 @@ export function ProductsManagement({
     };
   }, [showDeactivateConfirm, closeDeactivateConfirm]);
 
+  useEffect(() => {
+    if (!showUnsavedCloseConfirm) return;
+    lastFocusedBeforeUnsavedCloseConfirmRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    window.requestAnimationFrame(() => {
+      unsavedCloseConfirmCancelButtonRef.current?.focus();
+    });
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeUnsavedCloseConfirm();
+        return;
+      }
+
+      if (event.key === "Tab") {
+        const overlay = unsavedCloseConfirmOverlayRef.current;
+        if (!overlay) return;
+        const focusableElements = overlay.querySelectorAll<HTMLElement>(
+          FOCUSABLE_SELECTOR,
+        );
+        if (focusableElements.length === 0) return;
+        const firstElement = focusableElements[0];
+        const lastElement = focusableElements[focusableElements.length - 1];
+        const activeElement = document.activeElement;
+
+        if (event.shiftKey) {
+          if (activeElement === firstElement || !overlay.contains(activeElement)) {
+            event.preventDefault();
+            lastElement.focus();
+          }
+          return;
+        }
+
+        if (activeElement === lastElement || !overlay.contains(activeElement)) {
+          event.preventDefault();
+          firstElement.focus();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      lastFocusedBeforeUnsavedCloseConfirmRef.current?.focus();
+      lastFocusedBeforeUnsavedCloseConfirmRef.current = null;
+    };
+  }, [showUnsavedCloseConfirm, closeUnsavedCloseConfirm]);
+
   /* ── Update cost ── */
   const saveCost = async () => {
     if (!detailProduct) return;
+    const reason = costReasonDraft.trim();
+    if (reason.length < 3) {
+      toast.error("กรุณากรอกเหตุผลอย่างน้อย 3 ตัวอักษร");
+      return;
+    }
+
     setLoadingKey(`cost-${detailProduct.id}`);
 
     const res = await authFetch(`/api/products/${detailProduct.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "update_cost", costBase: costDraft }),
+      body: JSON.stringify({
+        action: "update_cost",
+        costBase: costDraft,
+        reason,
+      }),
     });
 
+    const data = (await res.json().catch(() => null)) as
+      | { message?: string; unchanged?: boolean }
+      | null;
+
     if (!res.ok) {
-      toast.error("บันทึกต้นทุนไม่สำเร็จ");
+      toast.error(data?.message ?? "บันทึกต้นทุนไม่สำเร็จ");
     } else {
+      if (data?.unchanged) {
+        toast("ต้นทุนเท่าเดิม ไม่มีการเปลี่ยนแปลง");
+        setEditingCost(false);
+        setCostReasonDraft("");
+        setLoadingKey(null);
+        return;
+      }
+
+      const updatedAt = new Date().toISOString();
       setProductItems((prev) =>
         prev.map((p) =>
-          p.id === detailProduct.id ? { ...p, costBase: costDraft } : p,
+          p.id === detailProduct.id
+            ? {
+                ...p,
+                costBase: costDraft,
+                costTracking: {
+                  source: "MANUAL",
+                  updatedAt,
+                  actorName: "คุณ",
+                  reason,
+                  reference: null,
+                },
+              }
+            : p,
         ),
       );
       setDetailProduct((prev) =>
-        prev ? { ...prev, costBase: costDraft } : prev,
+        prev
+          ? {
+              ...prev,
+              costBase: costDraft,
+              costTracking: {
+                source: "MANUAL",
+                updatedAt,
+                actorName: "คุณ",
+                reason,
+                reference: null,
+              },
+            }
+          : prev,
       );
       toast.success("อัปเดตต้นทุนเรียบร้อย");
       setEditingCost(false);
+      setCostReasonDraft("");
+      clearProductListCache();
       router.refresh();
     }
 
@@ -1826,6 +2255,7 @@ export function ProductsManagement({
 
     if (createdCount > 0) {
       toast.success(`สร้างรุ่นย่อยสำเร็จ ${createdCount}/${matrixRows.length} รายการ`);
+      clearProductListCache();
       router.refresh();
     }
 
@@ -1835,7 +2265,7 @@ export function ProductsManagement({
 
     if (createdCount === matrixRows.length) {
       setMatrixRows([]);
-      closeCreateSheet();
+      closeCreateSheetImmediate();
     }
   };
 
@@ -2071,7 +2501,9 @@ export function ProductsManagement({
                 : "border-slate-200 bg-white"
             }`}
             onClick={() => {
-              setStatusFilter(statusFilter === card.key ? "all" : card.key);
+              const nextStatus = statusFilter === card.key ? "all" : card.key;
+              setStatusFilter(nextStatus);
+              syncStatusFilterToUrl(nextStatus);
             }}
           >
             <p className={`text-lg font-bold ${card.color}`}>
@@ -2176,17 +2608,36 @@ export function ProductsManagement({
 
       {/* ── Product list ── */}
       <div className="space-y-2">
-        {productItems.length === 0 ? (
+        {isFilterLoading && productItems.length > 0 && (
+          <p className="px-1 text-[11px] text-muted-foreground">กำลังอัปเดตรายการ...</p>
+        )}
+
+        {isFilterLoading && productItems.length === 0 ? (
+          <div className="overflow-hidden rounded-xl border bg-white shadow-sm">
+            {Array.from({ length: 8 }).map((_, index) => (
+              <div key={index} className="flex items-center gap-3 border-b px-3 py-3 last:border-b-0">
+                <div className="h-12 w-12 shrink-0 animate-pulse rounded-lg bg-slate-200" />
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <div className="h-3 w-2/3 animate-pulse rounded bg-slate-200" />
+                  <div className="h-2.5 w-1/2 animate-pulse rounded bg-slate-200" />
+                  <div className="h-2.5 w-1/3 animate-pulse rounded bg-slate-200" />
+                </div>
+                <div className="w-16 space-y-1.5">
+                  <div className="h-3 w-full animate-pulse rounded bg-slate-200" />
+                  <div className="h-2.5 w-10 animate-pulse rounded bg-slate-200" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : productItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 rounded-xl border bg-white py-12 text-center shadow-sm">
             <Package className="h-10 w-10 text-slate-300" />
             <p className="text-sm text-muted-foreground">
-              {isListLoading
-                ? "กำลังโหลดสินค้า..."
-                : query || selectedCategoryId || statusFilter !== "all"
+              {query || selectedCategoryId || statusFilter !== "all"
                 ? "ไม่พบสินค้าที่ตรงกัน"
                 : "ยังไม่มีสินค้า"}
             </p>
-            {!isListLoading &&
+            {!isFilterLoading &&
               !query &&
               !selectedCategoryId &&
               statusFilter === "all" &&
@@ -2277,9 +2728,9 @@ export function ProductsManagement({
             onClick={() => {
               void fetchProductsPage({ page: productPage + 1, append: true });
             }}
-            disabled={isListLoading}
+            disabled={isLoadMoreLoading || isFilterLoading}
           >
-            {isListLoading
+            {isLoadMoreLoading
               ? "กำลังโหลด..."
               : `โหลดเพิ่มเติม (${fmtNumber(Math.max(totalMatchingCount - productItems.length, 0))} รายการ)`}
           </Button>
@@ -2304,7 +2755,7 @@ export function ProductsManagement({
        * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
       <SlideUpSheet
         isOpen={showCreateSheet}
-        onClose={closeCreateSheet}
+        onClose={requestCloseCreateSheet}
         title={mode === "create" ? "เพิ่มสินค้าใหม่" : "แก้ไขสินค้า"}
         panelMaxWidthClass="max-w-3xl"
         closeOnBackdrop={false}
@@ -2323,7 +2774,7 @@ export function ProductsManagement({
               type="button"
               variant="outline"
               className="h-11 rounded-xl text-sm"
-              onClick={closeCreateSheet}
+              onClick={requestCloseCreateSheet}
               disabled={loadingKey !== null}
             >
               ยกเลิก
@@ -3460,11 +3911,8 @@ export function ProductsManagement({
        * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */}
       <SlideUpSheet
         isOpen={showDetailSheet}
-        onClose={() => {
-          setShowDetailSheet(false);
-          setShowDetailImagePreview(false);
-          hideDeactivateConfirmImmediately();
-        }}
+        onClose={requestCloseDetailSheet}
+        closeOnBackdrop={false}
         title={detailProduct?.name ?? "รายละเอียดสินค้า"}
         description={detailProduct ? `SKU: ${detailProduct.sku}` : undefined}
         footer={
@@ -3579,6 +4027,7 @@ export function ProductsManagement({
                     if (tab.key === "cost") {
                       setCostDraft(detailProduct.costBase);
                       setEditingCost(false);
+                      setCostReasonDraft("");
                     }
                   }}
                 >
@@ -3764,12 +4213,27 @@ export function ProductsManagement({
                           onChange={(e) => setCostDraft(Number(e.target.value))}
                           className="h-10 w-full rounded-lg border px-3 text-sm outline-none ring-blue-500 focus:ring-2"
                         />
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-slate-700">
+                            เหตุผลที่แก้ไขต้นทุน
+                          </label>
+                          <textarea
+                            value={costReasonDraft}
+                            onChange={(event) => setCostReasonDraft(event.target.value)}
+                            maxLength={240}
+                            placeholder="เช่น ปรับจากใบกำกับล่าสุด, แก้ค่าที่คีย์ผิด"
+                            className="min-h-20 w-full rounded-lg border px-3 py-2 text-sm outline-none ring-blue-500 focus:ring-2"
+                          />
+                          <p className="text-[11px] text-slate-500">
+                            ต้องกรอกอย่างน้อย 3 ตัวอักษร เพื่อเก็บ audit trail
+                          </p>
+                        </div>
                         <div className="flex gap-2">
                           <Button
                             type="button"
                             variant="outline"
                             className="h-9 flex-1 text-xs"
-                            onClick={() => setEditingCost(false)}
+                            onClick={requestCancelCostEdit}
                             disabled={loadingKey !== null}
                           >
                             ยกเลิก
@@ -3778,7 +4242,9 @@ export function ProductsManagement({
                             type="button"
                             className="h-9 flex-1 text-xs"
                             onClick={saveCost}
-                            disabled={loadingKey !== null}
+                            disabled={
+                              loadingKey !== null || costReasonDraft.trim().length < 3
+                            }
                           >
                             {loadingKey === `cost-${detailProduct.id}`
                               ? "กำลังบันทึก..."
@@ -3832,12 +4298,55 @@ export function ProductsManagement({
                           </div>
                         )}
 
+                        <div className="rounded-lg border border-slate-200 bg-white px-3 py-2.5">
+                          <p className="text-xs font-medium text-slate-700">ที่มาของต้นทุนล่าสุด</p>
+                          <div className="mt-1 space-y-1 text-xs text-slate-600">
+                            <p>
+                              แหล่งที่มา:{" "}
+                              <span className="font-medium text-slate-800">
+                                {costSourceLabel[detailProduct.costTracking.source]}
+                              </span>
+                            </p>
+                            <p>
+                              อัปเดตเมื่อ:{" "}
+                              <span className="font-medium text-slate-800">
+                                {fmtDateTime(detailProduct.costTracking.updatedAt)}
+                              </span>
+                            </p>
+                            <p>
+                              โดย:{" "}
+                              <span className="font-medium text-slate-800">
+                                {detailProduct.costTracking.actorName ?? "—"}
+                              </span>
+                            </p>
+                            {detailProduct.costTracking.reference && (
+                              <p>
+                                อ้างอิง:{" "}
+                                <span className="font-medium text-slate-800">
+                                  {detailProduct.costTracking.reference}
+                                </span>
+                              </p>
+                            )}
+                            {detailProduct.costTracking.reason && (
+                              <p>
+                                หมายเหตุ:{" "}
+                                <span className="font-medium text-slate-800">
+                                  {detailProduct.costTracking.reason}
+                                </span>
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
                         {canUpdateCost && (
                           <Button
                             type="button"
                             variant="outline"
                             className="h-9 w-full text-xs"
-                            onClick={() => setEditingCost(true)}
+                            onClick={() => {
+                              setEditingCost(true);
+                              setCostReasonDraft("");
+                            }}
                             disabled={loadingKey !== null}
                           >
                             แก้ไขต้นทุน
@@ -3911,6 +4420,62 @@ export function ProductsManagement({
                 sizes="100vw"
                 priority
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showUnsavedCloseConfirm && (
+        <div
+          ref={unsavedCloseConfirmOverlayRef}
+          className={`fixed inset-0 z-[92] flex items-center justify-center p-4 transition-opacity duration-200 ${
+            isUnsavedCloseConfirmOpen
+              ? "bg-black/50 opacity-100"
+              : "pointer-events-none bg-black/0 opacity-0"
+          }`}
+        >
+          <button
+            type="button"
+            className="absolute inset-0"
+            aria-label="ปิดกล่องยืนยัน"
+            onClick={closeUnsavedCloseConfirm}
+          />
+          <div
+            className={`relative z-10 w-full max-w-sm rounded-2xl bg-white p-4 shadow-2xl transition-all duration-200 ${
+              isUnsavedCloseConfirmOpen
+                ? "translate-y-0 scale-100 opacity-100"
+                : "translate-y-2 scale-95 opacity-0"
+            }`}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="unsaved-close-title"
+            aria-describedby="unsaved-close-description"
+          >
+            <p id="unsaved-close-title" className="text-sm font-semibold text-slate-900">
+              {unsavedCloseConfirmContent.title}
+            </p>
+            <p id="unsaved-close-description" className="mt-2 text-xs text-slate-600">
+              {unsavedCloseConfirmContent.description}
+            </p>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button
+                ref={unsavedCloseConfirmCancelButtonRef}
+                type="button"
+                variant="outline"
+                className="h-10"
+                onClick={closeUnsavedCloseConfirm}
+                disabled={loadingKey !== null}
+              >
+                กลับไปแก้ไข
+              </Button>
+              <Button
+                type="button"
+                className="h-10"
+                onClick={confirmUnsavedClose}
+                disabled={loadingKey !== null}
+              >
+                {unsavedCloseConfirmContent.confirmLabel}
+              </Button>
             </div>
           </div>
         </div>

@@ -22,6 +22,7 @@ import {
   clearClientAuthToken,
   setClientAuthToken,
 } from "@/lib/auth/client-token";
+import { clearPurchaseLocalStorage } from "@/lib/purchases/client-storage";
 import {
   formatLaosAddress,
   getDistrictsByProvinceId,
@@ -378,6 +379,7 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
       });
     } finally {
       clearClientAuthToken();
+      clearPurchaseLocalStorage();
       setIsCancelConfirmOpen(false);
       setIsCancelling(false);
       router.replace("/login");

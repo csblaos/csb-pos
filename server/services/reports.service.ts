@@ -7,10 +7,16 @@ import { db } from "@/lib/db/client";
 import { stores } from "@/lib/db/schema";
 import {
   getGrossProfitSummary,
+  getOutstandingPurchaseRows,
+  getPurchaseApAgingSummary,
+  getPurchaseFxDeltaSummary,
   getSalesByChannel,
   getSalesSummary,
   getTopProducts,
   type GrossProfitSummary,
+  type PurchaseApAgingSummary,
+  type PurchaseFxDeltaSummary,
+  type PurchaseOutstandingRow,
   type SalesByChannelRow,
   type SalesSummary,
   type TopProductRow,
@@ -29,6 +35,8 @@ export type ReportsViewData = {
   topProducts: TopProductRow[];
   salesByChannel: SalesByChannelRow[];
   grossProfit: GrossProfitSummary;
+  purchaseFx: PurchaseFxDeltaSummary;
+  purchaseApAging: PurchaseApAgingSummary;
 };
 
 export async function invalidateReportsOverviewCache(
@@ -66,13 +74,20 @@ export async function getReportsViewData(params: {
       .limit(1)
       .then((rows) => rows[0] ?? null),
   ]);
+  const storeCurrency = (storeRow?.currency ?? "LAK") as "LAK" | "THB" | "USD";
+  const [purchaseFx, purchaseApAging] = await Promise.all([
+    getPurchaseFxDeltaSummary(params.storeId, storeCurrency),
+    getPurchaseApAgingSummary(params.storeId, storeCurrency),
+  ]);
 
   const response: ReportsViewData = {
-    storeCurrency: storeRow?.currency ?? "LAK",
+    storeCurrency,
     salesSummary,
     topProducts,
     salesByChannel,
     grossProfit,
+    purchaseFx,
+    purchaseApAging,
   };
 
   if (useCache) {
@@ -80,4 +95,18 @@ export async function getReportsViewData(params: {
   }
 
   return response;
+}
+
+export async function getOutstandingPurchaseRowsForExport(storeId: string) {
+  const [storeRow] = await db
+    .select({ currency: stores.currency })
+    .from(stores)
+    .where(eq(stores.id, storeId))
+    .limit(1);
+  const storeCurrency = (storeRow?.currency ?? "LAK") as "LAK" | "THB" | "USD";
+  const rows = await getOutstandingPurchaseRows(storeId, storeCurrency);
+  return {
+    storeCurrency,
+    rows,
+  } satisfies { storeCurrency: string; rows: PurchaseOutstandingRow[] };
 }

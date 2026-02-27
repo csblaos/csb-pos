@@ -4,7 +4,7 @@ import { and, eq, inArray, or } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db/client";
-import { productUnits, products, units } from "@/lib/db/schema";
+import { auditEvents, productUnits, products, units } from "@/lib/db/schema";
 import {
   RBACError,
   enforcePermission,
@@ -12,6 +12,7 @@ import {
   toRBACErrorResponse,
 } from "@/lib/rbac/access";
 import { normalizeProductPayload, updateProductSchema } from "@/lib/products/validation";
+import { buildAuditEventValues } from "@/server/services/audit.service";
 import {
   deleteProductImageFromR2,
   uploadProductImageToR2,
@@ -134,7 +135,7 @@ export async function PATCH(
       }
 
       const [targetProduct] = await db
-        .select({ id: products.id })
+        .select({ id: products.id, costBase: products.costBase, name: products.name })
         .from(products)
         .where(and(eq(products.id, productId), eq(products.storeId, storeId)))
         .limit(1);
@@ -143,10 +144,45 @@ export async function PATCH(
         return NextResponse.json({ message: "ไม่พบสินค้า" }, { status: 404 });
       }
 
-      await db
-        .update(products)
-        .set({ costBase: parsed.data.costBase })
-        .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
+      const nextCostBase = parsed.data.costBase;
+      const reason = parsed.data.reason;
+      if (nextCostBase === targetProduct.costBase) {
+        return NextResponse.json({ ok: true, unchanged: true });
+      }
+
+      await db.transaction(async (tx) => {
+        await tx
+          .update(products)
+          .set({ costBase: nextCostBase })
+          .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
+
+        await tx.insert(auditEvents).values(
+          buildAuditEventValues({
+            scope: "STORE",
+            storeId,
+            actorUserId: session.userId,
+            actorName: session.displayName,
+            actorRole: session.activeRoleName,
+            action: "product.cost.manual_update",
+            entityType: "product",
+            entityId: productId,
+            metadata: {
+              source: "MANUAL",
+              productName: targetProduct.name,
+              reason,
+              previousCostBase: targetProduct.costBase,
+              nextCostBase,
+            },
+            before: {
+              costBase: targetProduct.costBase,
+            },
+            after: {
+              costBase: nextCostBase,
+            },
+            request,
+          }),
+        );
+      });
 
       return NextResponse.json({ ok: true });
     }

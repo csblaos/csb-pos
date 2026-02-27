@@ -2,9 +2,193 @@
 
 ## Snapshot Date
 
-- February 26, 2026
+- February 27, 2026
 
 ## Changed (ล่าสุด)
+
+- เพิ่ม custom confirm ป้องกันการปิดฟอร์มสินค้าโดยไม่ตั้งใจ:
+  - modal `เพิ่มสินค้า/แก้ไขสินค้า`: ถ้ามี draft ค้างแล้วกด `ยกเลิก` หรือ `X` จะมี dialog ยืนยันก่อนปิด
+  - modal `Product Detail` ตอน `แก้ไขต้นทุน`: ถ้ามีการแก้ไขค้างแล้วกด `ยกเลิก` ในฟอร์มต้นทุนหรือกด `X` ปิดรายละเอียด จะมี dialog ยืนยันก่อนทิ้งข้อมูล
+  - ถ้าไม่มีการแก้ไขค้าง ระบบจะปิดได้ทันทีเหมือนเดิม
+
+- ปรับ UX modal `Product Detail` ในหน้า `/products`:
+  - ปิดการปิดด้วย backdrop แล้ว (`closeOnBackdrop=false`)
+  - ตอนคลิกนอก modal จะไม่ปิด เพื่อลดการเสีย context ระหว่างดูข้อมูลสินค้า
+
+- ปรับ default filter ของ `PO Operations`:
+  - ค่าเริ่มต้นในรายการ PO เปลี่ยนจาก `ทั้งหมด` เป็น `งานเปิด (OPEN)` เพื่อลดงานที่ปิดแล้วในมุมมองแรก
+  - sync URL ของ `poStatus` ให้ถือ `OPEN` เป็น default: ถ้าเป็น `OPEN` จะไม่เขียน query, แต่ถ้าเลือก `ทั้งหมด` หรือสถานะอื่นจะเขียน query เพื่อแชร์/refresh ได้มุมมองเดิม
+  - ตอนล้าง shortcut/preset จะกลับมาที่ `OPEN` ตาม default ใหม่ และ empty-state ใน `OPEN` ยังมีปุ่มสร้าง PO ให้ใช้งานต่อได้ทันที
+
+- ปรับ UX modal `Create PO` ให้กันปิดฟอร์มโดยไม่ตั้งใจ:
+  - เมื่อมีข้อมูลค้างในฟอร์ม ถ้ากด `ยกเลิก` หรือกด `X` จะขึ้น custom confirm ก่อนปิด
+  - ผู้ใช้เลือกได้ว่าจะ `กลับไปแก้ไข` หรือ `ปิดและทิ้งข้อมูล`
+  - กรณีฟอร์มยังว่าง (ไม่มี draft) จะปิดได้ทันทีเหมือนเดิม
+
+- เพิ่ม `Bulk settle` จาก workspace `AP by Supplier`:
+  - ใน panel statement สามารถติ๊กเลือกหลาย PO แล้วกด `บันทึกชำระแบบกลุ่ม`
+  - ใช้ endpoint เดิม `POST /api/stock/purchase-orders/[poId]/settle` แบบลำดับราย PO (ไม่เพิ่ม schema/API ใหม่)
+  - รองรับ `ยอดชำระรวมตาม statement` (optional) เพื่อ auto-allocate ตาม due date เก่าสุดก่อน (`oldest due first`)
+  - รองรับแสดง progress และรายการที่ fail ราย PO พร้อมข้อความจาก API
+  - หลังจบงานจะ refresh ทั้ง list/AP panel เพื่อ sync KPI และยอดค้าง
+
+- รองรับ flow “รับของก่อน ค่อยใส่ค่าขนส่งปลายเดือน” ใน PO:
+  - เพิ่ม endpoint `POST /api/stock/purchase-orders/[poId]/apply-extra-cost` (idempotency + audit)
+  - เพิ่ม service `applyPurchaseOrderExtraCostFlow`:
+    - อนุญาตเฉพาะ PO สถานะ `RECEIVED` ที่ยังไม่ `PAID`
+    - บล็อกกรณียอดรวมใหม่ต่ำกว่ายอดที่ชำระแล้ว
+    - อัปเดต `shippingCost/otherCost/otherCostNote` และคำนวณ `landedCostPerUnit` ของรายการ PO ใหม่ตาม `qtyReceived`
+  - เพิ่ม UI ใน PO Detail (`/stock?tab=purchase`) ปุ่ม `อัปเดตค่าส่ง/ค่าอื่น` + ฟอร์มกรอกยอดและ preview ยอดคงค้างใหม่
+  - ข้อจำกัด MVP: อัปเดต AP/Outstanding ทันที แต่ไม่ recost สินค้าย้อนย้อนหลัง
+
+- เพิ่ม notification workflow สำหรับ AP due/overdue (cron + in-app inbox + mute/snooze):
+  - เพิ่ม cron endpoint `GET /api/internal/cron/ap-reminders` (auth ด้วย `CRON_SECRET`) เพื่อ sync แจ้งเตือนจาก `getPurchaseApDueReminders`
+  - เพิ่ม schema `notification_inbox` (dedupe ต่อ PO+due status) และ `notification_rules` (mute/snooze ราย PO)
+  - เพิ่ม API ฝั่ง settings:
+    - `GET/PATCH /api/settings/notifications/inbox` (list inbox + mark read/unread/resolve)
+    - `PATCH /api/settings/notifications/rules` (snooze/mute/clear)
+  - ปรับหน้า `/settings/notifications` จากหน้า static เป็น in-app inbox ใช้งานจริง พร้อม action `อ่านแล้ว`, `ปิดรายการ`, `Snooze`, `Mute`
+  - เพิ่ม quick inbox ที่ navbar (`AppTopNav`): bell badge, preview รายการล่าสุด, action `อ่านแล้ว`, และลิงก์ไปหน้า AP/Notification Center
+  - ปรับ quick inbox บนจอ non-desktop (`<1024px`) ให้ใช้ popover card แบบเดียวกับ desktop (ไม่ full-screen) โดย render fixed-centered (portal) และจำกัดความสูง `~68dvh` เพื่อลดการล้นจอ/ล้นซ้าย
+  - ปรับปุ่ม `เปลี่ยนร้าน` ใน navbar เป็น compact icon-first และซ่อนเมื่ออยู่หน้า `/settings/stores`
+  - เพิ่ม graceful fallback ที่ `GET /api/settings/notifications/inbox` กรณี schema notification ยังไม่พร้อม: คืนรายการว่าง + warning แทน 500
+  - เพิ่มข้อความแนะนำชัดเจนใน `PATCH /api/settings/notifications/inbox` (503) เมื่อ schema notification ยังไม่พร้อม เพื่อให้ผู้ดูแลรัน `npm run db:repair` และ `npm run db:migrate`
+  - เพิ่ม cron schedule ใน `vercel.json` สำหรับ Vercel Hobby (`0 0 * * *` UTC) เพื่อรันวันละครั้ง
+  - เพิ่ม GitHub Actions workflow `.github/workflows/ap-reminders-cron.yml` เป็น external scheduler fallback (schedule `10 0 * * *` UTC + manual dispatch)
+
+- ปรับ UX หน้า `/stock?tab=purchase` ให้เป็น workspace-first:
+  - ใน modal `Create PO` (Step 1) ช่อง `ชื่อซัพพลายเออร์` เปลี่ยนเป็น hybrid input: เลือกชื่อจากรายการเดิม (ดึงจาก PO history ด้วย `datalist`) หรือพิมพ์ชื่อใหม่แบบ manual ได้ในช่องเดียว (ยังไม่เพิ่ม supplier master/schema)
+  - ใน modal `Create PO` (Step 2) เพิ่มปุ่ม `ดูสินค้าทั้งหมด/ซ่อนรายการสินค้า` เพื่อเปิด list picker สินค้าโดยไม่ต้องพิมพ์ก่อน พร้อมคงช่องค้นหาเดิม (ชื่อ/SKU)
+  - modal `Create PO` ปิดการปิดด้วย backdrop (กดนอก modal ไม่ปิด) และเพิ่มปุ่ม `ยกเลิก` ที่ footer เพื่อให้มีทางออกที่ชัดเจนทุก step
+  - แยกบล็อก `โหมดการทำงาน` (workspace tabs) ออกจากบล็อก KPI/shortcut เพื่อไม่ให้ผู้ใช้สับสนระหว่าง navigation กับตัวเลขสรุป
+    - เพิ่ม summary strip ด้านบน (`Open PO`, `Pending Rate`, `Overdue AP`, `Outstanding`) เป็น KPI summary-only (ไม่คลิก, สีการ์ดคงที่ไม่ highlight ตาม preset) และใช้ saved preset chip เป็น shortcut (พาไป workspace + ตั้งตัวกรองด่วน)
+    - เพิ่ม workspace switcher 3 โหมด: `PO Operations`, `Month-End Close`, `AP by Supplier` (mobile sticky + badge count)
+  - เพิ่มแถบ `Applied filter` + ปุ่มล้าง/บันทึก preset และเพิ่ม Saved preset ต่อผู้ใช้ (localStorage) พร้อมปุ่มลบ preset
+  - เพิ่มตัวเรียง statement ใน `AP by Supplier` (due date / outstanding desc) และ empty-state guidance (`ล้างตัวกรอง statement`, `ล้างคำค้นหา supplier`)
+    - จำ workspace ล่าสุดด้วย `workspace` query + localStorage เพื่อกลับเข้าแท็บแล้วอยู่โหมดเดิมอัตโนมัติ
+    - sync ตัวกรองหลักลง URL (`poStatus`, `due`, `payment`, `sort`) เพื่อแชร์ลิงก์มุมมองเดียวกันได้
+    - แยกการแสดง section ตาม workspace เพื่อลดความยาวหน้าและลด context-switch ระหว่างงานรายวันกับงานปิดเดือน
+    - ไม่เปลี่ยน API เดิม; เป็นการปรับเฉพาะ information architecture และ interaction flow ฝั่ง UI
+    - ปรับ localStorage key ของ workspace/preset ให้ผูกราย `storeId + userId` (ไม่ปนกันข้ามผู้ใช้/ข้ามร้านบน browser เดียว) และมี fallback migrate จาก key legacy
+    - ตอน logout / force relogin หลังเปลี่ยนรหัสผ่าน จะล้าง localStorage กลุ่ม `csb.stock.purchase.*` เพื่อลดปัญหา preset ค้างบนเครื่อง shared
+    - แก้ปัญหาเด้ง workspace ตอนเปิด `AP by Supplier`: ตอน sync filter (`due/payment/sort`) จะยึด query ล่าสุดจาก URL และบังคับคง `workspace=SUPPLIER_AP` ลดโอกาสถูก overwrite จาก query state เก่า
+
+- แก้บั๊ก 500 ของ endpoint AP supplier:
+  - สาเหตุจาก SQL expression `totalPaidBase` ใน `getOutstandingPurchaseRows` ปิดวงเล็บไม่ครบ
+  - แพตช์ที่ `lib/reports/queries.ts` แล้ว (`GET /api/stock/purchase-orders/ap-by-supplier` กลับมาทำงานได้)
+
+- เพิ่ม workflow ปลายเดือนแบบกลุ่มในคิว `PO รอปิดเรท` (หน้า `/stock?tab=purchase`):
+  - เลือกหลาย PO แล้วสั่ง `ปิดเรท + ชำระปลายเดือน` ได้ครั้งเดียว
+  - บังคับเลือก PO สกุลเดียวกันต่อรอบ เพื่อใช้อัตราแลกเปลี่ยนเดียวกัน
+  - บังคับกรอก `paymentReference` รอบบัตร/รอบชำระ เพื่อ trace ย้อนหลังได้ชัด
+  - ประมวลผลแบบลำดับด้วย endpoint เดิม (`finalize-rate` -> `settle`) และแสดง progress + รายการที่ fail เป็นราย PO
+  - เพิ่มโหมด `manual-first statement reconcile`: กรอก `ยอดชำระรวมตาม statement` ได้ครั้งเดียว แล้วระบบ auto-match ลง PO ตามครบกำหนดเก่าสุดก่อน (oldest due first)
+  - ถ้าไม่กรอกยอด statement ระบบจะชำระเต็มยอดค้างทุกรายการที่เลือกเหมือนเดิม; ถ้ากรอกแล้วมีเงินเหลือ ระบบจะแจ้งยอดที่ยังไม่ถูกจับคู่
+
+- เพิ่ม reminder งานค้างชำระอัตโนมัติบน dashboard (in-app):
+  - `getDashboardViewData` เพิ่มข้อมูล `purchaseApReminder` (แยก `overdue` / `due soon`, ยอดค้าง และรายการ PO top 5)
+  - reuse logic due-status จาก `purchase-ap.service` ผ่าน `getPurchaseApDueReminders()` เพื่อให้กติกาตรงกับหน้า AP statement
+  - dashboard ทุก store type (`online/cafe/restaurant/other`) แสดงบล็อกเตือนงาน AP และลิงก์ไป `/stock?tab=purchase`
+
+- เพิ่ม AP ราย supplier แบบ drill-down ในหน้า `/stock?tab=purchase`:
+  - เพิ่ม API summary supplier `GET /api/stock/purchase-orders/ap-by-supplier`
+  - เพิ่ม API statement ราย supplier `GET /api/stock/purchase-orders/ap-by-supplier/statement` (filter `paymentStatus/dueFilter/dueFrom/dueTo/q`)
+  - เพิ่ม API export CSV ราย supplier `GET /api/stock/purchase-orders/ap-by-supplier/export-csv`
+  - เพิ่ม service กลาง `server/services/purchase-ap.service.ts` เพื่อ reuse outstanding dataset เดิมให้ตัวเลข summary/statement/export ตรงกัน
+  - เพิ่ม UI panel `AP ราย supplier` (ค้นหา supplier, drill-down statement, filter และกดเปิด PO detail ต่อได้)
+
+- เพิ่ม Phase AP/Payment Ledger สำหรับ PO:
+  - เพิ่มคอลัมน์ `purchase_orders.due_date`
+  - เพิ่มตาราง `purchase_order_payments` รองรับ entry แบบ `PAYMENT` และ `REVERSAL`
+  - ขยายสถานะ `purchase_orders.payment_status` เป็น `UNPAID | PARTIAL | PAID`
+  - ปรับ endpoint `POST /api/stock/purchase-orders/[poId]/settle` ให้รองรับยอดชำระบางส่วน (`amountBase`)
+  - เพิ่ม endpoint `POST /api/stock/purchase-orders/[poId]/payments/[paymentId]/reverse` สำหรับย้อนรายการชำระ
+  - เพิ่ม endpoint `GET /api/stock/purchase-orders/outstanding/export-csv` สำหรับ export PO ค้างชำระ + FX delta ต่อซัพพลายเออร์
+  - หน้า `/stock` tab PO เพิ่ม due date ใน create/edit, แสดงยอดชำระสะสม/ยอดค้าง, timeline ชำระ และปุ่มย้อนรายการชำระ
+  - หน้า `/reports` เพิ่มการ์ด `AP Aging (0-30/31-60/61+)` และลิงก์ export CSV
+  - อัปเดต `scripts/repair-migrations.mjs` ให้เติม `due_date`, สร้าง `purchase_order_payments`, และ sync `payment_status` จาก payment ledger
+
+- เพิ่ม Phase ถัดไปของ PO ต่างสกุลเงิน (ปิดเรทก่อนชำระ + คิวงาน + รายงาน):
+  - เพิ่ม endpoint `GET /api/stock/purchase-orders/pending-rate` สำหรับคิว `รอปิดเรท` (filter: supplier/receivedFrom/receivedTo)
+  - เพิ่ม endpoint `POST /api/stock/purchase-orders/[poId]/settle` สำหรับบันทึกชำระ PO
+  - เพิ่ม business rule: PO ต่างสกุลเงินที่ยังไม่ล็อกเรท จะบันทึกชำระไม่ได้ (ต้อง `finalize-rate` ก่อน)
+  - เพิ่มคอลัมน์ `purchase_orders.exchange_rate_initial` เพื่อเก็บเรทตั้งต้นสำหรับเทียบกับเรทจริง
+  - เพิ่มคอลัมน์ชำระ PO (`payment_status`, `paid_at`, `paid_by`, `payment_reference`, `payment_note`)
+  - หน้า `/stock` tab PO เพิ่มการ์ดคิวรอปิดเรท + filter + ปุ่มลัดเปิด detail จากคิว
+  - หน้า PO detail เพิ่ม section สถานะชำระ + ฟอร์ม `บันทึกชำระ` (พร้อม guard กรณีต่างสกุลเงินยังไม่ปิดเรท)
+  - หน้า `/reports` เพิ่มการ์ดสรุป FX delta (pending/locked/changed + ผลรวมส่วนต่างมูลค่า)
+
+- ปรับ flow PO สกุลเงินต่างประเทศ (deferred exchange rate):
+  - ตอนสร้าง PO รองรับการไม่กรอก `exchangeRate` (ตั้งเป็นสถานะ `รอปิดเรท`)
+  - เพิ่ม endpoint `POST /api/stock/purchase-orders/[poId]/finalize-rate` สำหรับปิดเรทจริงภายหลัง
+  - เพิ่มคอลัมน์ใน `purchase_orders` เพื่อเก็บสถานะเรท (`exchange_rate_locked_at`, `exchange_rate_locked_by`, `exchange_rate_lock_note`)
+  - หน้า PO list/detail แสดงสถานะ `รอปิดเรท` และมีปุ่ม `ปิดเรท` เมื่อ PO รับสินค้าแล้วแต่ยังไม่ล็อกเรท
+
+- ปรับ UX หน้า `/products` ให้คงแท็บสถานะหลัง hard refresh:
+  - ผูกแท็บสถานะ (`ทั้งหมด/ใช้งาน/ปิดใช้งาน`) กับ URL query `status`
+  - เปิดหน้าใหม่ด้วย `?status=inactive` จะเข้าแท็บ `ปิดใช้งาน` ทันที และกดสลับแท็บแล้ว URL จะอัปเดตตาม
+
+- ปรับ UX หน้า `/stock` ให้เหลือ action รีเฟรชเดียว:
+  - เอาปุ่ม `รีเฟรช` ระดับหน้า (header) ออก
+  - ให้ใช้เฉพาะปุ่ม `รีเฟรชแท็บนี้` ใน toolbar ของแต่ละแท็บ เพื่อลดความซ้ำซ้อนและลดการกดผิด
+
+- ปรับ performance ของหน้า `/stock` tab `สั่งซื้อ (PO)` เพิ่มเติม:
+  - เพิ่ม cache รายละเอียด PO ต่อ `poId` ที่ระดับแท็บ เพื่อให้เปิดรายการเดิมซ้ำได้เร็วทันที
+  - เพิ่ม intent-driven prefetch ตอนผู้ใช้ `hover/focus/touch` แถวรายการ PO (โหลดเฉพาะรายการที่มีแนวโน้มถูกกด)
+  - ปรับ PO detail sheet ให้ใช้ cache ก่อนโหลดจริง, มีปุ่ม retry ตอนโหลด detail fail และ invalidate cache เมื่อแก้ไข/เปลี่ยนสถานะ PO
+
+- ปรับ Phase 2 ของหน้า `/stock` (History tab):
+  - เพิ่มโหมด API `GET /api/stock/movements?view=history` รองรับ server-side pagination/filter (`page`,`pageSize`,`type`,`q`,`productId`,`dateFrom`,`dateTo`)
+  - เพิ่ม query layer `getInventoryMovementsPage` และต่อผ่าน repository/service เพื่อแยก concern ชัดเจน
+  - ปรับ `StockMovementHistory` ให้ใช้ข้อมูลจาก API แบบแบ่งหน้าและกรองที่เซิร์ฟเวอร์
+  - เพิ่ม filter หลักใน UI ประวัติ: ประเภท movement + สินค้า (SKU/ชื่อ) + ช่วงวันที่
+  - เพิ่ม windowed virtualization ในรายการประวัติ เพื่อให้เลื่อนลื่นขึ้นเมื่อข้อมูลต่อหน้ามาก
+
+- ปรับ Phase 1 UX/Performance ของหน้า `/stock` (เริ่มจากไม่ใช้ prefetch แบบ bulk):
+  - `StockTabs` เปลี่ยนเป็น keep-mounted (mount เฉพาะแท็บที่เปิดแล้วคง state เดิมตอนสลับแท็บ)
+  - เพิ่มคอมโพเนนต์กลาง `stock-tab-feedback` สำหรับ state มาตรฐานต่อแท็บ: loading skeleton / empty / error + retry / last updated + refresh button
+  - แท็บ `สั่งซื้อ (PO)` เพิ่ม `รีเฟรชแท็บนี้` + `อัปเดตล่าสุด`, เพิ่ม fallback error แบบ retry และปรับ loading ใน PO detail เป็น skeleton
+  - แท็บ `ประวัติ` เปลี่ยนเป็น state ฝั่ง client ที่รีเฟรชเองได้ผ่าน `GET /api/stock/movements` พร้อม last updated และ state มาตรฐาน
+  - แท็บ `บันทึกสต็อก` เพิ่ม quick preset (`รับเข้า`, `ปรับยอด`, `ของเสีย`) พร้อม note template, เพิ่มรีเฟรชข้อมูลแท็บ, และส่ง `Idempotency-Key` ตอน `POST /api/stock/movements`
+  - ปุ่ม `ดูประวัติทั้งหมด` ในแท็บบันทึกสต็อก เปลี่ยนจาก hard reload เป็น `router.push` ไป `?tab=history`
+
+- ปรับ UX หน้า `/stock` tab `สั่งซื้อ (PO)`:
+  - เอาปุ่มลัด `ตั้งค่า PDF` ออกจาก header ของรายการ PO
+  - คงการตั้งค่าเอกสารไว้ที่หน้า `/settings/pdf?tab=po` เท่านั้น เพื่อลดความรกของ action หลักในหน้า stock
+
+- แก้ปัญหา 500 ที่ `GET /api/stock/purchase-orders/[poId]` จาก schema drift:
+  - พบว่า DB บางสภาพแวดล้อมขาดคอลัมน์ `purchase_orders.updated_by/updated_at` (แต่โค้ด query คอลัมน์ดังกล่าว)
+  - อัปเดต `scripts/repair-migrations.mjs` ให้เติมคอลัมน์ `updated_by` และ `updated_at` อัตโนมัติ
+  - เพิ่ม backfill `updated_at` จาก `created_at` และสร้าง index `po_updated_at_idx`
+  - รัน `npm run db:repair` กับฐานที่ใช้งานจริงแล้วเพื่อเติมคอลัมน์ที่ขาด
+
+- ปรับ PO detail sheet ในหน้า `/stock` (tab purchase):
+  - เปลี่ยนการโหลดรายละเอียด PO ให้ตรวจ `res.ok` และแสดง error message จาก API จริง
+  - เพิ่ม fallback error ที่ชัดเจน (`โหลดรายละเอียดใบสั่งซื้อไม่สำเร็จ`, `เชื่อมต่อไม่สำเร็จ`)
+  - เพิ่ม `AbortController` เพื่อยกเลิก request เดิมเมื่อผู้ใช้สลับ/คลิก PO ใหม่เร็ว ๆ
+  - ลด false-negative ที่เคยแสดง `ไม่พบข้อมูล` แม้จริง ๆ เป็นปัญหา permission/network/server
+
+- ปรับ performance/UX การสลับแท็บสถานะในหน้า `/products`:
+  - แยก loading state ระหว่าง `filter change` กับ `load more` เพื่อลดการบล็อก UI
+  - เพิ่ม client cache สำหรับผลลัพธ์หน้าแรกของแต่ละ filter key (`q/category/status/sort`) เพื่อให้สลับแท็บกลับมาที่เดิมได้เร็วขึ้น
+  - เพิ่ม `AbortController` ยกเลิก request เก่าที่ค้างเมื่อผู้ใช้เปลี่ยนแท็บ/ฟิลเตอร์เร็ว ๆ
+  - ถ้า filter ใหม่ยังไม่มี cache จะแสดง skeleton list ทันทีระหว่างรอ API
+  - ถ้ามี cache จะแสดงข้อมูล cache ทันทีและ revalidate เบื้องหลังพร้อมข้อความ `กำลังอัปเดตรายการ...`
+
+- ปรับ Cost Governance สำหรับสินค้า:
+  - action `update_cost` (`PATCH /api/products/[productId]`) บังคับให้ส่ง `reason` อย่างน้อย 3 ตัวอักษร
+  - เมื่อแก้ต้นทุนมือ ระบบจะเขียน audit event `product.cost.manual_update` พร้อม metadata `reason`, `previousCostBase`, `nextCostBase` และ before/after
+  - เมื่อรับสินค้าเข้า PO แล้วต้นทุนเปลี่ยน ระบบจะเขียน audit event `product.cost.auto_from_po` อัตโนมัติจาก service layer
+  - Product payload มี `costTracking` เพิ่ม (`source`, `updatedAt`, `actorName`, `reason`, `reference`) เพื่อให้หน้า Product Detail แสดงที่มาของต้นทุนล่าสุดได้
+- ปรับ UI หน้า `/products` (Product Detail > tab ต้นทุน):
+  - เพิ่มฟอร์มเหตุผลก่อนบันทึกต้นทุน และปิดปุ่มบันทึกจนกว่าจะกรอกเหตุผลครบ
+  - เพิ่มบล็อกแสดงที่มาของต้นทุนล่าสุด (แก้ไขมือ/รับเข้า PO), เวลา, ผู้ทำ, หมายเหตุ, และเลขอ้างอิง PO (ถ้ามี)
+- ปรับหน้า `/reports`:
+  - เพิ่ม current-cost preview คู่กับ realized gross profit
+  - แสดง `ต้นทุนสินค้า (ประเมิน)`, `กำไรขั้นต้น (ประเมิน)`, และส่วนต่างเทียบกับ realized
+- ปรับหน้า `/stock?tab=recording`:
+  - เอา field `cost` ออกจาก payload `POST /api/stock/movements`
+  - เอา UI ช่องต้นทุน optional ออกจากฟอร์มบันทึกสต็อกเพื่อลดความเข้าใจผิด
 
 - ปรับฟอร์ม `แก้ไขสินค้า` ใน `/products`:
   - แสดงรูปสินค้าปัจจุบันก่อนเลือกไฟล์ใหม่
@@ -78,8 +262,8 @@
   - เพิ่มปุ่ม `รีเฟรช` แบบ manual ในบรรทัดเดียวกับ title `สินค้า` และวางด้านขวา
   - ปุ่มมีสถานะ `กำลังรีเฟรช...` ระหว่างโหลด และยังไม่เปิด auto-refresh
 - ปรับ UX หน้า `/stock`:
-  - เพิ่มปุ่ม `รีเฟรช` แบบ manual ในบรรทัดเดียวกับ title `สต็อก` และวางด้านขวา
-  - ปุ่มมีสถานะ `กำลังรีเฟรช...` ระหว่างโหลด และยังไม่เปิด auto-refresh
+  - เอาปุ่ม `รีเฟรช` ระดับหน้า (header) ออก เพื่อไม่ซ้ำกับ `รีเฟรชแท็บนี้`
+  - ยืนยันแนวทางให้รีเฟรชเฉพาะแท็บที่กำลังใช้งานเท่านั้น
 - ปรับ UX หน้า `/orders` บน Desktop:
   - ย้ายปุ่ม `Full Screen` ไปที่ navbar หลัก และปรับเป็นปุ่มไอคอน
   - กดซ้ำเพื่อออกจาก Full Screen ได้ และรองรับออกด้วยปุ่ม `Esc`
@@ -119,8 +303,54 @@
 
 ## Impact
 
+- ปิดงานปลายเดือนได้เร็วขึ้นมากในกรณีจ่ายบัตรแบบ top-up ก้อนเดียว (ลดการคีย์ PO ทีละใบ)
+- ลดความผิดพลาดจากการใส่ reference ไม่สม่ำเสมอ เพราะ bulk flow บังคับใช้ `paymentReference` เดียวกันทั้งรอบ
+- ผู้ใช้เห็นรายการที่สำเร็จ/ไม่สำเร็จเป็นราย PO ทันที ทำให้ retry เฉพาะรายการที่ผิดได้เร็ว
+
+- ผู้ใช้เห็นงาน AP เร่งด่วน (`เลยกำหนด` / `ใกล้ครบกำหนด`) ทันทีที่เข้า dashboard โดยไม่ต้องเข้าหน้า PO ก่อน
+- ลดโอกาสหลุดงาน due date เพราะ reminder ใช้กติกาเดียวกับหน้า statement ราย supplier
+- เพิ่มความเร็วการตามงานค้าง: จาก dashboard กดไป `/stock?tab=purchase` ต่อได้ทันที
+
+- ทีมจัดซื้อ/บัญชีไล่งาน AP ได้เร็วขึ้นจากหน้าเดียว: เห็นยอดค้างราย supplier -> กดดู statement -> เจาะเข้า PO ได้ทันที
+- ลดความคลาดเคลื่อนของตัวเลข เพราะ summary/statement/export ใช้ฐาน outstanding dataset เดียวกัน
+- ลดงาน manual ช่วงกระทบยอดปลายเดือนด้วย export CSV ราย supplier ตามตัวกรองจริงในหน้าจอ
+
+- รองรับ flow เจ้าหนี้จริง: จ่ายบางส่วนได้, ย้อนรายการได้, และติดตามยอดค้างเป็น PO-level ledger ได้ชัดเจนขึ้น
+- ลดความเสี่ยงยอดชำระคลาดเคลื่อนจากการ overwrite ค่าเดิม เพราะทุก payment/reversal ถูกเก็บเป็นรายการแยก
+- ทีมบัญชีเห็นหนี้ค้างตามอายุ (AP Aging) และ export CSV ไปกระทบยอด supplier ได้ทันที
+- `db:repair` รองรับฐานเก่าที่ยังไม่มีโครง AP ใหม่ ช่วยลดความเสี่ยง 500 หลัง deploy
+- ปิดช่องโหว่ flow การเงิน: ระบบไม่ให้บันทึกชำระ PO ต่างสกุลเงินก่อนล็อกเรทจริง ลดความเสี่ยงบันทึกต้นทุนผิด
+- ผู้ใช้มีคิวงานปลายงวดชัดเจนขึ้น (PO รับแล้วแต่ยัง `รอปิดเรท`) และกรองตามซัพพลายเออร์/ช่วงวันที่ได้
+- ทีมเห็นผลกระทบส่วนต่าง FX จากข้อมูลจริงในหน้า reports (เรทตั้งต้นเทียบเรทที่ล็อก)
+- ติดตามสถานะหนี้ PO ได้ง่ายขึ้นจาก `paymentStatus/paidAt/paidBy` ใน PO detail/list
+- ผู้ใช้สามารถสร้าง/รับสินค้า PO ต่างสกุลเงินได้แม้ยังไม่ทราบเรทจริง และกลับมาปิดเรทตอนชำระปลายงวดได้
+- ลดการเดาเรทตอนสร้าง PO และเพิ่มความชัดเจนของสถานะเรทผ่าน badge/action ในหน้า PO
+- ผู้ใช้หน้า `/products` อยู่แท็บเดิมได้หลัง hard refresh/back-forward ลดการต้องกดแท็บซ้ำในงานจริง
+- การเปิด PO detail ซ้ำ/เปิดรายการถัดไปเร็วขึ้นชัดเจน เพราะมี cache ต่อใบและ prefetch เฉพาะ intent ของผู้ใช้
+- ลดความรู้สึกหน่วงตอนแตะรายการใน PO tab โดยไม่เพิ่ม request แบบยิงล่วงหน้าเกินจำเป็น (ยังคุม network cost ได้)
+- History tab รองรับข้อมูลจำนวนมากขึ้นโดยไม่หน่วงจากการ render ทั้งรายการใน DOM พร้อมกัน
+- การกรองข้อมูลประวัติย้ายไปฝั่ง server ลด payload และเวลาค้นหาในกรณีข้อมูลเยอะ
+- ผู้ใช้ค้นประวัติได้ตรงขึ้นด้วยตัวกรองสินค้า/ช่วงวันที่ โดยไม่ต้องเลื่อนดูทีละหน้าแบบเดิม
+- การสลับแท็บในหน้า stock ไม่รีเซ็ตฟอร์ม/รายการที่ผู้ใช้กำลังทำอยู่ ลดงานซ้ำจากการกรอกใหม่
+- ผู้ใช้รีเฟรชข้อมูลเฉพาะแท็บที่ใช้งานอยู่ได้ทันที และเห็นเวลาอัปเดตล่าสุดเพื่อลดการกดซ้ำ
+- loading/empty/error ของ 3 แท็บหลักมีรูปแบบเดียวกัน ทำให้เข้าใจสถานะระบบได้เร็วขึ้น
+- ลดโอกาส submit stock movement ซ้ำจากการกดซ้ำ/เน็ตแกว่ง ด้วย `Idempotency-Key` จาก client
+- หน้า PO โฟกัส action หลักขึ้น (`สร้างใบสั่งซื้อ`) และลดความสับสนจากปุ่มตั้งค่าที่ไม่ใช่งานรายวัน
+- ลดโอกาสเกิด 500 ในหน้า PO detail จากฐานข้อมูลที่ขาด migration บางช่วง
+- flow เปลี่ยนสถานะ PO ที่เขียน `updated_by/updated_at` จะไม่พังจากคอลัมน์หายอีกในฐานที่ผ่าน `db:repair`
+- ผู้ใช้สามารถเห็นสาเหตุจริงเมื่อเปิด PO detail ไม่ได้ (เช่น ไม่มีสิทธิ์/ไม่พบ PO/ระบบผิดพลาด) แทนข้อความ generic
+- ลดอาการข้อมูล PO detail เพี้ยนจาก request ตีกัน เมื่อคลิกหลายใบติดกันเร็ว ๆ
+- การกดสลับแท็บ `ทั้งหมด/ใช้งาน/ปิดใช้งาน` ตอบสนองเร็วขึ้นอย่างเห็นได้ชัด โดยเฉพาะกรณีสลับกลับแท็บเดิม
+- ลดอาการหน้าว่าง/ค้างระหว่างโหลดด้วย skeleton loading เมื่อข้อมูลยังมาไม่ถึง
+- ลดโอกาสข้อมูลเด้งย้อนจาก request เก่า (stale response) ด้วยการ abort request ที่ถูกแทนที่
+- ปุ่ม `โหลดเพิ่มเติม` ไม่ถูกรบกวนจาก loading ของการเปลี่ยนแท็บ (และกลับกัน)
+- เพิ่มความโปร่งใสของต้นทุนสินค้า: ทุกการแก้ต้นทุนแบบ manual ต้องมีเหตุผลและมี audit trail ที่ตรวจย้อนหลังได้
+- ลดความเสี่ยงแก้ต้นทุนมือโดยไม่มีที่มา เพราะ Product Detail แสดง cost source ล่าสุดจากระบบจริง
+- ต้นทุนที่มาจากการรับเข้า PO ถูก trace ได้ระดับสินค้า (อ้างอิงเลข PO) โดยไม่ต้องเพิ่ม schema ใหม่
+- ลดความสับสนในหน้า stock recording: ไม่เหลือช่องต้นทุนที่ผู้ใช้คิดว่ามีผลกับ `products.costBase`
+- รายงานกำไรอ่านง่ายขึ้น: แยก realized margin ออกจาก current-cost preview ชัดเจน
 - ผู้ใช้รีโหลดข้อมูลสินค้าล่าสุดได้ทันทีจาก header โดยไม่ต้องรีโหลดทั้งหน้าเอง
-- ผู้ใช้รีโหลดข้อมูลสต็อกล่าสุดได้ทันทีจาก header โดยไม่ต้องเปลี่ยนแท็บหรือรีโหลดทั้งหน้าเอง
+- ผู้ใช้รีโหลดข้อมูลสต็อกล่าสุดได้ตรงแท็บที่กำลังใช้งานผ่าน `รีเฟรชแท็บนี้` โดยไม่ต้องรีโหลดทั้งหน้า
 - ลดการกดซ้ำด้วยสถานะโหลดบนปุ่มรีเฟรช
 - ลดเคสช่องกรอกใน modal ถูกคีย์บอร์ดมือถือบัง โดยเฉพาะฟอร์มสร้าง/แก้ไขสินค้า
 - ลดอาการช่องกรอกหลุดใต้คีย์บอร์ดระหว่าง animation ของคีย์บอร์ด (เช่น iOS/Android บางรุ่น)
@@ -163,6 +393,73 @@
 
 ## Files (สำคัญ)
 
+- `components/app/purchase-order-list.tsx`
+- `docs/UI_ROUTE_MAP.md`
+- `docs/DECISIONS.md`
+- `AI_CONTEXT.md`
+- `docs/HANDOFF.md`
+- `server/services/dashboard.service.ts`
+- `server/services/purchase-ap.service.ts`
+- `components/storefront/dashboard/shared.tsx`
+- `components/storefront/dashboard/types/online-dashboard.tsx`
+- `components/storefront/dashboard/types/cafe-dashboard.tsx`
+- `components/storefront/dashboard/types/restaurant-dashboard.tsx`
+- `components/storefront/dashboard/types/other-dashboard.tsx`
+- `app/(app)/dashboard/page.tsx`
+- `docs/UI_ROUTE_MAP.md`
+- `docs/DECISIONS.md`
+- `AI_CONTEXT.md`
+- `docs/HANDOFF.md`
+- `app/api/stock/purchase-orders/ap-by-supplier/route.ts`
+- `app/api/stock/purchase-orders/ap-by-supplier/statement/route.ts`
+- `app/api/stock/purchase-orders/ap-by-supplier/export-csv/route.ts`
+- `server/services/purchase-ap.service.ts`
+- `components/app/purchase-ap-supplier-panel.tsx`
+- `components/app/purchase-order-list.tsx`
+- `docs/API_INVENTORY.md`
+- `docs/UI_ROUTE_MAP.md`
+- `docs/DECISIONS.md`
+- `AI_CONTEXT.md`
+- `docs/HANDOFF.md`
+- `app/api/stock/movements/route.ts`
+- `app/api/stock/purchase-orders/[poId]/finalize-rate/route.ts`
+- `app/api/stock/purchase-orders/[poId]/payments/[paymentId]/reverse/route.ts`
+- `app/api/stock/purchase-orders/[poId]/settle/route.ts`
+- `app/api/stock/purchase-orders/outstanding/export-csv/route.ts`
+- `app/api/stock/purchase-orders/pending-rate/route.ts`
+- `server/services/stock.service.ts`
+- `server/repositories/stock.repo.ts`
+- `server/services/purchase.service.ts`
+- `server/repositories/purchase.repo.ts`
+- `lib/inventory/queries.ts`
+- `lib/purchases/validation.ts`
+- `lib/db/schema/tables.ts`
+- `components/app/stock-movement-history.tsx`
+- `components/app/stock-tabs.tsx`
+- `components/app/stock-tab-feedback.tsx`
+- `components/app/purchase-order-list.tsx`
+- `components/app/stock-movement-history.tsx`
+- `components/app/stock-recording-form.tsx`
+- `app/api/products/[productId]/route.ts`
+- `lib/products/validation.ts`
+- `lib/products/service.ts`
+- `server/services/purchase.service.ts`
+- `components/app/products-management.tsx`
+- `components/app/stock-recording-form.tsx`
+- `lib/reports/queries.ts`
+- `app/(app)/reports/page.tsx`
+- `AI_CONTEXT.md`
+- `docs/API_INVENTORY.md`
+- `docs/UI_ROUTE_MAP.md`
+- `docs/DECISIONS.md`
+- `docs/SCHEMA_MAP.md`
+- `drizzle/0029_black_thunderbolt_ross.sql`
+- `drizzle/0030_old_valkyrie.sql`
+- `drizzle/0031_loud_maximus.sql`
+- `drizzle/meta/0029_snapshot.json`
+- `drizzle/meta/0030_snapshot.json`
+- `drizzle/meta/0031_snapshot.json`
+- `drizzle/meta/_journal.json`
 - `AI_CONTEXT.md`
 - `docs/ARCHITECTURE.md`
 - `docs/CONTEXT_INDEX.md`
@@ -193,7 +490,6 @@
 - `lib/products/variant-options.ts`
 - `lib/products/variant-persistence.ts`
 - `components/app/products-header-refresh-button.tsx`
-- `components/app/stock-header-refresh-button.tsx`
 - `lib/orders/messages.ts`
 - `lib/orders/validation.ts`
 - `app/(app)/stock/page.tsx`
@@ -221,6 +517,8 @@ npm run db:repair
 npm run db:migrate
 ```
 
+ตรวจสอบเพิ่ม (optional): ตาราง `purchase_orders` ต้องมีคอลัมน์ `updated_by` และ `updated_at`
+
 3. Quality checks
 
 ```bash
@@ -229,10 +527,75 @@ npm run build
 ```
 
 4. Functional check
+- เปิด `/stock?tab=purchase` ในการ์ด `คิว PO รอปิดเรท`:
+  - เลือกหลาย PO สกุลเดียวกัน แล้วกด `ปิดเรท + ชำระปลายเดือน`
+  - กรอก `อัตราแลกเปลี่ยน`, `วันที่ชำระ`, และ `paymentReference` แล้วเริ่มประมวลผล
+  - ต้องเห็น progress ระหว่างรัน และเมื่อสำเร็จ PO เหล่านั้นต้องออกจากคิว `รอปิดเรท`
+  - เปิด PO detail แต่ละใบที่สำเร็จ ต้องเห็นสถานะชำระอัปเดตและมี `paymentReference` ตามที่กรอก
+- ทดสอบเลือก PO หลายสกุลเงินพร้อมกัน:
+  - ระบบต้องไม่ให้เริ่ม bulk และแจ้งเตือนให้เลือกทีละสกุล
+- ทดสอบให้บาง PO fail (เช่น ปิดสิทธิ์/แก้ข้อมูลระหว่างรัน):
+  - ต้องมีรายการ error ราย PO และยังคงรายการที่ fail ไว้ให้แก้แล้วรันซ้ำได้
+- เปิด `/dashboard` (ผู้ใช้ที่มีสิทธิ์ `dashboard.view` + `inventory.view`):
+  - ต้องเห็นบล็อก `งานเจ้าหนี้ค้างชำระ (AP)`
+  - ถ้ามี PO ค้างชำระเลยกำหนด/ใกล้ครบกำหนด ต้องเห็น count และยอดรวมแยกตามสถานะ
+  - รายการเตือนต้องแสดง `PO`, `supplier`, `due date`, และ `ยอดค้าง`
+  - ปุ่ม `ไปหน้า PO` ต้องพาไป `/stock?tab=purchase`
+- เปิด `/stock?tab=purchase` แล้วดูการ์ด `AP ราย supplier`:
+  - ต้องเห็นรายชื่อ supplier พร้อมยอดค้างรวม และจำนวน PO
+  - ช่องค้นหา supplier ต้องกรองรายการได้
+- เลือก supplier แล้วตรวจ statement:
+  - ต้องเห็นรายการ PO ค้างชำระของ supplier นั้น
+  - เปลี่ยน filter `payment status` / `due status` / ช่วง `due date` / ค้นหาเลข PO แล้วผลลัพธ์ต้องเปลี่ยนตาม
+  - กดรายการใน statement ต้องเปิด PO detail ใบเดียวกันได้
+- ใน panel `AP ราย supplier` กด `Export Supplier CSV`:
+  - ต้องได้ไฟล์ CSV ที่มีคอลัมน์ `supplier_name`, `po_number`, `payment_status`, `due_status`, `outstanding_base`
+  - ข้อมูลในไฟล์ต้องตรงกับ filter ปัจจุบันของ statement
+- ไปหน้า `/stock?tab=purchase` แล้วคลิก PO หลายใบติดกันเร็ว ๆ:
+  - ต้องไม่ค้างหรือสลับรายละเอียดผิดใบจาก request เก่า
+- ทดสอบกรณี API detail ล้มเหลว (เช่น ปิด network ชั่วคราว/poId ไม่ถูกต้อง):
+  - ใน sheet ต้องแสดงข้อความ error ที่สื่อสาเหตุจริง ไม่ใช่ `ไม่พบข้อมูล` ตายตัว
+- เปิด `/products` แล้วกดสลับแท็บ `ทั้งหมด` <-> `ใช้งาน` <-> `ปิดใช้งาน` ต่อเนื่องเร็ว ๆ:
+  - แท็บ active ต้องเปลี่ยนทันที
+  - ถ้าแท็บนั้นยังไม่เคยโหลด ต้องเห็น skeleton list ระหว่างรอ
+  - ถ้าเคยโหลดแล้ว ต้องเห็นข้อมูลขึ้นเร็วจาก cache และมีข้อความ `กำลังอัปเดตรายการ...` ชั่วคราว
+- ขณะสลับแท็บ ให้กด `โหลดเพิ่มเติม` ตรวจว่า loading ของปุ่มยังแยกจาก loading ของการเปลี่ยนแท็บ
+- เปิด `/products` > Product Detail > tab `ต้นทุน` > กด `แก้ไขต้นทุน`
+- ไม่กรอกเหตุผลแล้วกดบันทึก: ปุ่มต้อง disabled และ/หรือระบบเตือน
+- กรอกเหตุผล + เปลี่ยนต้นทุนแล้วบันทึก: ต้องสำเร็จ และใน tab ต้นทุนต้องเห็น `ที่มาของต้นทุนล่าสุด` เป็น `แก้ไขมือ` พร้อมเหตุผล/เวลา/ผู้ทำ
+- สร้างหรือรับเข้า PO ให้ต้นทุนสินค้าเปลี่ยน แล้วกลับไปเปิด Product Detail: source ต้องเป็น `รับเข้า PO` และมีเลข PO ในช่องอ้างอิง
+- เปิด `/stock?tab=recording` แล้วตรวจว่าไม่มีช่องกรอกต้นทุนในฟอร์มแล้ว
+- เปิด `/reports` แล้วตรวจว่าการ์ด `กำไรขั้นต้น` มีทั้ง realized และ current-cost preview พร้อมส่วนต่าง
 - เปิดหน้า `/products` แล้วตรวจว่ามีปุ่ม `รีเฟรช` อยู่ขวาบนบรรทัดเดียวกับ title `สินค้า`
 - กดปุ่ม `รีเฟรช` และตรวจว่าปุ่มแสดง `กำลังรีเฟรช...` ระหว่างโหลด
-- เปิดหน้า `/stock` แล้วตรวจว่ามีปุ่ม `รีเฟรช` อยู่ขวาบนบรรทัดเดียวกับ title `สต็อก`
-- กดปุ่ม `รีเฟรช` และตรวจว่าปุ่มแสดง `กำลังรีเฟรช...` ระหว่างโหลด
+- สร้าง PO โดยเลือกสกุลเงินต่างประเทศและไม่กรอกเรท:
+  - ต้องสร้างสำเร็จและแสดงสถานะ `รอปิดเรท`
+- เปลี่ยน PO เป็น `RECEIVED` แล้วเปิด detail:
+  - ต้องเห็นปุ่ม `ปิดเรท`
+- กด `ปิดเรท` แล้วกรอกเรทจริง:
+  - ต้องบันทึกสำเร็จ, badge/ข้อความเปลี่ยนเป็น `ปิดเรทแล้ว` และปุ่ม `ปิดเรท` หาย
+- PO ที่ `RECEIVED` และต่างสกุลเงิน:
+  - ถ้ายัง `รอปิดเรท` ปุ่ม `บันทึกชำระ` ต้องถูก disable/ถูก block ด้วยข้อความชัดเจน
+  - หลัง `ปิดเรท` แล้วกด `บันทึกชำระ` ต้องสำเร็จและแสดงสถานะ `ชำระแล้ว`
+- ทดสอบ `บันทึกชำระ` แบบบางส่วน:
+  - ใส่ยอดน้อยกว่ายอดรวม แล้วสถานะต้องเป็น `ชำระบางส่วน`
+  - กรอกยอดเกินยอดค้างต้องถูก block พร้อมข้อความเตือน
+- ใน PO detail:
+  - ต้องเห็น timeline รายการ `PAYMENT/REVERSAL`
+  - กด `ย้อนรายการ` บน payment ที่ยังไม่ถูกย้อน ต้องสำเร็จและยอดค้างเพิ่มกลับ
+- เปิด `/reports` การ์ด `AP Aging`:
+  - ต้องเห็น bucket `0-30 / 31-60 / 61+` และยอดรวมค้างชำระ
+- ทดสอบ export CSV:
+  - กด `Export CSV` จากหน้า `/reports` หรือ `/stock?tab=purchase` แล้วต้องได้ไฟล์ที่มีคอลัมน์ `supplier_name`, `po_number`, `outstanding_base`, `fx_delta_base`
+- หน้า `/stock?tab=purchase` ส่วน `คิว PO รอปิดเรท`:
+  - เปลี่ยน filter ซัพพลายเออร์/ช่วงวันที่แล้วรายการคิวต้องเปลี่ยนตาม
+  - กดรายการในคิวต้องเปิด PO detail ใบนั้นได้ทันที
+- หน้า `/reports`:
+  - ต้องมีการ์ด `ผลต่างอัตราแลกเปลี่ยน (PO)` พร้อมตัวเลข pending/locked/changed และผลรวมผลต่างมูลค่า
+- ไปที่ `/products?status=inactive` แล้ว hard refresh: ต้องคงแท็บ `ปิดใช้งาน`
+- สลับแท็บสถานะใน `/products`: URL query `status` ต้องเปลี่ยนตาม และกด back/forward แล้วแท็บต้องตาม URL
+- เปิดหน้า `/stock` แล้วตรวจว่าไม่มีปุ่ม `รีเฟรช` ระดับหน้าใน header แล้ว
+- ตรวจทุกแท็บ (`PO/Recording/History`) ว่ามีปุ่ม `รีเฟรชแท็บนี้` และทำงานได้ตามแท็บนั้น
 - เปิด `/products` > เพิ่มสินค้าใหม่ บนมือถือ แล้วโฟกัสช่องกรอกล่าง ๆ (เช่น threshold/conversion) เพื่อตรวจว่าหน้าฟอร์มเลื่อนตามและไม่ถูกคีย์บอร์ดบัง
 - เปิด `/products` > แก้ไขสินค้า บนมือถือ แล้วสลับโฟกัสช่องบน/ล่างซ้ำหลายครั้งขณะคีย์บอร์ดเปิดอยู่ เพื่อตรวจว่าช่องที่โฟกัสยังอยู่ในมุมมองเสมอ
 - เปิด modal บนมือถือแล้วลองลากลงจากแถบ header: ต้องปิดได้เหมือนลากจาก handle และปุ่ม `X` ต้องกดปิดได้ปกติ
@@ -284,7 +647,7 @@ npm run build
 
 ## Next Step (แนะนำลำดับ)
 
-1. เพิ่ม outbox worker สำหรับส่งข้อความ shipping label ไป Facebook/WhatsApp
-2. เพิ่ม retry/backoff/dead-letter สำหรับ provider HTTP
-3. เพิ่ม webhook endpoint รับ tracking update จาก provider
-4. เพิ่ม dashboard metric: label success rate, provider latency, fail reasons
+1. เพิ่ม bulk payment import/reconcile จาก CSV statement ธนาคาร/บัตร แล้ว match เข้า PO/payment ledger แบบ idempotent
+2. เพิ่ม role policy แบบละเอียดใน notification (`ใคร mute ได้`, scope ต่อ store/user/role) และเพิ่ม audit event สำหรับ action mute/snooze
+3. เพิ่มช่องทางส่งแจ้งเตือนถัดไป (email/push) โดย reuse notification_inbox เป็น source-of-truth
+4. เพิ่ม outbox worker สำหรับส่งข้อความ shipping label ไป Facebook/WhatsApp

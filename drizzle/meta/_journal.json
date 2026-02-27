@@ -204,6 +204,34 @@
       "when": 1772086504228,
       "tag": "0028_bouncy_justin_hammer",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1772166184978,
+      "tag": "0029_black_thunderbolt_ross",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1772166926105,
+      "tag": "0030_old_valkyrie",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1772168131043,
+      "tag": "0031_loud_maximus",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1772174704278,
+      "tag": "0032_light_spacker_dave",
+      "breakpoints": true
     }
   ]
 }

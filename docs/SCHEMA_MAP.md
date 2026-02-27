@@ -4,14 +4,34 @@
 
 ## Migration Status
 
-- journal entries: `29`
-- latest migration tag: `0028_bouncy_justin_hammer`
+- journal entries: `32`
+- latest migration tag: `0032_light_spacker_dave`
 - latest focus:
   - โครงสร้างสินค้าแบบ Variant (Phase 1):
     - `product_models`
     - `product_model_attributes`
     - `product_model_attribute_values`
     - คอลัมน์ใหม่ใน `products` (`model_id`, `variant_label`, `variant_options_json`, `variant_sort_order`)
+  - เพิ่ม deferred FX lock ใน `purchase_orders`:
+    - `exchange_rate_locked_at`
+    - `exchange_rate_locked_by`
+    - `exchange_rate_lock_note`
+  - เพิ่ม PO payment + FX baseline ใน `purchase_orders`:
+    - `exchange_rate_initial`
+    - `payment_status`
+    - `paid_at`
+    - `paid_by`
+    - `payment_reference`
+    - `payment_note`
+  - เพิ่ม `purchase_orders.due_date`
+  - เพิ่มตาราง ledger การชำระ `purchase_order_payments`:
+    - `entry_type` (`PAYMENT`/`REVERSAL`)
+    - `amount_base`
+    - `paid_at`
+    - `reversed_payment_id`
+  - เพิ่ม notification workflow:
+    - ตาราง `notification_inbox` (in-app inbox + dedupe key)
+    - ตาราง `notification_rules` (mute/snooze policy ต่อ entity)
 
 ## Table Inventory (High-level)
 
@@ -47,11 +67,14 @@
 - `order_shipments`
 - `purchase_orders`
 - `purchase_order_items`
+- `purchase_order_payments`
 
 ### Reliability / Audit / Integration
 
 - `idempotency_requests`
 - `audit_events`
+- `notification_inbox`
+- `notification_rules`
 - `fb_connections`
 - `wa_connections`
 
@@ -108,8 +131,14 @@
 - `purchase_orders.store_id -> stores.id`
 - `purchase_orders.created_by -> users.id`
 - `purchase_orders.updated_by -> users.id`
+- `purchase_orders.exchange_rate_locked_by -> users.id`
+- `purchase_orders.paid_by -> users.id`
 - `purchase_order_items.purchase_order_id -> purchase_orders.id`
 - `purchase_order_items.product_id -> products.id`
+- `purchase_order_payments.purchase_order_id -> purchase_orders.id`
+- `purchase_order_payments.store_id -> stores.id`
+- `purchase_order_payments.created_by -> users.id`
+- `purchase_order_payments.reversed_payment_id -> purchase_order_payments.id`
 
 ### Reliability / Audit
 
@@ -117,6 +146,9 @@
 - `idempotency_requests.created_by -> users.id`
 - `audit_events.store_id -> stores.id`
 - `audit_events.actor_user_id -> users.id`
+- `notification_inbox.store_id -> stores.id`
+- `notification_rules.store_id -> stores.id`
+- `notification_rules.updated_by -> users.id`
 
 ## Important Enums / Statuses
 
@@ -143,6 +175,17 @@
 - idempotency status: `PROCESSING | SUCCEEDED | FAILED`
 - audit scope: `STORE | SYSTEM`
 - audit result: `SUCCESS | FAIL`
+- notification topic: `PURCHASE_AP_DUE`
+- notification entity type: `PURCHASE_ORDER`
+- notification severity: `INFO | WARNING | CRITICAL`
+- notification status: `UNREAD | READ | RESOLVED`
+- notification due status: `OVERDUE | DUE_SOON`
+
+### Purchase
+
+- PO status: `DRAFT | ORDERED | SHIPPED | RECEIVED | CANCELLED`
+- PO payment status: `UNPAID | PARTIAL | PAID`
+- PO payment entry type: `PAYMENT | REVERSAL`
 
 ## Indexes Worth Knowing (Operational)
 
@@ -160,11 +203,25 @@
 - audit:
   - `audit_events_scope_occurred_at_idx`
   - `audit_events_store_occurred_at_idx`
+- notifications:
+  - unique `notification_inbox_store_dedupe_unique`
+  - `notification_inbox_store_status_detected_idx`
+  - `notification_inbox_store_topic_detected_idx`
+  - unique `notification_rules_store_topic_entity_unique`
+  - `notification_rules_store_topic_idx`
 - product variants:
   - `product_models_store_name_unique`
   - `product_model_attributes_model_code_unique`
   - `product_model_attribute_values_attribute_code_unique`
   - `products_model_variant_options_unique`
+- purchase:
+  - `po_exchange_rate_locked_at_idx`
+  - `po_payment_status_paid_at_idx`
+  - `po_due_date_idx`
+  - `po_supplier_received_at_idx`
+  - `po_payments_po_id_idx`
+  - `po_payments_store_paid_at_idx`
+  - `po_payments_reversed_id_idx`
 
 ## Schema Change Checklist
 

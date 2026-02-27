@@ -6,6 +6,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { authFetch, clearClientAuthToken } from "@/lib/auth/client-token";
+import { clearPurchaseLocalStorage } from "@/lib/purchases/client-storage";
 
 export function LogoutButton() {
   const router = useRouter();
@@ -23,6 +24,7 @@ export function LogoutButton() {
       });
     } finally {
       clearClientAuthToken();
+      clearPurchaseLocalStorage();
       setIsLoggingOut(false);
     }
     router.replace("/login");

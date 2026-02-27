@@ -188,6 +188,11 @@ export const updateProductSchema = z.discriminatedUnion("action", [
       .number({ message: "กรอกต้นทุนให้ถูกต้อง" })
       .int("ต้นทุนต้องเป็นจำนวนเต็ม")
       .min(0, "ต้นทุนต้องไม่ติดลบ"),
+    reason: z
+      .string()
+      .trim()
+      .min(3, "กรุณากรอกเหตุผลอย่างน้อย 3 ตัวอักษร")
+      .max(240, "เหตุผลยาวเกินไป"),
   }),
   z.object({
     action: z.literal("remove_image"),

@@ -53,6 +53,19 @@ export type InventoryMovementView = {
   createdByName: string | null;
 };
 
+export type InventoryMovementFilters = {
+  type?: InventoryMovementView["type"];
+  productId?: string;
+  query?: string;
+  dateFrom?: string;
+  dateTo?: string;
+};
+
+export type InventoryMovementPage = {
+  movements: InventoryMovementView[];
+  total: number;
+};
+
 export type LowStockItem = {
   productId: string;
   sku: string;
@@ -418,6 +431,93 @@ export async function getRecentInventoryMovements(
     createdAt: row.createdAt,
     createdByName: row.createdByName,
   }));
+}
+
+export async function getInventoryMovementsPage(
+  storeId: string,
+  params: {
+    page: number;
+    pageSize: number;
+    filters?: InventoryMovementFilters;
+  },
+): Promise<InventoryMovementPage> {
+  const page = Math.max(1, Math.floor(params.page));
+  const pageSize = Math.min(200, Math.max(1, Math.floor(params.pageSize)));
+  const offset = (page - 1) * pageSize;
+  const filters = params.filters;
+  const whereConditions = [eq(inventoryMovements.storeId, storeId)];
+
+  if (filters?.type) {
+    whereConditions.push(eq(inventoryMovements.type, filters.type));
+  }
+
+  if (filters?.productId) {
+    whereConditions.push(eq(inventoryMovements.productId, filters.productId));
+  }
+
+  const query = filters?.query?.trim();
+  if (query) {
+    const pattern = `%${query}%`;
+    whereConditions.push(
+      sql`(${products.sku} like ${pattern} or ${products.name} like ${pattern})`,
+    );
+  }
+
+  if (filters?.dateFrom) {
+    whereConditions.push(sql`date(${inventoryMovements.createdAt}) >= date(${filters.dateFrom})`);
+  }
+
+  if (filters?.dateTo) {
+    whereConditions.push(sql`date(${inventoryMovements.createdAt}) <= date(${filters.dateTo})`);
+  }
+
+  const whereClause = and(...whereConditions);
+
+  const [rows, totalRows] = await Promise.all([
+    db
+      .select({
+        id: inventoryMovements.id,
+        productId: products.id,
+        productSku: products.sku,
+        productName: products.name,
+        type: inventoryMovements.type,
+        qtyBase: inventoryMovements.qtyBase,
+        note: inventoryMovements.note,
+        createdAt: inventoryMovements.createdAt,
+        createdByName: users.name,
+      })
+      .from(inventoryMovements)
+      .innerJoin(products, eq(inventoryMovements.productId, products.id))
+      .leftJoin(users, eq(inventoryMovements.createdBy, users.id))
+      .where(whereClause!)
+      .orderBy(desc(inventoryMovements.createdAt), desc(inventoryMovements.id))
+      .limit(pageSize)
+      .offset(offset),
+    db
+      .select({
+        total: sql<number>`count(*)`,
+      })
+      .from(inventoryMovements)
+      .innerJoin(products, eq(inventoryMovements.productId, products.id))
+      .where(whereClause!),
+  ]);
+
+  const movements = rows.map((row) => ({
+    id: row.id,
+    productId: row.productId,
+    productSku: row.productSku,
+    productName: row.productName,
+    type: row.type,
+    qtyBase: row.qtyBase,
+    note: row.note,
+    createdAt: row.createdAt,
+    createdByName: row.createdByName,
+  }));
+
+  return {
+    movements,
+    total: Number(totalRows[0]?.total ?? 0),
+  };
 }
 
 export async function getLowStockProducts(

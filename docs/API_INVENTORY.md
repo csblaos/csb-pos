@@ -50,9 +50,9 @@
 
 | Endpoint | Methods | Access Control | Notes |
 |---|---|---|---|
-| `/api/products` | `GET` | `Permission:products.view` | รายการสินค้าแบบ pagination (`q`,`categoryId`,`status`,`sort`,`page`,`pageSize`) + คืน `total`,`hasMore`,`summary`, ข้อมูล variant (`modelName`,`variantLabel`,`variantOptions`) และค่าสต็อก (`stockOnHand`,`stockReserved`,`stockAvailable`) |
+| `/api/products` | `GET` | `Permission:products.view` | รายการสินค้าแบบ pagination (`q`,`categoryId`,`status`,`sort`,`page`,`pageSize`) + คืน `total`,`hasMore`,`summary`, ข้อมูล variant (`modelName`,`variantLabel`,`variantOptions`), ค่าสต็อก (`stockOnHand`,`stockReserved`,`stockAvailable`) และ `costTracking` (source/time/actor/reason/reference) |
 | `/api/products` | `POST` | `Permission:products.create` | เพิ่มสินค้า (รองรับ payload `variant` เพื่อผูก/สร้าง model และบันทึก options) |
-| `/api/products/[productId]` | `PATCH` | หลัก `Permission:products.update` | มี action ย่อยบางตัวใช้ `hasPermission` เพิ่ม และ action `update` รองรับ payload `variant` |
+| `/api/products/[productId]` | `PATCH` | หลัก `Permission:products.update` | มี action ย่อยบางตัวใช้ `hasPermission` เพิ่ม และ action `update` รองรับ payload `variant`; action `update_cost` ต้องมี `reason` และจะเขียน audit event `product.cost.manual_update` |
 | `/api/products/models` | `GET` | `Permission:products.view` | ดึงรายการชื่อ Model สำหรับ auto-suggest (`q`,`limit`) และคืน `nextSortOrder` + `variantLabels` เมื่อส่ง `name` (รองรับ `variantQ`) เพื่อ auto ตั้ง `ลำดับแสดง` และแนะนำ `ชื่อ Variant` |
 | `/api/products/search` | `GET` | `Permission:products.view` | search |
 | `/api/products/generate-barcode` | `POST` | `Permission:products.create` | generate barcode |
@@ -67,12 +67,21 @@
 |---|---|---|---|
 | `/api/stock/current` | `GET` | `Permission:inventory.view` | stock overview |
 | `/api/stock/products` | `GET` | `Permission:inventory.view` | stock products |
-| `/api/stock/movements` | `GET` | `Permission:inventory.view` | list movements |
-| `/api/stock/movements` | `POST` | `Permission:inventory.create` | create movement |
+| `/api/stock/movements` | `GET` | `Permission:inventory.view` | default: คืน `products + movements` สำหรับ stock overview; รองรับโหมด history (`view=history`) พร้อม query `page`,`pageSize`,`type`,`q`,`productId`,`dateFrom`,`dateTo` เพื่อ list movement แบบ server-side pagination/filter |
+| `/api/stock/movements` | `POST` | `Permission:inventory.create` | create movement (payload ไม่รับ `cost`; ใช้เฉพาะ qty/unit/movementType/adjustMode/note) |
 | `/api/stock/purchase-orders` | `GET` | `Permission:inventory.view` | list PO |
-| `/api/stock/purchase-orders` | `POST` | `Permission:inventory.create` | create PO |
+| `/api/stock/purchase-orders` | `POST` | `Permission:inventory.create` | create PO (foreign currency รองรับสร้างแบบยังไม่ปิดเรทได้ โดยไม่ส่ง `exchangeRate`) |
+| `/api/stock/purchase-orders/ap-by-supplier` | `GET` | `Permission:inventory.view` | summary เจ้าหนี้ค้างจ่ายราย supplier (รองรับ `q`,`limit`) |
+| `/api/stock/purchase-orders/ap-by-supplier/statement` | `GET` | `Permission:inventory.view` | statement AP ราย supplier (ต้องส่ง `supplierKey`; รองรับ `paymentStatus`,`dueFilter`,`dueFrom`,`dueTo`,`q`,`limit`) |
+| `/api/stock/purchase-orders/ap-by-supplier/export-csv` | `GET` | `Permission:inventory.view` | export CSV statement ราย supplier ตาม filter |
+| `/api/stock/purchase-orders/pending-rate` | `GET` | `Permission:inventory.view` | คิว PO ที่ `RECEIVED` และยัง `รอปิดเรท` รองรับ filter `supplier`,`receivedFrom`,`receivedTo`,`limit` |
 | `/api/stock/purchase-orders/[poId]` | `GET` | `Permission:inventory.view` | PO detail |
 | `/api/stock/purchase-orders/[poId]` | `PATCH,PUT` | `Permission:inventory.create` | update PO / status flow |
+| `/api/stock/purchase-orders/[poId]/finalize-rate` | `POST` | `Permission:inventory.create` | ปิดเรทจริงหลังรับสินค้าแล้ว (รองรับ idempotency) |
+| `/api/stock/purchase-orders/[poId]/settle` | `POST` | `Permission:inventory.create` | บันทึกชำระ PO แบบจ่ายบางส่วน/เต็มจำนวน (`amountBase`) และบังคับปิดเรทก่อนสำหรับ PO ต่างสกุลเงิน (รองรับ idempotency) |
+| `/api/stock/purchase-orders/[poId]/apply-extra-cost` | `POST` | `Permission:inventory.create` | อัปเดต `shippingCost/otherCost` หลังรับสินค้า (เฉพาะ PO `RECEIVED` ที่ยังไม่ `PAID`) และ recalculation landed cost ในรายการ PO (รองรับ idempotency) |
+| `/api/stock/purchase-orders/[poId]/payments/[paymentId]/reverse` | `POST` | `Permission:inventory.create` | ย้อนรายการชำระ PO รายการที่เลือก (รองรับ idempotency) |
+| `/api/stock/purchase-orders/outstanding/export-csv` | `GET` | `Permission:reports.view` | export CSV เจ้าหนี้ PO ค้างชำระ + FX delta ต่อซัพพลายเออร์ |
 
 ## Settings / Members / RBAC
 
@@ -92,6 +101,9 @@
 | `/api/settings/roles` | `GET` | `Permission:rbac.roles.view` | list roles |
 | `/api/settings/roles/[roleId]` | `GET` | `Permission:rbac.roles.view` | role detail |
 | `/api/settings/roles/[roleId]` | `PATCH` | `Permission:rbac.roles.update` | update role |
+| `/api/settings/notifications/inbox` | `GET` | `Permission:settings.view` | list in-app notification inbox (`filter`,`limit`) + summary counters; ถ้า schema notifications ยังไม่พร้อมจะ fallback เป็นรายการว่างพร้อม `warning` |
+| `/api/settings/notifications/inbox` | `PATCH` | `Permission:settings.view` | action inbox: `mark_read`,`mark_unread`,`resolve`,`mark_all_read` (ถ้า schema notifications ยังไม่พร้อมจะตอบ `503` พร้อมข้อความแนะนำ `db:repair`/`db:migrate`) |
+| `/api/settings/notifications/rules` | `PATCH` | `Permission:settings.update` | ตั้งค่า mute/snooze/clear ราย entity (`SNOOZE`,`MUTE`,`CLEAR`) |
 | `/api/settings/superadmin/payment-policy` | `GET,PATCH` | `Superadmin(SystemRole)` | global payment policy |
 
 ## Units
@@ -119,6 +131,7 @@
 
 | Endpoint | Methods | Access Control | Notes |
 |---|---|---|---|
+| `/api/internal/cron/ap-reminders` | `GET` | `CronSecret` | sync AP due/overdue เข้าตาราง `notification_inbox` และเคารพ `notification_rules` |
 | `/api/internal/cron/idempotency-cleanup` | `GET` | `CronSecret` | cleanup idempotency data |
 
 ## Notes

@@ -59,6 +59,9 @@ export default async function AppLayout({
           activeStoreLogoUrl={activeStoreProfile?.logoUrl ?? null}
           activeBranchName={session.activeBranchName}
           shellTitle={layoutPreset.shellTitle}
+          canViewNotifications={
+            permissionKeys.includes("*") || permissionKeys.includes("settings.view")
+          }
         />
         {layoutPreset.modeNoteText ? (
           <p className={`mt-2 text-xs ${layoutPreset.modeNoteClassName}`}>

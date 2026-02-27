@@ -6,12 +6,15 @@ export const createPurchaseOrderSchema = z.object({
   purchaseCurrency: z.enum(["LAK", "THB", "USD"]),
   exchangeRate: z.coerce
     .number({ message: "กรุณากรอกอัตราแลกเปลี่ยน" })
-    .positive("อัตราแลกเปลี่ยนต้องมากกว่า 0"),
+    .positive("อัตราแลกเปลี่ยนต้องมากกว่า 0")
+    .optional(),
+  exchangeRateLockNote: z.string().trim().max(240).optional().or(z.literal("")),
   shippingCost: z.coerce.number().int().min(0).default(0),
   otherCost: z.coerce.number().int().min(0).default(0),
   otherCostNote: z.string().trim().max(240).optional().or(z.literal("")),
   note: z.string().trim().max(500).optional().or(z.literal("")),
   expectedAt: z.string().trim().optional().or(z.literal("")),
+  dueDate: z.string().trim().optional().or(z.literal("")),
   items: z
     .array(
       z.object({
@@ -49,6 +52,51 @@ export const updatePOStatusSchema = z.object({
 
 export type UpdatePOStatusInput = z.output<typeof updatePOStatusSchema>;
 
+export const finalizePOExchangeRateSchema = z.object({
+  exchangeRate: z.coerce
+    .number({ message: "กรุณากรอกอัตราแลกเปลี่ยนจริง" })
+    .positive("อัตราแลกเปลี่ยนต้องมากกว่า 0"),
+  note: z.string().trim().max(240).optional().or(z.literal("")),
+});
+
+export type FinalizePOExchangeRateInput = z.output<typeof finalizePOExchangeRateSchema>;
+
+export const settlePurchaseOrderSchema = z.object({
+  amountBase: z.coerce
+    .number({ message: "กรุณากรอกยอดชำระ" })
+    .int("ยอดชำระต้องเป็นจำนวนเต็ม")
+    .positive("ยอดชำระต้องมากกว่า 0"),
+  paidAt: z.string().trim().optional().or(z.literal("")),
+  paymentReference: z.string().trim().max(120).optional().or(z.literal("")),
+  paymentNote: z.string().trim().max(240).optional().or(z.literal("")),
+});
+
+export type SettlePurchaseOrderInput = z.output<typeof settlePurchaseOrderSchema>;
+
+export const applyPurchaseOrderExtraCostSchema = z.object({
+  shippingCost: z.coerce
+    .number({ message: "กรุณากรอกค่าขนส่ง" })
+    .int("ค่าขนส่งต้องเป็นจำนวนเต็ม")
+    .min(0, "ค่าขนส่งต้องไม่ติดลบ"),
+  otherCost: z.coerce
+    .number({ message: "กรุณากรอกค่าอื่นๆ" })
+    .int("ค่าอื่นๆ ต้องเป็นจำนวนเต็ม")
+    .min(0, "ค่าอื่นๆ ต้องไม่ติดลบ"),
+  otherCostNote: z.string().trim().max(240).optional().or(z.literal("")),
+});
+
+export type ApplyPurchaseOrderExtraCostInput = z.output<
+  typeof applyPurchaseOrderExtraCostSchema
+>;
+
+export const reversePurchaseOrderPaymentSchema = z.object({
+  note: z.string().trim().max(240).optional().or(z.literal("")),
+});
+
+export type ReversePurchaseOrderPaymentInput = z.output<
+  typeof reversePurchaseOrderPaymentSchema
+>;
+
 export const updatePurchaseOrderSchema = z.object({
   supplierName: z.string().trim().max(100).optional().or(z.literal("")),
   supplierContact: z.string().trim().max(100).optional().or(z.literal("")),
@@ -62,6 +110,7 @@ export const updatePurchaseOrderSchema = z.object({
   otherCostNote: z.string().trim().max(240).optional().or(z.literal("")),
   note: z.string().trim().max(500).optional().or(z.literal("")),
   expectedAt: z.string().trim().optional().or(z.literal("")),
+  dueDate: z.string().trim().optional().or(z.literal("")),
   trackingInfo: z.string().trim().max(240).optional().or(z.literal("")),
   items: z
     .array(

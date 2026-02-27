@@ -21,6 +21,16 @@ const emptyDashboardData: DashboardViewData = {
     lowStockCount: 0,
   },
   lowStockItems: [],
+  purchaseApReminder: {
+    storeCurrency: "LAK",
+    summary: {
+      overdueCount: 0,
+      dueSoonCount: 0,
+      overdueOutstandingBase: 0,
+      dueSoonOutstandingBase: 0,
+      items: [],
+    },
+  },
 };
 
 export default async function DashboardPage() {

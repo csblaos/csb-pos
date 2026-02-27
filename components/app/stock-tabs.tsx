@@ -20,6 +20,8 @@ const tabs = [
 ] as const;
 
 type TabId = (typeof tabs)[number]["id"];
+const isTabId = (value: string | null): value is TabId =>
+  value === "recording" || value === "inventory" || value === "history" || value === "purchase";
 
 export function StockTabs({
   recordingTab,
@@ -30,12 +32,30 @@ export function StockTabs({
 }: StockTabsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [activeTab, setActiveTab] = useState<TabId>((searchParams.get("tab") as TabId) || (initialTab as TabId));
+  const tabFromQuery = searchParams.get("tab");
+  const initialActiveTab: TabId = isTabId(tabFromQuery)
+    ? tabFromQuery
+    : isTabId(initialTab)
+      ? initialTab
+      : "inventory";
+  const [activeTab, setActiveTab] = useState<TabId>(
+    initialActiveTab,
+  );
+  const [mountedTabs, setMountedTabs] = useState<Record<TabId, boolean>>(() => ({
+    inventory: initialActiveTab === "inventory",
+    purchase: initialActiveTab === "purchase",
+    recording: initialActiveTab === "recording",
+    history: initialActiveTab === "history",
+  }));
+
+  useEffect(() => {
+    setMountedTabs((prev) => ({ ...prev, [activeTab]: true }));
+  }, [activeTab]);
 
   useEffect(() => {
     const tabParam = searchParams.get("tab");
-    if (tabParam && (tabParam === "recording" || tabParam === "inventory" || tabParam === "history" || tabParam === "purchase")) {
-      setActiveTab(tabParam as TabId);
+    if (isTabId(tabParam)) {
+      setActiveTab(tabParam);
     }
   }, [searchParams]);
 
@@ -71,10 +91,18 @@ export function StockTabs({
       </div>
 
       {/* Tab content */}
-      {activeTab === "recording" && recordingTab}
-      {activeTab === "inventory" && inventoryTab}
-      {activeTab === "history" && historyTab}
-      {activeTab === "purchase" && purchaseTab}
+      <div className={activeTab === "inventory" ? "block" : "hidden"} aria-hidden={activeTab !== "inventory"}>
+        {mountedTabs.inventory ? inventoryTab : null}
+      </div>
+      <div className={activeTab === "purchase" ? "block" : "hidden"} aria-hidden={activeTab !== "purchase"}>
+        {mountedTabs.purchase ? purchaseTab : null}
+      </div>
+      <div className={activeTab === "recording" ? "block" : "hidden"} aria-hidden={activeTab !== "recording"}>
+        {mountedTabs.recording ? recordingTab : null}
+      </div>
+      <div className={activeTab === "history" ? "block" : "hidden"} aria-hidden={activeTab !== "history"}>
+        {mountedTabs.history ? historyTab : null}
+      </div>
     </div>
   );
 }

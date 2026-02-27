@@ -6,6 +6,7 @@ import {
 } from "@/lib/rbac/access";
 import { stockMovementSchema } from "@/lib/inventory/validation";
 import {
+  getStockMovementsPage,
   getStockOverview,
   postStockMovement,
   StockServiceError,
@@ -18,9 +19,95 @@ import {
   safeMarkIdempotencyFailed,
 } from "@/server/services/idempotency.service";
 
-export async function GET() {
+const HISTORY_TYPE_VALUES = new Set([
+  "IN",
+  "OUT",
+  "RESERVE",
+  "RELEASE",
+  "ADJUST",
+  "RETURN",
+]);
+
+const parsePositiveInt = (
+  value: string | null,
+  fallbackValue: number,
+  maxValue: number,
+) => {
+  if (!value) {
+    return fallbackValue;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallbackValue;
+  }
+  return Math.min(parsed, maxValue);
+};
+
+const isDateOnly = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+export async function GET(request: Request) {
   try {
     const { storeId } = await enforcePermission("inventory.view");
+    const { searchParams } = new URL(request.url);
+    const view = searchParams.get("view");
+
+    if (view === "history") {
+      const page = parsePositiveInt(searchParams.get("page"), 1, 100_000);
+      const pageSize = parsePositiveInt(searchParams.get("pageSize"), 30, 100);
+      const typeParam = searchParams.get("type");
+      const q = searchParams.get("q")?.trim() ?? "";
+      const productId = searchParams.get("productId")?.trim() ?? "";
+      const dateFromRaw = searchParams.get("dateFrom")?.trim() ?? "";
+      const dateToRaw = searchParams.get("dateTo")?.trim() ?? "";
+
+      if (dateFromRaw && !isDateOnly(dateFromRaw)) {
+        return NextResponse.json(
+          { message: "รูปแบบวันที่เริ่มต้นไม่ถูกต้อง (YYYY-MM-DD)" },
+          { status: 400 },
+        );
+      }
+
+      if (dateToRaw && !isDateOnly(dateToRaw)) {
+        return NextResponse.json(
+          { message: "รูปแบบวันที่สิ้นสุดไม่ถูกต้อง (YYYY-MM-DD)" },
+          { status: 400 },
+        );
+      }
+
+      if (dateFromRaw && dateToRaw && dateFromRaw > dateToRaw) {
+        return NextResponse.json(
+          { message: "วันที่เริ่มต้นต้องไม่มากกว่าวันที่สิ้นสุด" },
+          { status: 400 },
+        );
+      }
+
+      const normalizedType =
+        typeParam && typeParam !== "all" && HISTORY_TYPE_VALUES.has(typeParam)
+          ? (typeParam as "IN" | "OUT" | "RESERVE" | "RELEASE" | "ADJUST" | "RETURN")
+          : undefined;
+
+      const { movements, total } = await getStockMovementsPage({
+        storeId,
+        page,
+        pageSize,
+        filters: {
+          type: normalizedType,
+          productId: productId || undefined,
+          query: q || undefined,
+          dateFrom: dateFromRaw || undefined,
+          dateTo: dateToRaw || undefined,
+        },
+      });
+
+      return NextResponse.json({
+        ok: true,
+        movements,
+        page,
+        pageSize,
+        total,
+        hasMore: page * pageSize < total,
+      });
+    }
 
     const { products, movements } = await getStockOverview({
       storeId,

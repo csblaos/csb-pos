@@ -7,6 +7,7 @@ import { useCallback, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { SlideUpSheet } from "@/components/ui/slide-up-sheet";
 import { authFetch, clearClientAuthToken } from "@/lib/auth/client-token";
+import { clearPurchaseLocalStorage } from "@/lib/purchases/client-storage";
 
 type AccountPasswordSettingsProps = {
   mustChangePassword: boolean;
@@ -103,6 +104,7 @@ export function AccountPasswordSettings({ mustChangePassword }: AccountPasswordS
 
       if (data?.requireRelogin) {
         clearClientAuthToken();
+        clearPurchaseLocalStorage();
         window.setTimeout(() => {
           router.replace("/login");
           router.refresh();

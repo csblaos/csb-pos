@@ -4,6 +4,7 @@ import { alias } from "drizzle-orm/sqlite-core";
 import { db } from "@/lib/db/client";
 import { getInventoryBalancesByStoreForProducts } from "@/lib/inventory/queries";
 import {
+  auditEvents,
   productCategories,
   productModels,
   productUnits,
@@ -30,6 +31,16 @@ export type ProductConversionView = {
   multiplierToBase: number;
 };
 
+export type ProductCostTrackingSource = "MANUAL" | "PURCHASE_ORDER" | "UNKNOWN";
+
+export type ProductCostTracking = {
+  source: ProductCostTrackingSource;
+  updatedAt: string | null;
+  actorName: string | null;
+  reason: string | null;
+  reference: string | null;
+};
+
 export type ProductListItem = {
   id: string;
   sku: string;
@@ -54,6 +65,7 @@ export type ProductListItem = {
   stockOnHand: number;
   stockReserved: number;
   stockAvailable: number;
+  costTracking: ProductCostTracking;
   active: boolean;
   createdAt: string;
   conversions: ProductConversionView[];
@@ -154,6 +166,13 @@ const mapProductRows = (rows: ProductRowWithConversion[]): ProductListItem[] => 
         stockOnHand: 0,
         stockReserved: 0,
         stockAvailable: 0,
+        costTracking: {
+          source: "UNKNOWN",
+          updatedAt: null,
+          actorName: null,
+          reason: null,
+          reference: null,
+        },
         active: Boolean(row.active),
         createdAt: row.createdAt,
         conversions: [],
@@ -185,6 +204,81 @@ const mapProductRows = (rows: ProductRowWithConversion[]): ProductListItem[] => 
 
   return productsList;
 };
+
+const parseAuditMetadata = (raw: string | null): Record<string, unknown> | null => {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+const getMetadataText = (metadata: Record<string, unknown> | null, key: string) => {
+  const value = metadata?.[key];
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+};
+
+async function getLatestCostTrackingByProductIds(
+  storeId: string,
+  productIds: string[],
+): Promise<Map<string, ProductCostTracking>> {
+  if (productIds.length === 0) return new Map();
+
+  const rows = await db
+    .select({
+      entityId: auditEvents.entityId,
+      action: auditEvents.action,
+      actorName: auditEvents.actorName,
+      metadata: auditEvents.metadata,
+      occurredAt: auditEvents.occurredAt,
+    })
+    .from(auditEvents)
+    .where(
+      and(
+        eq(auditEvents.storeId, storeId),
+        eq(auditEvents.entityType, "product"),
+        inArray(auditEvents.entityId, productIds),
+        inArray(auditEvents.action, [
+          "product.cost.manual_update",
+          "product.cost.auto_from_po",
+        ]),
+      ),
+    )
+    .orderBy(desc(auditEvents.occurredAt));
+
+  const trackingByProductId = new Map<string, ProductCostTracking>();
+  for (const row of rows) {
+    if (!row.entityId || trackingByProductId.has(row.entityId)) continue;
+    const metadata = parseAuditMetadata(row.metadata);
+    const source: ProductCostTrackingSource =
+      row.action === "product.cost.manual_update"
+        ? "MANUAL"
+        : row.action === "product.cost.auto_from_po"
+          ? "PURCHASE_ORDER"
+          : "UNKNOWN";
+
+    trackingByProductId.set(row.entityId, {
+      source,
+      updatedAt: row.occurredAt ?? null,
+      actorName: row.actorName ?? null,
+      reason:
+        source === "MANUAL"
+          ? getMetadataText(metadata, "reason")
+          : getMetadataText(metadata, "note"),
+      reference:
+        source === "PURCHASE_ORDER"
+          ? getMetadataText(metadata, "poNumber")
+          : null,
+    });
+  }
+
+  return trackingByProductId;
+}
 
 const buildProductsWhere = ({
   storeId,
@@ -270,7 +364,10 @@ async function listStoreProductsByIds(
     .leftJoin(productUnits, eq(productUnits.productId, products.id))
     .leftJoin(conversionUnits, eq(productUnits.unitId, conversionUnits.id))
     .where(and(eq(products.storeId, storeId), inArray(products.id, productIds)));
-  const balances = await getInventoryBalancesByStoreForProducts(storeId, productIds);
+  const [balances, costTrackingByProductId] = await Promise.all([
+    getInventoryBalancesByStoreForProducts(storeId, productIds),
+    getLatestCostTrackingByProductIds(storeId, productIds),
+  ]);
 
   const items = mapProductRows(rows);
   const balanceByProductId = new Map(balances.map((balance) => [balance.productId, balance]));
@@ -282,6 +379,7 @@ async function listStoreProductsByIds(
       stockOnHand: balance?.onHand ?? 0,
       stockReserved: balance?.reserved ?? 0,
       stockAvailable: balance?.available ?? 0,
+      costTracking: costTrackingByProductId.get(item.id) ?? item.costTracking,
     };
   });
 }

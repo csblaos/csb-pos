@@ -16,6 +16,14 @@ import { eq } from "drizzle-orm";
 import { ProductsHeaderRefreshButton } from "@/components/app/products-header-refresh-button";
 
 const PRODUCT_PAGE_SIZE = 30;
+type ProductStatusFilter = "all" | "active" | "inactive";
+
+function parseStatusFilter(value: string | undefined): ProductStatusFilter {
+  if (value === "active" || value === "inactive") {
+    return value;
+  }
+  return "all";
+}
 
 const ProductsManagement = dynamic(
   () =>
@@ -31,7 +39,14 @@ const ProductsManagement = dynamic(
   },
 );
 
-export default async function ProductsPage() {
+export default async function ProductsPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ status?: string }>;
+}) {
+  const params = await searchParams;
+  const initialStatusFilter = parseStatusFilter(params?.status);
+
   const [session, permissionKeys] = await Promise.all([
     getSession(),
     getUserPermissionsForCurrentSession(),
@@ -65,7 +80,7 @@ export default async function ProductsPage() {
   const [productPage, summaryCounts, units, categories, financial, storeRow] = await Promise.all([
     listStoreProductsPage({
       storeId: session.activeStoreId,
-      status: "all",
+      status: initialStatusFilter,
       sort: "newest",
       page: 1,
       pageSize: PRODUCT_PAGE_SIZE,
@@ -109,6 +124,7 @@ export default async function ProductsPage() {
         canArchive={canArchive}
         canViewCost={canViewCost}
         canUpdateCost={canUpdateCost}
+        initialStatusFilter={initialStatusFilter}
       />
     </section>
   );

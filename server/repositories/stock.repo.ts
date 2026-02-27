@@ -5,10 +5,13 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/server/db/client";
 import { timeDb } from "@/server/perf/perf";
 import {
+  getInventoryMovementsPage,
   getRecentInventoryMovements,
   getStockProductsForStore,
   getStockProductsForStorePage,
+  type InventoryMovementFilters,
   type InventoryMovementView,
+  type InventoryMovementPage,
   type StockProductOption,
 } from "@/lib/inventory/queries";
 import { inventoryMovements, productUnits, products } from "@/lib/db/schema";
@@ -45,6 +48,21 @@ export async function listRecentStockMovementsByStore(
 ): Promise<InventoryMovementView[]> {
   return timeDb("stock.repo.listRecentMovements", async () =>
     getRecentInventoryMovements(storeId, limit),
+  );
+}
+
+export async function listStockMovementsPageByStore(
+  storeId: string,
+  page: number,
+  pageSize: number,
+  filters?: InventoryMovementFilters,
+): Promise<InventoryMovementPage> {
+  return timeDb("stock.repo.listMovementsPage", async () =>
+    getInventoryMovementsPage(storeId, {
+      page,
+      pageSize,
+      filters,
+    }),
   );
 }
 

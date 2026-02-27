@@ -16,7 +16,6 @@ import {
   getStockProductsPage,
 } from "@/server/services/stock.service";
 import { getPurchaseOrderListPage } from "@/server/services/purchase.service";
-import { StockHeaderRefreshButton } from "@/components/app/stock-header-refresh-button";
 
 const StockRecordingForm = dynamic(
   () =>
@@ -177,10 +176,7 @@ export default async function StockPage({
     return (
       <section className="space-y-4">
         <header className="space-y-1">
-          <div className="flex items-center justify-between gap-3">
-            <h1 className="text-xl font-semibold">สต็อก</h1>
-            <StockHeaderRefreshButton />
-          </div>
+          <h1 className="text-xl font-semibold">สต็อก</h1>
           <p className="text-sm text-muted-foreground">
             จัดการรับเข้า ปรับสต็อก สั่งซื้อ และตรวจสอบยอดคงเหลือ
           </p>
@@ -207,6 +203,8 @@ export default async function StockPage({
           purchaseTab={
             <PurchaseOrderList
               purchaseOrders={initialPOs}
+              activeStoreId={activeStoreId}
+              userId={session.userId}
               storeCurrency={storeCurrency}
               canCreate={canCreate}
               pageSize={PO_PAGE_SIZE}

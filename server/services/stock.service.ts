@@ -13,10 +13,12 @@ import {
   findUnitMultiplierToBase,
   getStockBalanceByProduct,
   listRecentStockMovementsByStore,
+  listStockMovementsPageByStore,
   listStockProductsByStore,
   listStockProductsByStorePage,
 } from "@/server/repositories/stock.repo";
 import type {
+  InventoryMovementFilters,
   InventoryMovementView,
   StockProductOption,
 } from "@/lib/inventory/queries";
@@ -121,6 +123,20 @@ export async function getRecentStockMovements(params: {
   limit: number;
 }): Promise<InventoryMovementView[]> {
   return listRecentStockMovementsByStore(params.storeId, params.limit);
+}
+
+export async function getStockMovementsPage(params: {
+  storeId: string;
+  page: number;
+  pageSize: number;
+  filters?: InventoryMovementFilters;
+}): Promise<{ movements: InventoryMovementView[]; total: number }> {
+  return listStockMovementsPageByStore(
+    params.storeId,
+    params.page,
+    params.pageSize,
+    params.filters,
+  );
 }
 
 export async function getStockProductsPage(params: {

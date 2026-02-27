@@ -6,6 +6,8 @@ import {
   DashboardCardsSkeleton,
   LowStock,
   LowStockSkeleton,
+  PurchaseApReminder,
+  PurchaseApReminderSkeleton,
   TodaySales,
   TodaySalesSkeleton,
   type StorefrontDashboardProps,
@@ -96,6 +98,12 @@ export function RestaurantStorefrontDashboard({
       </Suspense>
 
       {canViewInventory ? (
+        <Suspense fallback={<PurchaseApReminderSkeleton />}>
+          <PurchaseApReminder dashboardDataPromise={dashboardDataPromise} />
+        </Suspense>
+      ) : null}
+
+      {canViewInventory ? (
         <Suspense fallback={<LowStockSkeleton />}>
           <LowStock dashboardDataPromise={dashboardDataPromise} />
         </Suspense>
@@ -109,4 +117,3 @@ export function RestaurantStorefrontDashboard({
     </section>
   );
 }
-

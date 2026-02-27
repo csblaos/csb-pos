@@ -75,6 +75,13 @@ export const purchaseOrderStatusEnum = [
   "RECEIVED",
   "CANCELLED",
 ] as const;
+export const purchaseOrderPaymentStatusEnum = ["UNPAID", "PARTIAL", "PAID"] as const;
+export const purchaseOrderPaymentEntryTypeEnum = ["PAYMENT", "REVERSAL"] as const;
+export const notificationTopicEnum = ["PURCHASE_AP_DUE"] as const;
+export const notificationEntityTypeEnum = ["PURCHASE_ORDER"] as const;
+export const notificationSeverityEnum = ["INFO", "WARNING", "CRITICAL"] as const;
+export const notificationStatusEnum = ["UNREAD", "READ", "RESOLVED"] as const;
+export const notificationDueStatusEnum = ["OVERDUE", "DUE_SOON"] as const;
 export const idempotencyStatusEnum = [
   "PROCESSING",
   "SUCCEEDED",
@@ -790,6 +797,27 @@ export const purchaseOrders = sqliteTable(
       .notNull()
       .default("LAK"),
     exchangeRate: integer("exchange_rate").notNull().default(1),
+    exchangeRateInitial: integer("exchange_rate_initial").notNull().default(1),
+    exchangeRateLockedAt: text("exchange_rate_locked_at"),
+    exchangeRateLockedBy: text("exchange_rate_locked_by").references(
+      () => users.id,
+      {
+        onDelete: "set null",
+      },
+    ),
+    exchangeRateLockNote: text("exchange_rate_lock_note"),
+    paymentStatus: text("payment_status", {
+      enum: purchaseOrderPaymentStatusEnum,
+    })
+      .notNull()
+      .default("UNPAID"),
+    paidAt: text("paid_at"),
+    paidBy: text("paid_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    paymentReference: text("payment_reference"),
+    paymentNote: text("payment_note"),
+    dueDate: text("due_date"),
     shippingCost: integer("shipping_cost").notNull().default(0),
     otherCost: integer("other_cost").notNull().default(0),
     otherCostNote: text("other_cost_note"),
@@ -815,6 +843,21 @@ export const purchaseOrders = sqliteTable(
     poStatusIdx: index("po_status_idx").on(table.storeId, table.status),
     poCreatedAtIdx: index("po_created_at_idx").on(table.storeId, table.createdAt),
     poUpdatedAtIdx: index("po_updated_at_idx").on(table.storeId, table.updatedAt),
+    poExchangeRateLockedAtIdx: index("po_exchange_rate_locked_at_idx").on(
+      table.storeId,
+      table.exchangeRateLockedAt,
+    ),
+    poPaymentStatusPaidAtIdx: index("po_payment_status_paid_at_idx").on(
+      table.storeId,
+      table.paymentStatus,
+      table.paidAt,
+    ),
+    poDueDateIdx: index("po_due_date_idx").on(table.storeId, table.dueDate),
+    poSupplierReceivedAtIdx: index("po_supplier_received_at_idx").on(
+      table.storeId,
+      table.supplierName,
+      table.receivedAt,
+    ),
     poStorePoNumberUnique: uniqueIndex("po_store_po_number_unique").on(
       table.storeId,
       table.poNumber,
@@ -841,6 +884,137 @@ export const purchaseOrderItems = sqliteTable(
   (table) => ({
     poItemsPoIdIdx: index("po_items_po_id_idx").on(table.purchaseOrderId),
     poItemsProductIdIdx: index("po_items_product_id_idx").on(table.productId),
+  }),
+);
+
+export const purchaseOrderPayments = sqliteTable(
+  "purchase_order_payments",
+  {
+    id: id(),
+    purchaseOrderId: text("purchase_order_id")
+      .notNull()
+      .references(() => purchaseOrders.id, { onDelete: "cascade" }),
+    storeId: text("store_id")
+      .notNull()
+      .references(() => stores.id, { onDelete: "cascade" }),
+    entryType: text("entry_type", {
+      enum: purchaseOrderPaymentEntryTypeEnum,
+    })
+      .notNull()
+      .default("PAYMENT"),
+    amountBase: integer("amount_base").notNull(),
+    paidAt: text("paid_at").notNull().default(createdAtDefault),
+    reference: text("reference"),
+    note: text("note"),
+    reversedPaymentId: text("reversed_payment_id"),
+    createdBy: text("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: text("created_at").notNull().default(createdAtDefault),
+  },
+  (table) => ({
+    poPaymentsPoIdIdx: index("po_payments_po_id_idx").on(table.purchaseOrderId),
+    poPaymentsStorePaidAtIdx: index("po_payments_store_paid_at_idx").on(
+      table.storeId,
+      table.paidAt,
+    ),
+    poPaymentsReversedIdIdx: index("po_payments_reversed_id_idx").on(
+      table.reversedPaymentId,
+    ),
+    poPaymentsReversedFk: foreignKey({
+      columns: [table.reversedPaymentId],
+      foreignColumns: [table.id],
+      name: "po_payments_reversed_fk",
+    }).onDelete("set null"),
+  }),
+);
+
+export const notificationInbox = sqliteTable(
+  "notification_inbox",
+  {
+    id: id(),
+    storeId: text("store_id")
+      .notNull()
+      .references(() => stores.id, { onDelete: "cascade" }),
+    topic: text("topic", { enum: notificationTopicEnum })
+      .notNull()
+      .default("PURCHASE_AP_DUE"),
+    entityType: text("entity_type", { enum: notificationEntityTypeEnum }).notNull(),
+    entityId: text("entity_id").notNull(),
+    dedupeKey: text("dedupe_key").notNull(),
+    title: text("title").notNull(),
+    message: text("message").notNull(),
+    severity: text("severity", { enum: notificationSeverityEnum })
+      .notNull()
+      .default("WARNING"),
+    status: text("status", { enum: notificationStatusEnum })
+      .notNull()
+      .default("UNREAD"),
+    dueStatus: text("due_status", { enum: notificationDueStatusEnum }),
+    dueDate: text("due_date"),
+    payload: text("payload").notNull().default("{}"),
+    firstDetectedAt: text("first_detected_at").notNull().default(createdAtDefault),
+    lastDetectedAt: text("last_detected_at").notNull().default(createdAtDefault),
+    readAt: text("read_at"),
+    resolvedAt: text("resolved_at"),
+    createdAt: text("created_at").notNull().default(createdAtDefault),
+    updatedAt: text("updated_at").notNull().default(createdAtDefault),
+  },
+  (table) => ({
+    notificationInboxStoreDedupeUnique: uniqueIndex(
+      "notification_inbox_store_dedupe_unique",
+    ).on(table.storeId, table.dedupeKey),
+    notificationInboxStoreStatusDetectedIdx: index(
+      "notification_inbox_store_status_detected_idx",
+    ).on(table.storeId, table.status, table.lastDetectedAt),
+    notificationInboxStoreTopicDetectedIdx: index(
+      "notification_inbox_store_topic_detected_idx",
+    ).on(table.storeId, table.topic, table.lastDetectedAt),
+    notificationInboxStoreEntityIdx: index("notification_inbox_store_entity_idx").on(
+      table.storeId,
+      table.entityType,
+      table.entityId,
+    ),
+  }),
+);
+
+export const notificationRules = sqliteTable(
+  "notification_rules",
+  {
+    id: id(),
+    storeId: text("store_id")
+      .notNull()
+      .references(() => stores.id, { onDelete: "cascade" }),
+    topic: text("topic", { enum: notificationTopicEnum })
+      .notNull()
+      .default("PURCHASE_AP_DUE"),
+    entityType: text("entity_type", { enum: notificationEntityTypeEnum }).notNull(),
+    entityId: text("entity_id").notNull(),
+    mutedForever: integer("muted_forever", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    mutedUntil: text("muted_until"),
+    snoozedUntil: text("snoozed_until"),
+    note: text("note"),
+    updatedBy: text("updated_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: text("created_at").notNull().default(createdAtDefault),
+    updatedAt: text("updated_at").notNull().default(createdAtDefault),
+  },
+  (table) => ({
+    notificationRulesStoreTopicEntityUnique: uniqueIndex(
+      "notification_rules_store_topic_entity_unique",
+    ).on(table.storeId, table.topic, table.entityType, table.entityId),
+    notificationRulesStoreTopicIdx: index("notification_rules_store_topic_idx").on(
+      table.storeId,
+      table.topic,
+    ),
+    notificationRulesStoreEntityIdx: index("notification_rules_store_entity_idx").on(
+      table.storeId,
+      table.entityType,
+      table.entityId,
+    ),
   }),
 );
 

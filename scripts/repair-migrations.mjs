@@ -869,6 +869,16 @@ async function ensureSchemaCompatForLatestAuthChanges() {
       \`supplier_contact\` text,
       \`purchase_currency\` text not null default 'LAK',
       \`exchange_rate\` integer not null default 1,
+      \`exchange_rate_initial\` integer not null default 1,
+      \`exchange_rate_locked_at\` text,
+      \`exchange_rate_locked_by\` text references \`users\`(\`id\`) on delete set null,
+      \`exchange_rate_lock_note\` text,
+      \`payment_status\` text not null default 'UNPAID',
+      \`paid_at\` text,
+      \`paid_by\` text references \`users\`(\`id\`) on delete set null,
+      \`payment_reference\` text,
+      \`payment_note\` text,
+      \`due_date\` text,
       \`shipping_cost\` integer not null default 0,
       \`other_cost\` integer not null default 0,
       \`other_cost_note\` text,
@@ -904,6 +914,134 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     console.info("[db:repair] added column purchase_orders.cancelled_at");
   }
 
+  // Ensure columns from migration 0025 exist
+  if (!(await columnExists("purchase_orders", "updated_by"))) {
+    await client.execute("alter table `purchase_orders` add `updated_by` text");
+    console.info("[db:repair] added column purchase_orders.updated_by");
+  }
+
+  if (!(await columnExists("purchase_orders", "updated_at"))) {
+    await client.execute("alter table `purchase_orders` add `updated_at` text");
+    console.info("[db:repair] added column purchase_orders.updated_at");
+  }
+
+  if (!(await columnExists("purchase_orders", "exchange_rate_locked_at"))) {
+    await client.execute(
+      "alter table `purchase_orders` add `exchange_rate_locked_at` text",
+    );
+    console.info("[db:repair] added column purchase_orders.exchange_rate_locked_at");
+  }
+
+  if (!(await columnExists("purchase_orders", "exchange_rate_locked_by"))) {
+    await client.execute(
+      "alter table `purchase_orders` add `exchange_rate_locked_by` text",
+    );
+    console.info("[db:repair] added column purchase_orders.exchange_rate_locked_by");
+  }
+
+  if (!(await columnExists("purchase_orders", "exchange_rate_lock_note"))) {
+    await client.execute(
+      "alter table `purchase_orders` add `exchange_rate_lock_note` text",
+    );
+    console.info("[db:repair] added column purchase_orders.exchange_rate_lock_note");
+  }
+
+  if (!(await columnExists("purchase_orders", "exchange_rate_initial"))) {
+    await client.execute(
+      "alter table `purchase_orders` add `exchange_rate_initial` integer not null default 1",
+    );
+    console.info("[db:repair] added column purchase_orders.exchange_rate_initial");
+  }
+
+  if (!(await columnExists("purchase_orders", "payment_status"))) {
+    await client.execute(
+      "alter table `purchase_orders` add `payment_status` text not null default 'UNPAID'",
+    );
+    console.info("[db:repair] added column purchase_orders.payment_status");
+  }
+
+  if (!(await columnExists("purchase_orders", "paid_at"))) {
+    await client.execute("alter table `purchase_orders` add `paid_at` text");
+    console.info("[db:repair] added column purchase_orders.paid_at");
+  }
+
+  if (!(await columnExists("purchase_orders", "paid_by"))) {
+    await client.execute("alter table `purchase_orders` add `paid_by` text");
+    console.info("[db:repair] added column purchase_orders.paid_by");
+  }
+
+  if (!(await columnExists("purchase_orders", "payment_reference"))) {
+    await client.execute(
+      "alter table `purchase_orders` add `payment_reference` text",
+    );
+    console.info("[db:repair] added column purchase_orders.payment_reference");
+  }
+
+  if (!(await columnExists("purchase_orders", "payment_note"))) {
+    await client.execute("alter table `purchase_orders` add `payment_note` text");
+    console.info("[db:repair] added column purchase_orders.payment_note");
+  }
+
+  if (!(await columnExists("purchase_orders", "due_date"))) {
+    await client.execute("alter table `purchase_orders` add `due_date` text");
+    console.info("[db:repair] added column purchase_orders.due_date");
+  }
+
+  await client.execute(`
+    update \`purchase_orders\`
+    set \`updated_at\` = coalesce(\`updated_at\`, \`created_at\`, CURRENT_TIMESTAMP)
+    where \`updated_at\` is null or trim(\`updated_at\`) = ''
+  `);
+  console.info("[db:repair] normalized purchase_orders.updated_at");
+
+  await client.execute(`
+    update \`purchase_orders\`
+    set \`exchange_rate_locked_at\` = coalesce(\`exchange_rate_locked_at\`, \`updated_at\`, \`created_at\`, CURRENT_TIMESTAMP),
+        \`exchange_rate_locked_by\` = coalesce(\`exchange_rate_locked_by\`, \`updated_by\`, \`created_by\`)
+    where \`exchange_rate_locked_at\` is null
+  `);
+  console.info("[db:repair] backfilled purchase_orders.exchange_rate_locked_at");
+
+  await client.execute(`
+    update \`purchase_orders\`
+    set \`exchange_rate_initial\` = coalesce(\`exchange_rate_initial\`, \`exchange_rate\`, 1)
+    where \`exchange_rate_initial\` is null or \`exchange_rate_initial\` <= 0
+  `);
+  console.info("[db:repair] normalized purchase_orders.exchange_rate_initial");
+
+  await client.execute(`
+    update \`purchase_orders\`
+    set \`payment_status\` = case
+      when \`paid_at\` is not null and trim(\`paid_at\`) <> '' then 'PAID'
+      else 'UNPAID'
+    end
+    where \`payment_status\` is null
+      or trim(\`payment_status\`) = ''
+      or \`payment_status\` not in ('UNPAID', 'PARTIAL', 'PAID')
+  `);
+  console.info("[db:repair] normalized purchase_orders.payment_status");
+
+  await client.execute(
+    "create index if not exists `po_updated_at_idx` on `purchase_orders` (`store_id`, `updated_at`)",
+  );
+  console.info("[db:repair] ensured purchase_orders.updated_at index");
+  await client.execute(
+    "create index if not exists `po_exchange_rate_locked_at_idx` on `purchase_orders` (`store_id`, `exchange_rate_locked_at`)",
+  );
+  console.info("[db:repair] ensured purchase_orders.exchange_rate_locked_at index");
+  await client.execute(
+    "create index if not exists `po_payment_status_paid_at_idx` on `purchase_orders` (`store_id`, `payment_status`, `paid_at`)",
+  );
+  console.info("[db:repair] ensured purchase_orders.payment_status index");
+  await client.execute(
+    "create index if not exists `po_supplier_received_at_idx` on `purchase_orders` (`store_id`, `supplier_name`, `received_at`)",
+  );
+  console.info("[db:repair] ensured purchase_orders.supplier_received_at index");
+  await client.execute(
+    "create index if not exists `po_due_date_idx` on `purchase_orders` (`store_id`, `due_date`)",
+  );
+  console.info("[db:repair] ensured purchase_orders.due_date index");
+
   await client.execute(`
     create table if not exists \`purchase_order_items\` (
       \`id\` text primary key not null,
@@ -923,6 +1061,136 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     "create index if not exists `po_items_product_id_idx` on `purchase_order_items` (`product_id`)",
   );
   console.info("[db:repair] ensured table purchase_order_items + indexes");
+
+  await client.execute(`
+    create table if not exists \`purchase_order_payments\` (
+      \`id\` text primary key not null,
+      \`purchase_order_id\` text not null references \`purchase_orders\`(\`id\`) on delete cascade,
+      \`store_id\` text not null references \`stores\`(\`id\`) on delete cascade,
+      \`entry_type\` text not null default 'PAYMENT',
+      \`amount_base\` integer not null,
+      \`paid_at\` text not null default (CURRENT_TIMESTAMP),
+      \`reference\` text,
+      \`note\` text,
+      \`reversed_payment_id\` text references \`purchase_order_payments\`(\`id\`) on delete set null,
+      \`created_by\` text references \`users\`(\`id\`) on delete set null,
+      \`created_at\` text not null default (CURRENT_TIMESTAMP)
+    )
+  `);
+  await client.execute(
+    "create index if not exists `po_payments_po_id_idx` on `purchase_order_payments` (`purchase_order_id`)",
+  );
+  await client.execute(
+    "create index if not exists `po_payments_store_paid_at_idx` on `purchase_order_payments` (`store_id`, `paid_at`)",
+  );
+  await client.execute(
+    "create index if not exists `po_payments_reversed_id_idx` on `purchase_order_payments` (`reversed_payment_id`)",
+  );
+  console.info("[db:repair] ensured table purchase_order_payments + indexes");
+
+  await client.execute(`
+    update \`purchase_orders\`
+    set \`payment_status\` = (
+      case
+        when (
+          coalesce((
+            select sum(case
+              when \`purchase_order_payments\`.\`entry_type\` = 'PAYMENT' then \`purchase_order_payments\`.\`amount_base\`
+              when \`purchase_order_payments\`.\`entry_type\` = 'REVERSAL' then -\`purchase_order_payments\`.\`amount_base\`
+              else 0
+            end)
+            from \`purchase_order_payments\`
+            where \`purchase_order_payments\`.\`purchase_order_id\` = \`purchase_orders\`.\`id\`
+          ), 0)
+        ) <= 0 then 'UNPAID'
+        when (
+          coalesce((
+            select sum(case
+              when \`purchase_order_payments\`.\`entry_type\` = 'PAYMENT' then \`purchase_order_payments\`.\`amount_base\`
+              when \`purchase_order_payments\`.\`entry_type\` = 'REVERSAL' then -\`purchase_order_payments\`.\`amount_base\`
+              else 0
+            end)
+            from \`purchase_order_payments\`
+            where \`purchase_order_payments\`.\`purchase_order_id\` = \`purchase_orders\`.\`id\`
+          ), 0)
+        ) >= (
+          coalesce((
+            select sum(\`purchase_order_items\`.\`unit_cost_base\` * \`purchase_order_items\`.\`qty_ordered\`)
+            from \`purchase_order_items\`
+            where \`purchase_order_items\`.\`purchase_order_id\` = \`purchase_orders\`.\`id\`
+          ), 0) + coalesce(\`purchase_orders\`.\`shipping_cost\`, 0) + coalesce(\`purchase_orders\`.\`other_cost\`, 0)
+        ) then 'PAID'
+        else 'PARTIAL'
+      end
+    )
+  `);
+  console.info("[db:repair] synced purchase_orders.payment_status from payment ledger");
+
+  // ── notifications workflow (migration 0032) ──
+
+  await client.execute(`
+    create table if not exists \`notification_inbox\` (
+      \`id\` text primary key not null,
+      \`store_id\` text not null references \`stores\`(\`id\`) on delete cascade,
+      \`topic\` text not null default 'PURCHASE_AP_DUE',
+      \`entity_type\` text not null,
+      \`entity_id\` text not null,
+      \`dedupe_key\` text not null,
+      \`title\` text not null,
+      \`message\` text not null,
+      \`severity\` text not null default 'WARNING',
+      \`status\` text not null default 'UNREAD',
+      \`due_status\` text,
+      \`due_date\` text,
+      \`payload\` text not null default '{}',
+      \`first_detected_at\` text not null default (CURRENT_TIMESTAMP),
+      \`last_detected_at\` text not null default (CURRENT_TIMESTAMP),
+      \`read_at\` text,
+      \`resolved_at\` text,
+      \`created_at\` text not null default (CURRENT_TIMESTAMP),
+      \`updated_at\` text not null default (CURRENT_TIMESTAMP)
+    )
+  `);
+  await client.execute(
+    "create unique index if not exists `notification_inbox_store_dedupe_unique` on `notification_inbox` (`store_id`, `dedupe_key`)",
+  );
+  await client.execute(
+    "create index if not exists `notification_inbox_store_status_detected_idx` on `notification_inbox` (`store_id`, `status`, `last_detected_at`)",
+  );
+  await client.execute(
+    "create index if not exists `notification_inbox_store_topic_detected_idx` on `notification_inbox` (`store_id`, `topic`, `last_detected_at`)",
+  );
+  await client.execute(
+    "create index if not exists `notification_inbox_store_entity_idx` on `notification_inbox` (`store_id`, `entity_type`, `entity_id`)",
+  );
+  console.info("[db:repair] ensured table notification_inbox + indexes");
+
+  await client.execute(`
+    create table if not exists \`notification_rules\` (
+      \`id\` text primary key not null,
+      \`store_id\` text not null references \`stores\`(\`id\`) on delete cascade,
+      \`topic\` text not null default 'PURCHASE_AP_DUE',
+      \`entity_type\` text not null,
+      \`entity_id\` text not null,
+      \`muted_forever\` integer not null default 0,
+      \`muted_until\` text,
+      \`snoozed_until\` text,
+      \`note\` text,
+      \`updated_by\` text references \`users\`(\`id\`) on delete set null,
+      \`created_at\` text not null default (CURRENT_TIMESTAMP),
+      \`updated_at\` text not null default (CURRENT_TIMESTAMP)
+    )
+  `);
+  await client.execute(
+    "create unique index if not exists `notification_rules_store_topic_entity_unique` on `notification_rules` (`store_id`, `topic`, `entity_type`, `entity_id`)",
+  );
+  await client.execute(
+    "create index if not exists `notification_rules_store_topic_idx` on `notification_rules` (`store_id`, `topic`)",
+  );
+  await client.execute(
+    "create index if not exists `notification_rules_store_entity_idx` on `notification_rules` (`store_id`, `entity_type`, `entity_id`)",
+  );
+  console.info("[db:repair] ensured table notification_rules + indexes");
 
   // ── idempotency_requests (migration 0026) ──
 
