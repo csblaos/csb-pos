@@ -617,6 +617,12 @@ export const inventoryMovements = sqliteTable(
     inventoryMovementsStoreIdIdx: index("inventory_movements_store_id_idx").on(
       table.storeId,
     ),
+    inventoryMovementsStoreCreatedAtIdx: index(
+      "inventory_movements_store_created_at_idx",
+    ).on(table.storeId, table.createdAt, table.id),
+    inventoryMovementsStoreTypeCreatedAtIdx: index(
+      "inventory_movements_store_type_created_at_idx",
+    ).on(table.storeId, table.type, table.createdAt, table.id),
     inventoryMovementsProductIdIdx: index(
       "inventory_movements_product_id_idx",
     ).on(table.productId),

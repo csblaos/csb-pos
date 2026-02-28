@@ -8,9 +8,18 @@
 
 - ปรับ flow แท็บ `/stock?tab=recording` ให้แยกจากงานบัญชี/PO ชัดขึ้น:
   - เพิ่ม guardrail card ว่า Recording ใช้สำหรับปรับจำนวนสต็อกเท่านั้น (ไม่บันทึกต้นทุน/เรท) และเพิ่มปุ่มลัด `ไปแท็บสั่งซื้อ (PO)`
+  - ปรับ guardrail card ให้ข้อความอธิบายยาวเป็นแบบพับ/ขยาย (default ปิด) เพื่อลดความสูงบนมือถือ และยังคงคำเตือนหลักพร้อม CTA ไปแท็บ PO ไว้ด้านบนตลอด
   - เพิ่ม mobile UX: ปุ่ม `บันทึกสต็อก` แบบ sticky ที่ก้นจอ และปุ่ม `ดูสินค้าทั้งหมด` เพื่อเปิด list picker เลือกสินค้าได้โดยไม่ต้องพิมพ์ก่อน
   - harden API `POST /api/stock/movements`: ถ้าส่ง field กลุ่มต้นทุน/เรท (`cost/costBase/rate/exchangeRate/...`) จะตอบ 400 พร้อมข้อความแนะนำให้ไปทำที่ PO/Month-End
   - sync filter หลักของ Recording ลง URL (`recordingType`, `recordingProductId`) เพื่อแชร์มุมมองเดียวกันได้ และใช้ `router.replace(..., { scroll: false })` ลดอาการเด้งจอ
+
+- ปรับแท็บ `/stock?tab=history` ให้แชร์มุมมองได้และกรองครบขึ้น:
+  - เพิ่ม filter type `จอง (RESERVE)` และ `ยกเลิกจอง (RELEASE)` ในชุด chip
+  - sync filter/page ลง URL (`historyType`, `historyQ`, `historyDateFrom`, `historyDateTo`, `historyPage`) ด้วย `router.replace(..., { scroll: false })`
+  - เพิ่ม in-memory cache ต่อ filter key (`type/page/q/date`) เพื่อให้สลับ chip เดิมแสดงผลได้ทันที และค่อย revalidate เบื้องหลัง
+  - ปรับ query วันที่ใน history จาก `date(created_at)` เป็นช่วงเวลา (`>= dayStart`, `< nextDayStart`) เพื่อให้ index ทำงานได้ดีขึ้น
+  - เพิ่ม composite index ใน `inventory_movements` สำหรับงาน history: `inventory_movements_store_created_at_idx`, `inventory_movements_store_type_created_at_idx`
+  - เอาตัวเลข count ออกจาก chip filter เพื่อกันความเข้าใจผิดจากข้อมูลรายหน้า (pagination)
 
 - แก้ปัญหา date input ล้นจอบนมือถือใน PO:
   - ช่อง `คาดว่าจะได้รับ` และ `ครบกำหนดชำระ` (Create PO) ปรับเป็น 1 คอลัมน์บน mobile และ 2 คอลัมน์บนจอใหญ่ (`md+`)

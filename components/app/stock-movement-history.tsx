@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Calendar } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,14 @@ type StockMovementHistoryProps = {
   movements: InventoryMovementView[];
 };
 
-type MovementTypeFilter = "all" | "IN" | "OUT" | "ADJUST" | "RETURN";
+type MovementTypeFilter =
+  | "all"
+  | "IN"
+  | "OUT"
+  | "RESERVE"
+  | "RELEASE"
+  | "ADJUST"
+  | "RETURN";
 
 const movementBadgeClass: Record<InventoryMovementView["type"], string> = {
   IN: "bg-emerald-100 text-emerald-700",
@@ -40,12 +48,77 @@ const movementTypeLabelMap: Record<InventoryMovementView["type"], string> = {
 const ITEMS_PER_PAGE = 50;
 const VIRTUAL_ROW_ESTIMATE = 164;
 const VIRTUAL_OVERSCAN = 4;
+const HISTORY_CACHE_MAX_ENTRIES = 24;
+const HISTORY_TYPE_QUERY_KEY = "historyType";
+const HISTORY_PAGE_QUERY_KEY = "historyPage";
+const HISTORY_Q_QUERY_KEY = "historyQ";
+const HISTORY_DATE_FROM_QUERY_KEY = "historyDateFrom";
+const HISTORY_DATE_TO_QUERY_KEY = "historyDateTo";
+
+const isDateOnly = (value: string | null) =>
+  Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+
+function parseHistoryTypeFilter(value: string | null): MovementTypeFilter | null {
+  if (
+    value === "all" ||
+    value === "IN" ||
+    value === "OUT" ||
+    value === "RESERVE" ||
+    value === "RELEASE" ||
+    value === "ADJUST" ||
+    value === "RETURN"
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function parsePositivePage(value: string | null): number {
+  if (!value) {
+    return 1;
+  }
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 1;
+  }
+  return parsed;
+}
+
+function buildHistoryCacheKey(params: {
+  page: number;
+  typeFilter: MovementTypeFilter;
+  query: string;
+  dateFrom: string;
+  dateTo: string;
+}): string {
+  return [
+    params.page,
+    params.typeFilter,
+    params.query.trim().toLowerCase(),
+    params.dateFrom,
+    params.dateTo,
+  ].join("|");
+}
 
 export function StockMovementHistory({ movements }: StockMovementHistoryProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const typeFilterFromQuery =
+    parseHistoryTypeFilter(searchParams.get(HISTORY_TYPE_QUERY_KEY)) ?? "all";
+  const pageFromQuery = parsePositivePage(searchParams.get(HISTORY_PAGE_QUERY_KEY));
+  const queryFromUrl = searchParams.get(HISTORY_Q_QUERY_KEY)?.trim() ?? "";
+  const dateFromFromUrl = isDateOnly(searchParams.get(HISTORY_DATE_FROM_QUERY_KEY))
+    ? (searchParams.get(HISTORY_DATE_FROM_QUERY_KEY) as string)
+    : "";
+  const dateToFromUrl = isDateOnly(searchParams.get(HISTORY_DATE_TO_QUERY_KEY))
+    ? (searchParams.get(HISTORY_DATE_TO_QUERY_KEY) as string)
+    : "";
+
   const [movementItems, setMovementItems] = useState(movements);
   const [totalItems, setTotalItems] = useState(movements.length);
-  const [typeFilter, setTypeFilter] = useState<MovementTypeFilter>("all");
-  const [page, setPage] = useState(1);
+  const [typeFilter, setTypeFilter] = useState<MovementTypeFilter>(typeFilterFromQuery);
+  const [page, setPage] = useState(pageFromQuery);
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -53,24 +126,83 @@ export function StockMovementHistory({ movements }: StockMovementHistoryProps) {
     movements.length > 0 ? new Date().toISOString() : null,
   );
 
-  const [productQueryInput, setProductQueryInput] = useState("");
-  const [dateFromInput, setDateFromInput] = useState("");
-  const [dateToInput, setDateToInput] = useState("");
-  const [appliedProductQuery, setAppliedProductQuery] = useState("");
-  const [appliedDateFrom, setAppliedDateFrom] = useState("");
-  const [appliedDateTo, setAppliedDateTo] = useState("");
+  const [productQueryInput, setProductQueryInput] = useState(queryFromUrl);
+  const [dateFromInput, setDateFromInput] = useState(dateFromFromUrl);
+  const [dateToInput, setDateToInput] = useState(dateToFromUrl);
+  const [appliedProductQuery, setAppliedProductQuery] = useState(queryFromUrl);
+  const [appliedDateFrom, setAppliedDateFrom] = useState(dateFromFromUrl);
+  const [appliedDateTo, setAppliedDateTo] = useState(dateToFromUrl);
+  const historyCacheRef = useRef<
+    Map<string, { movements: InventoryMovementView[]; total: number; fetchedAt: string }>
+  >(new Map());
 
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(520);
+  const currentCacheKey = buildHistoryCacheKey({
+    page,
+    typeFilter,
+    query: appliedProductQuery,
+    dateFrom: appliedDateFrom,
+    dateTo: appliedDateTo,
+  });
 
   useEffect(() => {
     setMovementItems(movements);
     setTotalItems(movements.length);
-    setPage(1);
     setErrorMessage(null);
     setLastUpdatedAt(movements.length > 0 ? new Date().toISOString() : null);
   }, [movements]);
+
+  useEffect(() => {
+    const nextTypeFilter =
+      parseHistoryTypeFilter(searchParams.get(HISTORY_TYPE_QUERY_KEY)) ?? "all";
+    if (nextTypeFilter !== typeFilter) {
+      setTypeFilter(nextTypeFilter);
+    }
+
+    const nextPage = parsePositivePage(searchParams.get(HISTORY_PAGE_QUERY_KEY));
+    if (nextPage !== page) {
+      setPage(nextPage);
+    }
+
+    const nextQuery = searchParams.get(HISTORY_Q_QUERY_KEY)?.trim() ?? "";
+    if (nextQuery !== productQueryInput) {
+      setProductQueryInput(nextQuery);
+    }
+    if (nextQuery !== appliedProductQuery) {
+      setAppliedProductQuery(nextQuery);
+    }
+
+    const nextDateFrom = isDateOnly(searchParams.get(HISTORY_DATE_FROM_QUERY_KEY))
+      ? (searchParams.get(HISTORY_DATE_FROM_QUERY_KEY) as string)
+      : "";
+    const nextDateTo = isDateOnly(searchParams.get(HISTORY_DATE_TO_QUERY_KEY))
+      ? (searchParams.get(HISTORY_DATE_TO_QUERY_KEY) as string)
+      : "";
+    if (nextDateFrom !== dateFromInput) {
+      setDateFromInput(nextDateFrom);
+    }
+    if (nextDateFrom !== appliedDateFrom) {
+      setAppliedDateFrom(nextDateFrom);
+    }
+    if (nextDateTo !== dateToInput) {
+      setDateToInput(nextDateTo);
+    }
+    if (nextDateTo !== appliedDateTo) {
+      setAppliedDateTo(nextDateTo);
+    }
+  }, [
+    appliedDateFrom,
+    appliedDateTo,
+    appliedProductQuery,
+    dateFromInput,
+    dateToInput,
+    page,
+    productQueryInput,
+    searchParams,
+    typeFilter,
+  ]);
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -92,12 +224,13 @@ export function StockMovementHistory({ movements }: StockMovementHistoryProps) {
   }, []);
 
   const fetchHistory = useCallback(
-    async (options?: { manual?: boolean; signal?: AbortSignal }) => {
+    async (options?: { manual?: boolean; signal?: AbortSignal; background?: boolean }) => {
       const isManual = options?.manual ?? false;
+      const isBackground = options?.background ?? false;
       setErrorMessage(null);
       if (isManual) {
         setIsRefreshing(true);
-      } else {
+      } else if (!isBackground) {
         setIsLoading(true);
       }
 
@@ -147,10 +280,23 @@ export function StockMovementHistory({ movements }: StockMovementHistoryProps) {
           return;
         }
 
+        const nextTotal = Number(data.total ?? data.movements.length);
+        const fetchedAt = new Date().toISOString();
         setMovementItems(data.movements);
-        setTotalItems(Number(data.total ?? data.movements.length));
+        setTotalItems(nextTotal);
         setErrorMessage(null);
-        setLastUpdatedAt(new Date().toISOString());
+        setLastUpdatedAt(fetchedAt);
+        historyCacheRef.current.set(currentCacheKey, {
+          movements: data.movements,
+          total: nextTotal,
+          fetchedAt,
+        });
+        if (historyCacheRef.current.size > HISTORY_CACHE_MAX_ENTRIES) {
+          const oldestKey = historyCacheRef.current.keys().next().value;
+          if (oldestKey) {
+            historyCacheRef.current.delete(oldestKey);
+          }
+        }
       } catch {
         if (options?.signal?.aborted) {
           return;
@@ -162,31 +308,30 @@ export function StockMovementHistory({ movements }: StockMovementHistoryProps) {
         }
         if (isManual) {
           setIsRefreshing(false);
-        } else {
+        } else if (!isBackground) {
           setIsLoading(false);
         }
       }
     },
-    [appliedDateFrom, appliedDateTo, appliedProductQuery, page, typeFilter],
+    [appliedDateFrom, appliedDateTo, appliedProductQuery, currentCacheKey, page, typeFilter],
   );
 
   useEffect(() => {
     const controller = new AbortController();
     setScrollTop(0);
     viewportRef.current?.scrollTo({ top: 0 });
-    void fetchHistory({ signal: controller.signal });
+    const cached = historyCacheRef.current.get(currentCacheKey);
+    if (cached) {
+      setMovementItems(cached.movements);
+      setTotalItems(cached.total);
+      setErrorMessage(null);
+      setLastUpdatedAt(cached.fetchedAt);
+      void fetchHistory({ signal: controller.signal, background: true });
+    } else {
+      void fetchHistory({ signal: controller.signal });
+    }
     return () => controller.abort();
-  }, [fetchHistory]);
-
-  const stats = useMemo(() => {
-    const counts = {
-      IN: movementItems.filter((m) => m.type === "IN").length,
-      OUT: movementItems.filter((m) => m.type === "OUT").length,
-      ADJUST: movementItems.filter((m) => m.type === "ADJUST").length,
-      RETURN: movementItems.filter((m) => m.type === "RETURN").length,
-    };
-    return counts;
-  }, [movementItems]);
+  }, [currentCacheKey, fetchHistory]);
 
   const totalPages = Math.max(1, Math.ceil(totalItems / ITEMS_PER_PAGE));
   const currentPage = Math.min(page, totalPages);
@@ -196,6 +341,79 @@ export function StockMovementHistory({ movements }: StockMovementHistoryProps) {
       setPage(totalPages);
     }
   }, [page, totalPages]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    let changed = false;
+
+    if (typeFilter === "all") {
+      if (params.has(HISTORY_TYPE_QUERY_KEY)) {
+        params.delete(HISTORY_TYPE_QUERY_KEY);
+        changed = true;
+      }
+    } else if (params.get(HISTORY_TYPE_QUERY_KEY) !== typeFilter) {
+      params.set(HISTORY_TYPE_QUERY_KEY, typeFilter);
+      changed = true;
+    }
+
+    if (appliedProductQuery) {
+      if (params.get(HISTORY_Q_QUERY_KEY) !== appliedProductQuery) {
+        params.set(HISTORY_Q_QUERY_KEY, appliedProductQuery);
+        changed = true;
+      }
+    } else if (params.has(HISTORY_Q_QUERY_KEY)) {
+      params.delete(HISTORY_Q_QUERY_KEY);
+      changed = true;
+    }
+
+    if (appliedDateFrom) {
+      if (params.get(HISTORY_DATE_FROM_QUERY_KEY) !== appliedDateFrom) {
+        params.set(HISTORY_DATE_FROM_QUERY_KEY, appliedDateFrom);
+        changed = true;
+      }
+    } else if (params.has(HISTORY_DATE_FROM_QUERY_KEY)) {
+      params.delete(HISTORY_DATE_FROM_QUERY_KEY);
+      changed = true;
+    }
+
+    if (appliedDateTo) {
+      if (params.get(HISTORY_DATE_TO_QUERY_KEY) !== appliedDateTo) {
+        params.set(HISTORY_DATE_TO_QUERY_KEY, appliedDateTo);
+        changed = true;
+      }
+    } else if (params.has(HISTORY_DATE_TO_QUERY_KEY)) {
+      params.delete(HISTORY_DATE_TO_QUERY_KEY);
+      changed = true;
+    }
+
+    if (currentPage <= 1) {
+      if (params.has(HISTORY_PAGE_QUERY_KEY)) {
+        params.delete(HISTORY_PAGE_QUERY_KEY);
+        changed = true;
+      }
+    } else if (params.get(HISTORY_PAGE_QUERY_KEY) !== String(currentPage)) {
+      params.set(HISTORY_PAGE_QUERY_KEY, String(currentPage));
+      changed = true;
+    }
+
+    if (!changed) {
+      return;
+    }
+
+    const nextQuery = params.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
+      scroll: false,
+    });
+  }, [
+    appliedDateFrom,
+    appliedDateTo,
+    appliedProductQuery,
+    currentPage,
+    pathname,
+    router,
+    searchParams,
+    typeFilter,
+  ]);
 
   const applyFilters = () => {
     if (dateFromInput && dateToInput && dateFromInput > dateToInput) {
@@ -260,7 +478,7 @@ export function StockMovementHistory({ movements }: StockMovementHistoryProps) {
                 : "text-slate-600 hover:bg-slate-100"
             }`}
           >
-            ทั้งหมด ({movementItems.length})
+            ทั้งหมด
           </button>
 
           <button
@@ -275,7 +493,7 @@ export function StockMovementHistory({ movements }: StockMovementHistoryProps) {
                 : "text-slate-600 hover:bg-slate-100"
             }`}
           >
-            รับเข้า ({stats.IN})
+            รับเข้า
           </button>
 
           <button
@@ -290,7 +508,37 @@ export function StockMovementHistory({ movements }: StockMovementHistoryProps) {
                 : "text-slate-600 hover:bg-slate-100"
             }`}
           >
-            เบิกออก ({stats.OUT})
+            เบิกออก
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setTypeFilter("RESERVE");
+              setPage(1);
+            }}
+            className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              typeFilter === "RESERVE"
+                ? "bg-amber-600 text-white"
+                : "text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            จอง
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setTypeFilter("RELEASE");
+              setPage(1);
+            }}
+            className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              typeFilter === "RELEASE"
+                ? "bg-slate-600 text-white"
+                : "text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            ยกเลิกจอง
           </button>
 
           <button
@@ -305,7 +553,7 @@ export function StockMovementHistory({ movements }: StockMovementHistoryProps) {
                 : "text-slate-600 hover:bg-slate-100"
             }`}
           >
-            ปรับสต็อก ({stats.ADJUST})
+            ปรับสต็อก
           </button>
 
           <button
@@ -320,7 +568,7 @@ export function StockMovementHistory({ movements }: StockMovementHistoryProps) {
                 : "text-slate-600 hover:bg-slate-100"
             }`}
           >
-            รับคืน ({stats.RETURN})
+            รับคืน
           </button>
         </div>
 

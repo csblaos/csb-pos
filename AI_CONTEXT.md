@@ -183,11 +183,17 @@ npm run db:migrate
   - เพิ่ม state มาตรฐานต่อแท็บ: loading skeleton / empty state / error + ปุ่ม retry
   - `บันทึกสต็อก` เพิ่ม quick preset (`รับเข้า`, `ปรับยอด`, `ของเสีย`) พร้อม note template และส่ง `Idempotency-Key` ตอน `POST /api/stock/movements` จาก client
   - แท็บ `บันทึกสต็อก` เพิ่ม guardrail ชัดเจนว่า flow นี้ไม่บันทึกต้นทุน/อัตราแลกเปลี่ยน พร้อม CTA ไปแท็บ `สั่งซื้อ (PO)` สำหรับงานซื้อเข้า
+  - กล่องคำแนะนำในแท็บ `บันทึกสต็อก` ปรับเป็นพับ/ขยายได้ (default ปิด) เพื่อลดความยาวบนจอมือถือ โดยยังคงคำเตือนหลักและ CTA ไปแท็บ `สั่งซื้อ (PO)` ให้เห็นตลอด
   - ใน mobile ของแท็บ `บันทึกสต็อก` เพิ่มปุ่ม sticky `บันทึกสต็อก` ที่ก้นจอ และเพิ่มปุ่ม `ดูสินค้าทั้งหมด` เปิด list picker (ค้นหาชื่อ/SKU แล้วแตะเลือกได้)
   - `POST /api/stock/movements` จะ reject field กลุ่มต้นทุน/เรท (`cost/costBase/rate/exchangeRate/...`) ด้วย 400 เพื่อบังคับ separation ระหว่างงาน Recording vs PO/Month-End
   - แท็บ `บันทึกสต็อก` sync filter หลักลง URL แล้ว (`recordingType`, `recordingProductId`) เพื่อแชร์ลิงก์มุมมอง/สินค้าเป้าหมายในทีมได้ โดยใช้ `router.replace(..., { scroll: false })`
   - ลิงก์ `ดูประวัติทั้งหมด` ในแท็บบันทึกสต็อก เปลี่ยนเป็น `router.push(?tab=history)` (ไม่ hard reload)
   - แท็บ `ประวัติ` ใช้ server-side pagination/filter ผ่าน `GET /api/stock/movements?view=history` รองรับกรอง `ประเภท/สินค้า/ช่วงวันที่`
+  - แท็บ `ประวัติ` รองรับ filter type เพิ่ม `RESERVE/RELEASE` แล้ว และ sync filter/page ลง URL (`historyType`, `historyQ`, `historyDateFrom`, `historyDateTo`, `historyPage`) เพื่อแชร์มุมมองได้
+  - แท็บ `ประวัติ` เพิ่ม in-memory cache ต่อ filter key (`type/page/q/date`) เพื่อให้สลับ chip ประเภทเดิมแล้วแสดงผลได้ไวขึ้นทันที ก่อน revalidate เบื้องหลัง
+  - query history ปรับ date filter เป็นช่วงเวลา (`createdAt >= dayStart` และ `< nextDayStart`) แทน `date(createdAt)` เพื่อใช้ index ได้ดีขึ้น
+  - เพิ่ม composite index ที่ `inventory_movements` สำหรับงาน history (`store_id, created_at, id` และ `store_id, type, created_at, id`)
+  - เพื่อเลี่ยงตัวเลขชวนสับสนจากข้อมูลรายหน้า (pagination) filter chip ในแท็บ `ประวัติ` ปรับเป็น label-only (เอาจำนวนใน chip ออก)
   - รายการในแท็บ `ประวัติ` ใช้ windowed virtualization เพื่อลดภาระ render เมื่อจำนวนรายการต่อหน้าสูง
 - Reports:
   - `grossProfit` ใน reports มีทั้ง realized (`cogs` + `grossProfit`) และ current-cost preview (`currentCostCogs` + `currentCostGrossProfit` + `grossProfitDeltaVsCurrentCost`)

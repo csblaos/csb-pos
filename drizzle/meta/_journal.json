@@ -232,6 +232,13 @@
       "when": 1772174704278,
       "tag": "0032_light_spacker_dave",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1772571900000,
+      "tag": "0033_swift_inventory_history_indexes",
+      "breakpoints": true
     }
   ]
 }

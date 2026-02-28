@@ -441,6 +441,19 @@ export async function getInventoryMovementsPage(
     filters?: InventoryMovementFilters;
   },
 ): Promise<InventoryMovementPage> {
+  const toDayStartIso = (dateOnly: string) => `${dateOnly}T00:00:00.000Z`;
+  const toNextDayStartIso = (dateOnly: string) => {
+    const [year, month, day] = dateOnly.split("-").map((part) => Number.parseInt(part, 10));
+    if (!year || !month || !day) {
+      return toDayStartIso(dateOnly);
+    }
+    const nextDay = new Date(Date.UTC(year, month - 1, day + 1));
+    const yyyy = String(nextDay.getUTCFullYear());
+    const mm = String(nextDay.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(nextDay.getUTCDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}T00:00:00.000Z`;
+  };
+
   const page = Math.max(1, Math.floor(params.page));
   const pageSize = Math.min(200, Math.max(1, Math.floor(params.pageSize)));
   const offset = (page - 1) * pageSize;
@@ -456,22 +469,24 @@ export async function getInventoryMovementsPage(
   }
 
   const query = filters?.query?.trim();
-  if (query) {
-    const pattern = `%${query}%`;
-    whereConditions.push(
-      sql`(${products.sku} like ${pattern} or ${products.name} like ${pattern})`,
-    );
-  }
+  const productQueryCondition = query
+    ? sql`(${products.sku} like ${`%${query}%`} or ${products.name} like ${`%${query}%`})`
+    : undefined;
 
   if (filters?.dateFrom) {
-    whereConditions.push(sql`date(${inventoryMovements.createdAt}) >= date(${filters.dateFrom})`);
+    whereConditions.push(sql`${inventoryMovements.createdAt} >= ${toDayStartIso(filters.dateFrom)}`);
   }
 
   if (filters?.dateTo) {
-    whereConditions.push(sql`date(${inventoryMovements.createdAt}) <= date(${filters.dateTo})`);
+    whereConditions.push(
+      sql`${inventoryMovements.createdAt} < ${toNextDayStartIso(filters.dateTo)}`,
+    );
   }
 
-  const whereClause = and(...whereConditions);
+  const movementWhereClause = and(...whereConditions);
+  const joinedWhereClause = productQueryCondition
+    ? and(...whereConditions, productQueryCondition)
+    : movementWhereClause;
 
   const [rows, totalRows] = await Promise.all([
     db
@@ -489,17 +504,24 @@ export async function getInventoryMovementsPage(
       .from(inventoryMovements)
       .innerJoin(products, eq(inventoryMovements.productId, products.id))
       .leftJoin(users, eq(inventoryMovements.createdBy, users.id))
-      .where(whereClause!)
+      .where(joinedWhereClause!)
       .orderBy(desc(inventoryMovements.createdAt), desc(inventoryMovements.id))
       .limit(pageSize)
       .offset(offset),
-    db
-      .select({
-        total: sql<number>`count(*)`,
-      })
-      .from(inventoryMovements)
-      .innerJoin(products, eq(inventoryMovements.productId, products.id))
-      .where(whereClause!),
+    query
+      ? db
+          .select({
+            total: sql<number>`count(*)`,
+          })
+          .from(inventoryMovements)
+          .innerJoin(products, eq(inventoryMovements.productId, products.id))
+          .where(joinedWhereClause!)
+      : db
+          .select({
+            total: sql<number>`count(*)`,
+          })
+          .from(inventoryMovements)
+          .where(movementWhereClause!),
   ]);
 
   const movements = rows.map((row) => ({

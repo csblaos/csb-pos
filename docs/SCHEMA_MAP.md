@@ -209,6 +209,9 @@
   - `notification_inbox_store_topic_detected_idx`
   - unique `notification_rules_store_topic_entity_unique`
   - `notification_rules_store_topic_idx`
+- inventory movements:
+  - `inventory_movements_store_created_at_idx`
+  - `inventory_movements_store_type_created_at_idx`
 - product variants:
   - `product_models_store_name_unique`
   - `product_model_attributes_model_code_unique`

@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ScanBarcode, X } from "lucide-react";
+import { ChevronDown, ChevronUp, ScanBarcode, Search, X } from "lucide-react";
 import toast from "react-hot-toast";
 
 import { Button } from "@/components/ui/button";
@@ -137,6 +137,7 @@ export function StockRecordingForm({
   const [showScanner, setShowScanner] = useState(false);
   const [showScannerPermission, setShowScannerPermission] = useState(false);
   const [hasSeenScannerPermission, setHasSeenScannerPermission] = useState(false);
+  const [isUsageGuideOpen, setIsUsageGuideOpen] = useState(false);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -644,16 +645,31 @@ export function StockRecordingForm({
 
       {/* Help Text Box */}
       <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">
-        <p className="font-semibold text-blue-900">ฟอร์มนี้ใช้สำหรับงานปรับจำนวนสต็อก</p>
-        <p className="mt-1 text-xs text-blue-800">
-          ไม่บันทึกต้นทุนสินค้าและไม่รองรับอัตราแลกเปลี่ยน (rate)
-        </p>
-        <ul className="mt-1 space-y-1 text-xs text-blue-700">
-          <li>• <strong>ตรวจนับสต็อก</strong> (Stock Take) - ปรับยอดให้ตรงกับความเป็นจริง</li>
-          <li>• <strong>รับคืนจากลูกค้า</strong> - สินค้าที่รับคืนมาเพิ่มเข้าสต็อก</li>
-          <li>• <strong>โอนระหว่างสาขา</strong> - รับ/ส่งสินค้าระหว่างสาขา</li>
-          <li>• <strong>ของแถม/ตัวอย่าง</strong> - เจ้าของนำมาเพิ่มโดยไม่ผ่าน PO</li>
-        </ul>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <p className="font-semibold text-blue-900">ฟอร์มนี้ใช้สำหรับงานปรับจำนวนสต็อก</p>
+            <p className="mt-1 text-xs text-blue-800">
+              ไม่บันทึกต้นทุนสินค้าและไม่รองรับอัตราแลกเปลี่ยน (rate)
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsUsageGuideOpen((current) => !current)}
+            aria-expanded={isUsageGuideOpen}
+            className="inline-flex shrink-0 items-center gap-1 rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-medium text-blue-800 transition hover:bg-blue-100"
+          >
+            {isUsageGuideOpen ? "ซ่อนรายละเอียด" : "อ่านวิธีใช้"}
+            {isUsageGuideOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          </button>
+        </div>
+        {isUsageGuideOpen ? (
+          <ul className="mt-2 space-y-1 text-xs text-blue-700">
+            <li>• <strong>ตรวจนับสต็อก</strong> (Stock Take) - ปรับยอดให้ตรงกับความเป็นจริง</li>
+            <li>• <strong>รับคืนจากลูกค้า</strong> - สินค้าที่รับคืนมาเพิ่มเข้าสต็อก</li>
+            <li>• <strong>โอนระหว่างสาขา</strong> - รับ/ส่งสินค้าระหว่างสาขา</li>
+            <li>• <strong>ของแถม/ตัวอย่าง</strong> - เจ้าของนำมาเพิ่มโดยไม่ผ่าน PO</li>
+          </ul>
+        ) : null}
       </div>
 
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
