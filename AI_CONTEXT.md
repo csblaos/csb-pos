@@ -136,6 +136,7 @@ npm run db:migrate
   - ใน Create PO/แก้ไข PO ช่องวันที่ `คาดว่าจะได้รับ` และ `ครบกำหนดชำระ` ปรับ responsive ใหม่: mobile แสดงแยกบรรทัด (1 คอลัมน์), จอใหญ่ค่อยจัด 2 คอลัมน์ และเพิ่ม `min-w-0/max-w-full` กัน date input ล้นจอ
   - เนื่องจาก `input[type=date]` บนมือถือไม่รองรับ placeholder สม่ำเสมอ จึงเพิ่ม helper text + quick actions (`วันนี้`, `+7 วัน`, `สิ้นเดือน`, `ล้างค่า`) สำหรับช่องวันที่ใน Create PO และ Edit PO
   - เพิ่ม hardening บน mobile สำหรับ PO detail/edit: `SlideUpSheet` content กัน overflow แนวนอน (`overflow-x-hidden`) และ date input ใน Edit PO ใช้ฟอนต์ 16px บนมือถือ (`text-base`) เพื่อลด iOS auto-zoom/อาการล้นจอ
+  - เพิ่มคลาส `po-date-input` + global CSS (coarse pointer) เพื่อบังคับ `width/max-width/min-width` และควบคุม `::-webkit-datetime-edit` สำหรับ native date input ลดเคสล้นจอบนมือถือจริง (Create/Edit PO + Month-End filters)
   - ใน modal `คิว PO รอปิดเรท` (Month-End bulk) ช่องตัวเลข `อัตราแลกเปลี่ยนจริง` และ `ยอดชำระรวมตาม statement` ใช้ placeholder `0` โดยไม่ prefill ค่า `0` ลง input
   - modal `Create PO` ตั้งค่าไม่ให้ปิดเมื่อกด backdrop แล้ว (`closeOnBackdrop=false`) และเพิ่มปุ่ม `ยกเลิก` ที่ footer เพื่อปิดฟอร์มอย่างชัดเจน
   - modal `Create PO` เพิ่ม custom confirm ก่อนปิดเมื่อมีข้อมูลค้าง (ทั้งกดปุ่ม `ยกเลิก` และปุ่ม `X`) เพื่อลดการทิ้งฟอร์มโดยไม่ตั้งใจ
@@ -144,6 +145,7 @@ npm run db:migrate
   - หน้า `/stock?tab=purchase` ปรับลำดับ section ให้ `ตัวชี้วัดและทางลัด` แสดงก่อน แล้วค่อย `โหมดการทำงาน`; การ์ด KPI ใช้โทนสีปกติ (neutral slate) ทั้งหมด
   - summary strip ด้านบน (`Open PO`, `Pending Rate`, `Overdue AP`, `Outstanding`) เป็น KPI summary-only (ไม่คลิก) และใช้สีคงที่ไม่เปลี่ยนตาม preset; shortcut ใช้ saved preset chip ด้านล่างเพื่อพาไป workspace + ตัวกรองด่วน พร้อมแถบ `Applied filter` สำหรับล้าง/บันทึก preset
   - จำ workspace ล่าสุดด้วย `workspace` query + localStorage และ sync ตัวกรองหลักลง URL (`poStatus`, `due`, `payment`, `sort`) เพื่อแชร์ลิงก์มุมมองเดียวกันในทีมได้
+  - ปรับ UX ตอนสลับ workspace/filter ที่ sync ลง URL: ฝั่ง client เก็บ/restore scroll position (best-effort) หลัง `router.replace` เพื่อลดอาการเด้งขึ้นบนระหว่างเปลี่ยนโหมดการทำงาน
   - `poStatus` จะไม่ถูกใส่ใน URL เมื่อเป็นค่า default (`OPEN`); ถ้าผู้ใช้เลือก `ทั้งหมด` หรือสถานะอื่น ระบบจะเก็บค่าใน URL เพื่อคงมุมมองเดิมหลัง refresh/share link
   - แก้ race condition ตอนเข้า `AP by Supplier` แล้วเด้งกลับ workspace เดิม: การ sync filter ฝั่ง AP จะยึด query ล่าสุดจาก URL และบังคับคง `workspace=SUPPLIER_AP` ระหว่างอัปเดต `due/payment/sort`
   - รองรับ Saved preset ต่อผู้ใช้ (เก็บใน localStorage) สำหรับเรียก shortcut ที่ใช้บ่อย และลบ preset ได้จากหน้าเดียวกัน

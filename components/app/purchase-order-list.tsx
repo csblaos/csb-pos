@@ -353,6 +353,7 @@ export function PurchaseOrderList({
   const [isBulkSubmitting, setIsBulkSubmitting] = useState(false);
   const [bulkProgressText, setBulkProgressText] = useState<string | null>(null);
   const [bulkErrors, setBulkErrors] = useState<string[]>([]);
+  const pendingScrollRestoreRef = useRef<{ x: number; y: number } | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isCreateCloseConfirmOpen, setIsCreateCloseConfirmOpen] = useState(false);
   const [selectedPO, setSelectedPO] = useState<string | null>(null);
@@ -525,12 +526,39 @@ export function PurchaseOrderList({
       if (nextQuery === currentQuery) {
         return;
       }
+      if (typeof window !== "undefined") {
+        pendingScrollRestoreRef.current = {
+          x: window.scrollX,
+          y: window.scrollY,
+        };
+      }
       router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
         scroll: false,
       });
     },
     [pathname, router, searchParams],
   );
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const pending = pendingScrollRestoreRef.current;
+    if (!pending) {
+      return;
+    }
+    const restore = () => {
+      window.scrollTo(pending.x, pending.y);
+    };
+    const rafId = window.requestAnimationFrame(() => {
+      restore();
+      window.setTimeout(restore, 0);
+    });
+    pendingScrollRestoreRef.current = null;
+    return () => {
+      window.cancelAnimationFrame(rafId);
+    };
+  }, [searchParams]);
 
   const replaceWorkspaceQuery = useCallback(
     (nextWorkspace: PurchaseWorkspace) => {
@@ -1807,13 +1835,13 @@ export function PurchaseOrderList({
           />
           <input
             type="date"
-            className="h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
+            className="po-date-input h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
             value={pendingReceivedFrom}
             onChange={(event) => setPendingReceivedFrom(event.target.value)}
           />
           <input
             type="date"
-            className="h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
+            className="po-date-input h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
             value={pendingReceivedTo}
             onChange={(event) => setPendingReceivedTo(event.target.value)}
           />
@@ -1925,7 +1953,7 @@ export function PurchaseOrderList({
                     <label className="text-[11px] text-slate-600">วันที่ชำระ (top-up date)</label>
                     <input
                       type="date"
-                      className="h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
+                      className="po-date-input h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
                       value={bulkPaidAtInput}
                       onChange={(event) => setBulkPaidAtInput(event.target.value)}
                       disabled={isBulkSubmitting}
@@ -2777,7 +2805,7 @@ export function PurchaseOrderList({
                       คาดว่าจะได้รับ (ไม่บังคับ)
                     </label>
                     <input
-                      className={fieldClassName}
+                      className={`${fieldClassName} po-date-input`}
                       type="date"
                       value={expectedAt}
                       onChange={(e) => setExpectedAt(e.target.value)}
@@ -2821,7 +2849,7 @@ export function PurchaseOrderList({
                       ครบกำหนดชำระ (due date)
                     </label>
                     <input
-                      className={fieldClassName}
+                      className={`${fieldClassName} po-date-input`}
                       type="date"
                       value={dueDate}
                       onChange={(e) => setDueDate(e.target.value)}
@@ -4029,7 +4057,7 @@ function PODetailSheet({
                     </label>
                     <input
                       type="date"
-                      className="h-9 w-full rounded-lg border border-emerald-200 bg-white px-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-300"
+                      className="po-date-input h-9 w-full rounded-lg border border-emerald-200 bg-white px-2.5 text-sm outline-none focus:ring-2 focus:ring-emerald-300"
                       value={settlePaidAtInput}
                       onChange={(event) => setSettlePaidAtInput(event.target.value)}
                     />
@@ -4407,7 +4435,7 @@ function PODetailSheet({
                       <label className="text-[11px] text-slate-500">วันที่คาดรับ</label>
                       <input
                         type="date"
-                        className="h-9 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-2.5 text-base sm:text-sm outline-none focus:ring-2 focus:ring-primary"
+                        className="po-date-input h-9 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-2.5 text-base sm:text-sm outline-none focus:ring-2 focus:ring-primary"
                         value={editForm.expectedAt}
                         onChange={(e) =>
                           setEditForm((prev) => ({
@@ -4451,7 +4479,7 @@ function PODetailSheet({
                       <label className="text-[11px] text-slate-500">ครบกำหนดชำระ</label>
                       <input
                         type="date"
-                        className="h-9 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-2.5 text-base sm:text-sm outline-none focus:ring-2 focus:ring-primary"
+                        className="po-date-input h-9 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-2.5 text-base sm:text-sm outline-none focus:ring-2 focus:ring-primary"
                         value={editForm.dueDate}
                         onChange={(e) =>
                           setEditForm((prev) => ({

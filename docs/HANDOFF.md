@@ -14,7 +14,12 @@
   - เพิ่ม hardening สำหรับ production mobile:
     - `SlideUpSheet` content เพิ่ม `overflow-x-hidden` กัน element ดันความกว้างเกิน viewport
     - date input ใน `Edit PO` ปรับเป็น `text-base` บนมือถือ (16px) แล้วค่อย `sm:text-sm` เพื่อลด iOS auto-zoom ที่ทำให้ดูเหมือน modal ล้นจอ
+    - เพิ่มคลาส `po-date-input` และ global CSS (เฉพาะ coarse pointer) เพื่อบังคับขนาด/การตัดข้อความของ native date control (`::-webkit-datetime-edit`) ลดเคสล้นจอใน production mobile
   - ใน modal `คิว PO รอปิดเรท` ปรับช่องตัวเลข `อัตราแลกเปลี่ยนจริง` และ `ยอดชำระรวมตาม statement` ให้ใช้ placeholder `0` โดยไม่ prefill `0` จริง
+
+- ปรับ UX ตอนสลับ `โหมดการทำงาน`/ตัวกรองที่ผูก URL ในหน้า PO:
+  - ก่อน `router.replace` ระบบจะเก็บตำแหน่ง scroll ปัจจุบันไว้ และ restore หลัง query เปลี่ยน (best-effort)
+  - ลดอาการหน้าเด้งกลับไปบนสุดระหว่างสลับ `PO Operations` / `Month-End Close` / `AP by Supplier`
 
 - ปรับ UX ช่องตัวเลขใน modal `Create PO`:
   - ช่อง `ราคา/₭` (ต่อรายการสินค้า), `ค่าขนส่ง`, `ค่าอื่นๆ` เปลี่ยนเป็นค่าว่างเริ่มต้น (ไม่ prefill `0`)
