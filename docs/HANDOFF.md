@@ -15,6 +15,7 @@
     - `SlideUpSheet` content เพิ่ม `overflow-x-hidden` กัน element ดันความกว้างเกิน viewport
     - date input ใน `Edit PO` ปรับเป็น `text-base` บนมือถือ (16px) แล้วค่อย `sm:text-sm` เพื่อลด iOS auto-zoom ที่ทำให้ดูเหมือน modal ล้นจอ
     - เพิ่มคลาส `po-date-input` และ global CSS (เฉพาะ coarse pointer) เพื่อบังคับขนาด/การตัดข้อความของ native date control (`::-webkit-datetime-edit`) ลดเคสล้นจอใน production mobile
+  - เปลี่ยนช่อง `วันที่คาดรับ/ครบกำหนดชำระ` ใน Create/Edit PO เป็น custom datepicker (calendar popover) แทน native `type=date` เพื่อแก้เคสล้นจอบน iOS ให้เสถียรกว่า
   - ใน modal `คิว PO รอปิดเรท` ปรับช่องตัวเลข `อัตราแลกเปลี่ยนจริง` และ `ยอดชำระรวมตาม statement` ให้ใช้ placeholder `0` โดยไม่ prefill `0` จริง
 
 - ปรับ UX ตอนสลับ `โหมดการทำงาน`/ตัวกรองที่ผูก URL ในหน้า PO:
@@ -38,6 +39,7 @@
 - ปรับ UX modal `Product Detail` ในหน้า `/products`:
   - ปิดการปิดด้วย backdrop แล้ว (`closeOnBackdrop=false`)
   - ตอนคลิกนอก modal จะไม่ปิด เพื่อลดการเสีย context ระหว่างดูข้อมูลสินค้า
+  - เพิ่ม inner padding ของเนื้อหาใน modal เล็กน้อย (จาก base `16px` เป็น `20px` ต่อด้าน) เพื่อให้หายใจขึ้นและอ่านข้อมูลง่ายขึ้น
 
 - ปรับ default filter ของ `PO Operations`:
   - ค่าเริ่มต้นในรายการ PO เปลี่ยนจาก `ทั้งหมด` เป็น `งานเปิด (OPEN)` เพื่อลดงานที่ปิดแล้วในมุมมองแรก

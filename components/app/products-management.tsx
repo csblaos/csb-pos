@@ -3972,7 +3972,7 @@ export function ProductsManagement({
         }
       >
         {detailProduct && (
-          <div className="space-y-4">
+          <div className="space-y-4 px-1 pb-1">
             {/* Product image + actions */}
             <div className="flex flex-col items-center gap-2">
               {detailProduct.imageUrl ? (

@@ -2,7 +2,9 @@
 
 import {
   Banknote,
+  CalendarDays,
   Clock,
+  ChevronLeft,
   Download,
   Loader2,
   Package,
@@ -263,6 +265,213 @@ function toDateInputValue(date: Date): string {
   const month = `${date.getMonth() + 1}`.padStart(2, "0");
   const day = `${date.getDate()}`.padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function parseIsoDateValue(value: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [yearText, monthText, dayText] = value.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day)
+  ) {
+    return null;
+  }
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+  return parsed;
+}
+
+function formatIsoDateDisplay(value: string): string {
+  const parsed = parseIsoDateValue(value);
+  if (!parsed) return "";
+  const day = `${parsed.getDate()}`.padStart(2, "0");
+  const month = `${parsed.getMonth() + 1}`.padStart(2, "0");
+  const year = parsed.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+const calendarWeekdayLabels = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"] as const;
+
+type PurchaseDatePickerFieldProps = {
+  value: string;
+  onChange: (nextValue: string) => void;
+  triggerClassName: string;
+  placeholder?: string;
+  ariaLabel: string;
+  disabled?: boolean;
+};
+
+function PurchaseDatePickerField({
+  value,
+  onChange,
+  triggerClassName,
+  placeholder = "dd/mm/yyyy",
+  ariaLabel,
+  disabled = false,
+}: PurchaseDatePickerFieldProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [viewCursor, setViewCursor] = useState<Date>(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const parsed = parseIsoDateValue(value) ?? new Date();
+    setViewCursor(new Date(parsed.getFullYear(), parsed.getMonth(), 1));
+  }, [isOpen, value]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (!containerRef.current?.contains(target)) {
+        setIsOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  const firstDayOfMonth = new Date(
+    viewCursor.getFullYear(),
+    viewCursor.getMonth(),
+    1,
+  ).getDay();
+  const daysInMonth = new Date(
+    viewCursor.getFullYear(),
+    viewCursor.getMonth() + 1,
+    0,
+  ).getDate();
+  const calendarCells: Array<number | null> = [
+    ...Array.from({ length: firstDayOfMonth }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, index) => index + 1),
+  ];
+  while (calendarCells.length < 42) {
+    calendarCells.push(null);
+  }
+  const todayIso = toDateInputValue(new Date());
+  const selectedIso = parseIsoDateValue(value) ? value : "";
+  const monthLabel = viewCursor.toLocaleDateString("th-TH", {
+    month: "long",
+    year: "numeric",
+  });
+
+  return (
+    <div ref={containerRef} className="relative min-w-0">
+      <button
+        type="button"
+        className={triggerClassName}
+        aria-label={ariaLabel}
+        onClick={() => {
+          if (disabled) return;
+          setIsOpen((prev) => !prev);
+        }}
+        disabled={disabled}
+      >
+        <span
+          className={`truncate ${selectedIso ? "text-slate-900" : "text-slate-400"}`}
+        >
+          {selectedIso ? formatIsoDateDisplay(selectedIso) : placeholder}
+        </span>
+        <CalendarDays className="h-4 w-4 shrink-0 text-slate-400" />
+      </button>
+
+      {isOpen ? (
+        <div className="absolute left-0 right-0 top-[calc(100%+0.4rem)] z-[130] rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+          <div className="flex items-center justify-between pb-1">
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+              onClick={() =>
+                setViewCursor(
+                  (prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1),
+                )
+              }
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+            <p className="text-xs font-semibold text-slate-700">{monthLabel}</p>
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+              onClick={() =>
+                setViewCursor(
+                  (prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1),
+                )
+              }
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-7 gap-1 pb-1">
+            {calendarWeekdayLabels.map((label) => (
+              <span
+                key={label}
+                className="flex h-6 items-center justify-center text-[10px] font-medium text-slate-400"
+              >
+                {label}
+              </span>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7 gap-1">
+            {calendarCells.map((day, index) => {
+              if (day === null) {
+                return <span key={`blank-${index}`} className="h-8" />;
+              }
+              const dayIso = toDateInputValue(
+                new Date(viewCursor.getFullYear(), viewCursor.getMonth(), day),
+              );
+              const isSelected = selectedIso === dayIso;
+              const isToday = todayIso === dayIso;
+              return (
+                <button
+                  key={dayIso}
+                  type="button"
+                  className={`h-8 rounded-md text-xs font-medium transition-colors ${
+                    isSelected
+                      ? "bg-primary text-primary-foreground"
+                      : isToday
+                        ? "border border-primary/40 bg-primary/10 text-primary"
+                        : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                  onClick={() => {
+                    onChange(dayIso);
+                    setIsOpen(false);
+                  }}
+                >
+                  {day}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function sortPendingQueueForSettlement(
@@ -2804,11 +3013,11 @@ export function PurchaseOrderList({
                     <label className="text-xs text-muted-foreground">
                       คาดว่าจะได้รับ (ไม่บังคับ)
                     </label>
-                    <input
-                      className={`${fieldClassName} po-date-input`}
-                      type="date"
+                    <PurchaseDatePickerField
                       value={expectedAt}
-                      onChange={(e) => setExpectedAt(e.target.value)}
+                      onChange={setExpectedAt}
+                      triggerClassName={`${fieldClassName} flex items-center justify-between gap-2 text-left`}
+                      ariaLabel="เลือกวันที่คาดว่าจะได้รับ"
                     />
                     <p className="text-[11px] text-slate-500">
                       ยังไม่ระบุได้ เลือกภายหลังได้
@@ -2848,11 +3057,11 @@ export function PurchaseOrderList({
                     <label className="text-xs text-muted-foreground">
                       ครบกำหนดชำระ (due date)
                     </label>
-                    <input
-                      className={`${fieldClassName} po-date-input`}
-                      type="date"
+                    <PurchaseDatePickerField
                       value={dueDate}
-                      onChange={(e) => setDueDate(e.target.value)}
+                      onChange={setDueDate}
+                      triggerClassName={`${fieldClassName} flex items-center justify-between gap-2 text-left`}
+                      ariaLabel="เลือกวันที่ครบกำหนดชำระ"
                     />
                     <p className="text-[11px] text-slate-500">
                       ถ้ายังไม่รู้กำหนดจริง ให้เว้นว่างไว้ก่อนได้
@@ -4433,16 +4642,13 @@ function PODetailSheet({
                   <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
                     <div className="space-y-1 min-w-0">
                       <label className="text-[11px] text-slate-500">วันที่คาดรับ</label>
-                      <input
-                        type="date"
-                        className="po-date-input h-9 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-2.5 text-base sm:text-sm outline-none focus:ring-2 focus:ring-primary"
+                      <PurchaseDatePickerField
                         value={editForm.expectedAt}
-                        onChange={(e) =>
-                          setEditForm((prev) => ({
-                            ...prev,
-                            expectedAt: e.target.value,
-                          }))
+                        onChange={(nextValue) =>
+                          setEditForm((prev) => ({ ...prev, expectedAt: nextValue }))
                         }
+                        triggerClassName="h-9 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-2.5 text-left text-base sm:text-sm outline-none focus:ring-2 focus:ring-primary"
+                        ariaLabel="เลือกวันที่คาดรับในฟอร์มแก้ไข PO"
                       />
                       <div className="flex max-w-full flex-wrap gap-1.5 pt-1">
                         <button
@@ -4477,16 +4683,13 @@ function PODetailSheet({
                     </div>
                     <div className="space-y-1 min-w-0">
                       <label className="text-[11px] text-slate-500">ครบกำหนดชำระ</label>
-                      <input
-                        type="date"
-                        className="po-date-input h-9 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-2.5 text-base sm:text-sm outline-none focus:ring-2 focus:ring-primary"
+                      <PurchaseDatePickerField
                         value={editForm.dueDate}
-                        onChange={(e) =>
-                          setEditForm((prev) => ({
-                            ...prev,
-                            dueDate: e.target.value,
-                          }))
+                        onChange={(nextValue) =>
+                          setEditForm((prev) => ({ ...prev, dueDate: nextValue }))
                         }
+                        triggerClassName="h-9 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-2.5 text-left text-base sm:text-sm outline-none focus:ring-2 focus:ring-primary"
+                        ariaLabel="เลือกวันที่ครบกำหนดชำระในฟอร์มแก้ไข PO"
                       />
                       <div className="flex max-w-full flex-wrap gap-1.5 pt-1">
                         <button

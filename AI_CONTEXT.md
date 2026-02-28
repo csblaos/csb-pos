@@ -108,6 +108,7 @@ npm run db:migrate
   - หน้า Product Detail ไม่แสดงปุ่ม quick action เกี่ยวกับรูปแล้ว (จัดการรูปผ่านปุ่ม `แก้ไข` ในฟอร์มเดียว)
   - หน้า Product Detail ย้าย action หลัก (`แก้ไข/สำเนา/เปิด-ปิดใช้งาน/พิมพ์บาร์โค้ด`) ไป footer ของ `SlideUpSheet` แบบ sticky และเพิ่ม custom confirm dialog ก่อน `ปิดใช้งาน` (ไม่ใช้ browser alert) พร้อม animation เปิด/ปิด และจัดวางกล่องยืนยันกึ่งกลางจอ
   - modal `Product Detail` ตั้งค่าไม่ให้ปิดเมื่อกด backdrop แล้ว (`closeOnBackdrop=false`) เพื่อลดการปิดรายละเอียดสินค้าโดยไม่ตั้งใจ
+  - modal `Product Detail` เพิ่ม inner spacing ของเนื้อหาอีกเล็กน้อย (`+4px` ต่อด้านจากค่า base ของ `SlideUpSheet`) เพื่อให้ช่องว่างอ่านง่ายขึ้นโดยไม่กระทบ modal อื่น
   - modal `เพิ่ม/แก้ไขสินค้า` และ `Product Detail` (ตอนแก้ต้นทุน) เพิ่ม custom confirm ก่อนปิดด้วยปุ่ม `ยกเลิก`/`X` เมื่อมีข้อมูลค้างที่ยังไม่บันทึก
   - ปุ่ม `ยืนยันปิดใช้งาน` ใน confirm dialog ใช้สี `primary` ของ theme (เอา style สีส้มแบบ hardcode ออก)
   - หน้า Product Detail ปรับรูปตัวอย่างให้เล็กลง (mobile `96px`, sm `112px`) และรองรับแตะรูปเพื่อเปิด preview เต็มจอ (ปิดได้ด้วยพื้นหลัง/ปุ่ม X/ปุ่ม Esc)
@@ -137,6 +138,7 @@ npm run db:migrate
   - เนื่องจาก `input[type=date]` บนมือถือไม่รองรับ placeholder สม่ำเสมอ จึงเพิ่ม helper text + quick actions (`วันนี้`, `+7 วัน`, `สิ้นเดือน`, `ล้างค่า`) สำหรับช่องวันที่ใน Create PO และ Edit PO
   - เพิ่ม hardening บน mobile สำหรับ PO detail/edit: `SlideUpSheet` content กัน overflow แนวนอน (`overflow-x-hidden`) และ date input ใน Edit PO ใช้ฟอนต์ 16px บนมือถือ (`text-base`) เพื่อลด iOS auto-zoom/อาการล้นจอ
   - เพิ่มคลาส `po-date-input` + global CSS (coarse pointer) เพื่อบังคับ `width/max-width/min-width` และควบคุม `::-webkit-datetime-edit` สำหรับ native date input ลดเคสล้นจอบนมือถือจริง (Create/Edit PO + Month-End filters)
+  - ช่อง `คาดว่าจะได้รับ` / `ครบกำหนดชำระ` ใน Create PO และ Edit PO เปลี่ยนเป็น custom datepicker (calendar popover + เก็บค่า `YYYY-MM-DD`) แล้ว เพื่อลด dependency กับ native date control บน iOS
   - ใน modal `คิว PO รอปิดเรท` (Month-End bulk) ช่องตัวเลข `อัตราแลกเปลี่ยนจริง` และ `ยอดชำระรวมตาม statement` ใช้ placeholder `0` โดยไม่ prefill ค่า `0` ลง input
   - modal `Create PO` ตั้งค่าไม่ให้ปิดเมื่อกด backdrop แล้ว (`closeOnBackdrop=false`) และเพิ่มปุ่ม `ยกเลิก` ที่ footer เพื่อปิดฟอร์มอย่างชัดเจน
   - modal `Create PO` เพิ่ม custom confirm ก่อนปิดเมื่อมีข้อมูลค้าง (ทั้งกดปุ่ม `ยกเลิก` และปุ่ม `X`) เพื่อลดการทิ้งฟอร์มโดยไม่ตั้งใจ
