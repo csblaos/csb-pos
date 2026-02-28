@@ -182,6 +182,10 @@ npm run db:migrate
   - ทั้ง 3 แท็บหลัก (`สั่งซื้อ`, `บันทึกสต็อก`, `ประวัติ`) มี toolbar มาตรฐาน: `รีเฟรชแท็บนี้` + เวลา `อัปเดตล่าสุด HH:mm`
   - เพิ่ม state มาตรฐานต่อแท็บ: loading skeleton / empty state / error + ปุ่ม retry
   - `บันทึกสต็อก` เพิ่ม quick preset (`รับเข้า`, `ปรับยอด`, `ของเสีย`) พร้อม note template และส่ง `Idempotency-Key` ตอน `POST /api/stock/movements` จาก client
+  - แท็บ `บันทึกสต็อก` เพิ่ม guardrail ชัดเจนว่า flow นี้ไม่บันทึกต้นทุน/อัตราแลกเปลี่ยน พร้อม CTA ไปแท็บ `สั่งซื้อ (PO)` สำหรับงานซื้อเข้า
+  - ใน mobile ของแท็บ `บันทึกสต็อก` เพิ่มปุ่ม sticky `บันทึกสต็อก` ที่ก้นจอ และเพิ่มปุ่ม `ดูสินค้าทั้งหมด` เปิด list picker (ค้นหาชื่อ/SKU แล้วแตะเลือกได้)
+  - `POST /api/stock/movements` จะ reject field กลุ่มต้นทุน/เรท (`cost/costBase/rate/exchangeRate/...`) ด้วย 400 เพื่อบังคับ separation ระหว่างงาน Recording vs PO/Month-End
+  - แท็บ `บันทึกสต็อก` sync filter หลักลง URL แล้ว (`recordingType`, `recordingProductId`) เพื่อแชร์ลิงก์มุมมอง/สินค้าเป้าหมายในทีมได้ โดยใช้ `router.replace(..., { scroll: false })`
   - ลิงก์ `ดูประวัติทั้งหมด` ในแท็บบันทึกสต็อก เปลี่ยนเป็น `router.push(?tab=history)` (ไม่ hard reload)
   - แท็บ `ประวัติ` ใช้ server-side pagination/filter ผ่าน `GET /api/stock/movements?view=history` รองรับกรอง `ประเภท/สินค้า/ช่วงวันที่`
   - รายการในแท็บ `ประวัติ` ใช้ windowed virtualization เพื่อลดภาระ render เมื่อจำนวนรายการต่อหน้าสูง

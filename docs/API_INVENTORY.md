@@ -68,7 +68,7 @@
 | `/api/stock/current` | `GET` | `Permission:inventory.view` | stock overview |
 | `/api/stock/products` | `GET` | `Permission:inventory.view` | stock products |
 | `/api/stock/movements` | `GET` | `Permission:inventory.view` | default: คืน `products + movements` สำหรับ stock overview; รองรับโหมด history (`view=history`) พร้อม query `page`,`pageSize`,`type`,`q`,`productId`,`dateFrom`,`dateTo` เพื่อ list movement แบบ server-side pagination/filter |
-| `/api/stock/movements` | `POST` | `Permission:inventory.create` | create movement (payload ไม่รับ `cost`; ใช้เฉพาะ qty/unit/movementType/adjustMode/note) |
+| `/api/stock/movements` | `POST` | `Permission:inventory.create` | create movement (payload ใช้เฉพาะ `qty/unit/movementType/adjustMode/note`; ถ้าส่ง field กลุ่มต้นทุน/เรท เช่น `cost`,`costBase`,`rate`,`exchangeRate` จะถูก reject 400) |
 | `/api/stock/purchase-orders` | `GET` | `Permission:inventory.view` | list PO |
 | `/api/stock/purchase-orders` | `POST` | `Permission:inventory.create` | create PO (foreign currency รองรับสร้างแบบยังไม่ปิดเรทได้ โดยไม่ส่ง `exchangeRate`) |
 | `/api/stock/purchase-orders/ap-by-supplier` | `GET` | `Permission:inventory.view` | summary เจ้าหนี้ค้างจ่ายราย supplier (รองรับ `q`,`limit`) |

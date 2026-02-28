@@ -6,6 +6,12 @@
 
 ## Changed (ล่าสุด)
 
+- ปรับ flow แท็บ `/stock?tab=recording` ให้แยกจากงานบัญชี/PO ชัดขึ้น:
+  - เพิ่ม guardrail card ว่า Recording ใช้สำหรับปรับจำนวนสต็อกเท่านั้น (ไม่บันทึกต้นทุน/เรท) และเพิ่มปุ่มลัด `ไปแท็บสั่งซื้อ (PO)`
+  - เพิ่ม mobile UX: ปุ่ม `บันทึกสต็อก` แบบ sticky ที่ก้นจอ และปุ่ม `ดูสินค้าทั้งหมด` เพื่อเปิด list picker เลือกสินค้าได้โดยไม่ต้องพิมพ์ก่อน
+  - harden API `POST /api/stock/movements`: ถ้าส่ง field กลุ่มต้นทุน/เรท (`cost/costBase/rate/exchangeRate/...`) จะตอบ 400 พร้อมข้อความแนะนำให้ไปทำที่ PO/Month-End
+  - sync filter หลักของ Recording ลง URL (`recordingType`, `recordingProductId`) เพื่อแชร์มุมมองเดียวกันได้ และใช้ `router.replace(..., { scroll: false })` ลดอาการเด้งจอ
+
 - แก้ปัญหา date input ล้นจอบนมือถือใน PO:
   - ช่อง `คาดว่าจะได้รับ` และ `ครบกำหนดชำระ` (Create PO) ปรับเป็น 1 คอลัมน์บน mobile และ 2 คอลัมน์บนจอใหญ่ (`md+`)
   - ฟอร์ม `แก้ไข PO` ส่วนวันที่/tracking ปรับจาก `sm:3 คอลัมน์` เป็น responsive (`1 -> 2 -> 3`) เพื่อลดการบีบช่องบนจอเล็ก

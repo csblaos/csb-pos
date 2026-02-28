@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, ScanBarcode, X } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -35,6 +35,8 @@ type StockRecordingFormProps = {
 
 type MovementType = "IN" | "ADJUST" | "RETURN";
 type AdjustMode = "INCREASE" | "DECREASE";
+const RECORDING_MOVEMENT_QUERY_KEY = "recordingType";
+const RECORDING_PRODUCT_QUERY_KEY = "recordingProductId";
 
 const movementLabel: Record<MovementType, string> = {
   IN: "รับเข้า",
@@ -60,6 +62,13 @@ const movementTypeLabelMap: Record<InventoryMovementView["type"], string> = {
   RETURN: "รับคืน",
 };
 
+function parseMovementTypeQuery(value: string | null): MovementType | null {
+  if (value === "IN" || value === "ADJUST" || value === "RETURN") {
+    return value;
+  }
+  return null;
+}
+
 export function StockRecordingForm({
   initialProducts,
   canCreate,
@@ -67,6 +76,13 @@ export function StockRecordingForm({
   canInbound,
 }: StockRecordingFormProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const movementTypeFromQuery = parseMovementTypeQuery(
+    searchParams.get(RECORDING_MOVEMENT_QUERY_KEY),
+  );
+  const productIdFromQuery =
+    searchParams.get(RECORDING_PRODUCT_QUERY_KEY)?.trim() ?? "";
   const [productItems, setProductItems] = useState(initialProducts);
   const [recentMovements, setRecentMovements] = useState<InventoryMovementView[]>([]);
   const [isRefreshingData, setIsRefreshingData] = useState(false);
@@ -86,10 +102,16 @@ export function StockRecordingForm({
     return options;
   }, [canAdjust, canInbound]);
 
-  const [productId, setProductId] = useState<string>("");
-  const [movementType, setMovementType] = useState<MovementType>(
-    movementTypeOptions[0] ?? "IN",
-  );
+  const [productId, setProductId] = useState<string>(productIdFromQuery);
+  const [movementType, setMovementType] = useState<MovementType>(() => {
+    if (
+      movementTypeFromQuery &&
+      movementTypeOptions.includes(movementTypeFromQuery)
+    ) {
+      return movementTypeFromQuery;
+    }
+    return movementTypeOptions[0] ?? "IN";
+  });
   const [unitId, setUnitId] = useState<string>("");
   const [qty, setQty] = useState<string>("1");
   const [adjustMode, setAdjustMode] = useState<AdjustMode>("INCREASE");
@@ -104,6 +126,8 @@ export function StockRecordingForm({
   >([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const [showProductPicker, setShowProductPicker] = useState(false);
+  const [productPickerQuery, setProductPickerQuery] = useState("");
   const [currentStock, setCurrentStock] = useState<{
     onHand: number;
     available: number;
@@ -115,6 +139,21 @@ export function StockRecordingForm({
   const [hasSeenScannerPermission, setHasSeenScannerPermission] = useState(false);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const fetchCurrentStock = useCallback(async (prodId: string) => {
+    setLoadingStock(true);
+    try {
+      const res = await authFetch(`/api/stock/current?productId=${prodId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setCurrentStock(data.stock || null);
+      }
+    } catch {
+      setCurrentStock(null);
+    } finally {
+      setLoadingStock(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (initialProducts.length === 0) {
@@ -160,12 +199,90 @@ export function StockRecordingForm({
     }
   }, [movementType, movementTypeOptions]);
 
+  useEffect(() => {
+    const nextMovementType = parseMovementTypeQuery(
+      searchParams.get(RECORDING_MOVEMENT_QUERY_KEY),
+    );
+    if (
+      nextMovementType &&
+      movementTypeOptions.includes(nextMovementType) &&
+      nextMovementType !== movementType
+    ) {
+      setMovementType(nextMovementType);
+    }
+
+    const nextProductId =
+      searchParams.get(RECORDING_PRODUCT_QUERY_KEY)?.trim() ?? "";
+    if (!nextProductId || nextProductId === productId) {
+      return;
+    }
+    if (productItems.some((item) => item.productId === nextProductId)) {
+      setProductId(nextProductId);
+      void fetchCurrentStock(nextProductId);
+    }
+  }, [
+    fetchCurrentStock,
+    movementType,
+    movementTypeOptions,
+    productId,
+    productItems,
+    searchParams,
+  ]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    const defaultMovementType = movementTypeOptions[0] ?? "IN";
+    let changed = false;
+
+    if (movementType === defaultMovementType) {
+      if (params.has(RECORDING_MOVEMENT_QUERY_KEY)) {
+        params.delete(RECORDING_MOVEMENT_QUERY_KEY);
+        changed = true;
+      }
+    } else if (params.get(RECORDING_MOVEMENT_QUERY_KEY) !== movementType) {
+      params.set(RECORDING_MOVEMENT_QUERY_KEY, movementType);
+      changed = true;
+    }
+
+    if (productId) {
+      if (params.get(RECORDING_PRODUCT_QUERY_KEY) !== productId) {
+        params.set(RECORDING_PRODUCT_QUERY_KEY, productId);
+        changed = true;
+      }
+    } else if (params.has(RECORDING_PRODUCT_QUERY_KEY)) {
+      params.delete(RECORDING_PRODUCT_QUERY_KEY);
+      changed = true;
+    }
+
+    if (!changed) {
+      return;
+    }
+
+    const nextQuery = params.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
+      scroll: false,
+    });
+  }, [movementType, movementTypeOptions, pathname, productId, router, searchParams]);
+
   const selectedProduct = useMemo(
     () => productItems.find((item) => item.productId === productId),
     [productId, productItems],
   );
 
   const selectedUnit = selectedProduct?.unitOptions.find((unit) => unit.unitId === unitId);
+
+  const filteredProductItems = useMemo(() => {
+    const query = productPickerQuery.trim().toLowerCase();
+    if (!query) {
+      return productItems;
+    }
+    return productItems.filter((item) => {
+      return (
+        item.name.toLowerCase().includes(query) ||
+        item.sku.toLowerCase().includes(query)
+      );
+    });
+  }, [productItems, productPickerQuery]);
 
   const qtyBasePreview = useMemo(() => {
     const qtyNumber = Number(qty);
@@ -185,21 +302,6 @@ export function StockRecordingForm({
 
     return rounded;
   }, [adjustMode, movementType, qty, selectedUnit]);
-
-  const fetchCurrentStock = async (prodId: string) => {
-    setLoadingStock(true);
-    try {
-      const res = await authFetch(`/api/stock/current?productId=${prodId}`);
-      if (res.ok) {
-        const data = await res.json();
-        setCurrentStock(data.stock || null);
-      }
-    } catch {
-      setCurrentStock(null);
-    } finally {
-      setLoadingStock(false);
-    }
-  };
 
   const handleSearch = useCallback(
     async (query: string) => {
@@ -342,6 +444,26 @@ export function StockRecordingForm({
     return `stock-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   };
 
+  const focusQtyInput = useCallback(() => {
+    window.setTimeout(() => {
+      document.getElementById("stock-qty")?.focus();
+    }, 100);
+  }, []);
+
+  const applySelectedProduct = useCallback(
+    (nextProductId: string, nextBaseUnitId: string) => {
+      setProductId(nextProductId);
+      setUnitId(nextBaseUnitId);
+      setSearchQuery("");
+      setShowSearchDropdown(false);
+      setShowProductPicker(false);
+      setProductPickerQuery("");
+      void fetchCurrentStock(nextProductId);
+      focusQtyInput();
+    },
+    [fetchCurrentStock, focusQtyInput],
+  );
+
   const selectProductFromSearch = (product: ProductListItem) => {
     const exists = productItems.find((item) => item.productId === product.id);
     if (!exists) {
@@ -369,17 +491,21 @@ export function StockRecordingForm({
       };
       setProductItems((prev) => [nextProduct, ...prev]);
     }
-
-    setProductId(product.id);
-    setUnitId(product.baseUnitId);
-    setSearchQuery("");
-    setShowSearchDropdown(false);
-    fetchCurrentStock(product.id);
-
-    setTimeout(() => {
-      document.getElementById("stock-qty")?.focus();
-    }, 100);
+    applySelectedProduct(product.id, product.baseUnitId);
   };
+
+  const selectProductFromPicker = useCallback(
+    (product: StockProductOption) => {
+      applySelectedProduct(product.productId, product.baseUnitId);
+    },
+    [applySelectedProduct],
+  );
+
+  const jumpToPurchaseTab = useCallback(() => {
+    const params = new URLSearchParams(window.location.search);
+    params.set("tab", "purchase");
+    router.push(`?${params.toString()}`);
+  }, [router]);
 
   const handleBarcodeResult = async (barcode: string) => {
     setShowScanner(false);
@@ -518,13 +644,31 @@ export function StockRecordingForm({
 
       {/* Help Text Box */}
       <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">
-        <p className="font-semibold text-blue-900">💡 ฟอร์มนี้ใช้สำหรับ:</p>
+        <p className="font-semibold text-blue-900">ฟอร์มนี้ใช้สำหรับงานปรับจำนวนสต็อก</p>
+        <p className="mt-1 text-xs text-blue-800">
+          ไม่บันทึกต้นทุนสินค้าและไม่รองรับอัตราแลกเปลี่ยน (rate)
+        </p>
         <ul className="mt-1 space-y-1 text-xs text-blue-700">
           <li>• <strong>ตรวจนับสต็อก</strong> (Stock Take) - ปรับยอดให้ตรงกับความเป็นจริง</li>
           <li>• <strong>รับคืนจากลูกค้า</strong> - สินค้าที่รับคืนมาเพิ่มเข้าสต็อก</li>
           <li>• <strong>โอนระหว่างสาขา</strong> - รับ/ส่งสินค้าระหว่างสาขา</li>
           <li>• <strong>ของแถม/ตัวอย่าง</strong> - เจ้าของนำมาเพิ่มโดยไม่ผ่าน PO</li>
         </ul>
+      </div>
+
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+        <p className="font-semibold">ถ้าคุณกำลังซื้อสินค้าเข้าใหม่ ให้ไปแท็บสั่งซื้อ (PO)</p>
+        <p className="mt-1">
+          PO จะเก็บต้นทุน, เจ้าหนี้, และ workflow ปิดเรท/ชำระปลายเดือนให้ครบกว่า Recording
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          className="mt-2 h-8 border-amber-200 bg-white px-3 text-xs text-amber-800 hover:bg-amber-100"
+          onClick={jumpToPurchaseTab}
+        >
+          ไปแท็บสั่งซื้อ (PO)
+        </Button>
       </div>
 
       {quickPresets.length > 0 ? (
@@ -620,6 +764,16 @@ export function StockRecordingForm({
                 <ScanBarcode className="h-4 w-4" />
               </Button>
             </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-2 h-9 w-full text-xs sm:hidden"
+              onClick={() => setShowProductPicker(true)}
+              disabled={loading || productItems.length === 0}
+            >
+              ดูสินค้าทั้งหมด ({productItems.length.toLocaleString("th-TH")})
+            </Button>
 
             {showSearchDropdown && searchResults.length > 0 && (
               <div className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-lg border bg-white shadow-lg">
@@ -745,6 +899,14 @@ export function StockRecordingForm({
               หากคุณกำลัง <strong>สั่งซื้อสินค้าใหม่</strong> ควรใช้ <strong>แท็บ &quot;สั่งซื้อ (PO)&quot;</strong> แทน
               เพราะจะบันทึกต้นทุนและราคาซื้อได้อย่างสมบูรณ์
             </p>
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-2 h-8 border-amber-200 bg-white px-3 text-xs text-amber-800 hover:bg-amber-100"
+              onClick={jumpToPurchaseTab}
+            >
+              ไปแท็บสั่งซื้อ (PO)
+            </Button>
           </div>
         )}
 
@@ -804,10 +966,6 @@ export function StockRecordingForm({
             : "กรุณากรอกจำนวนให้แปลงเป็นหน่วยหลักได้"}
         </p>
 
-        <Button className="h-10 w-full" onClick={submitMovement} disabled={loading || !canCreate || !productId}>
-          {loading ? "กำลังบันทึก..." : "บันทึกสต็อก"}
-        </Button>
-
         {successMessage && <p className="text-sm text-emerald-700">{successMessage}</p>}
         {errorMessage && <p className="text-sm text-red-600">{errorMessage}</p>}
         {dataError && productItems.length > 0 ? (
@@ -825,6 +983,16 @@ export function StockRecordingForm({
             </Button>
           </div>
         ) : null}
+
+        <div className="sticky bottom-0 z-20 -mx-4 border-t border-slate-200 bg-white/95 px-4 pb-[calc(env(safe-area-inset-bottom,0px)+0.75rem)] pt-3 shadow-[0_-8px_20px_-18px_rgba(15,23,42,0.45)] supports-[backdrop-filter]:bg-white/85 sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:pb-0 sm:pt-0 sm:shadow-none">
+          <Button
+            className="h-11 w-full"
+            onClick={submitMovement}
+            disabled={loading || !canCreate || !productId}
+          >
+            {loading ? "กำลังบันทึก..." : "บันทึกสต็อก"}
+          </Button>
+        </div>
         </article>
       ) : null}
 
@@ -875,6 +1043,50 @@ export function StockRecordingForm({
           </div>
         </article>
       )}
+
+      <SlideUpSheet
+        isOpen={showProductPicker}
+        onClose={() => setShowProductPicker(false)}
+        title="เลือกสินค้า"
+        description={`${productItems.length.toLocaleString("th-TH")} รายการในสาขานี้`}
+      >
+        <div className="space-y-3">
+          <input
+            type="text"
+            value={productPickerQuery}
+            onChange={(event) => setProductPickerQuery(event.target.value)}
+            className="h-10 w-full rounded-lg border px-3 text-sm outline-none ring-primary focus:ring-2"
+            placeholder="ค้นหาจากชื่อหรือ SKU"
+          />
+
+          <div className="max-h-[56dvh] space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1">
+            {filteredProductItems.length === 0 ? (
+              <p className="px-3 py-6 text-center text-xs text-slate-500">
+                ไม่พบสินค้าที่ตรงกับคำค้นหา
+              </p>
+            ) : (
+              filteredProductItems.map((item) => (
+                <button
+                  key={item.productId}
+                  type="button"
+                  className={`w-full rounded-md px-3 py-2 text-left transition-colors ${
+                    item.productId === productId
+                      ? "bg-blue-50 text-blue-900 ring-1 ring-blue-200"
+                      : "hover:bg-slate-50"
+                  }`}
+                  onClick={() => selectProductFromPicker(item)}
+                >
+                  <p className="text-sm font-medium">{item.name}</p>
+                  <p className="text-xs text-slate-500">{item.sku}</p>
+                  <p className="text-xs text-slate-500">
+                    คงเหลือ {item.onHand.toLocaleString("th-TH")} {item.baseUnitCode}
+                  </p>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      </SlideUpSheet>
 
       {/* Scanner Permission Sheet */}
       <SlideUpSheet

@@ -28,6 +28,16 @@ const HISTORY_TYPE_VALUES = new Set([
   "RETURN",
 ]);
 
+const FORBIDDEN_STOCK_MOVEMENT_FIELDS = new Set([
+  "cost",
+  "costBase",
+  "rate",
+  "exchangeRate",
+  "exchange_rate",
+  "unitCost",
+  "unitCostBase",
+]);
+
 const parsePositiveInt = (
   value: string | null,
   fallbackValue: number,
@@ -44,6 +54,15 @@ const parsePositiveInt = (
 };
 
 const isDateOnly = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value);
+
+const getForbiddenStockMovementFields = (payload: unknown): string[] => {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return [];
+  }
+  return Object.keys(payload).filter((field) =>
+    FORBIDDEN_STOCK_MOVEMENT_FIELDS.has(field),
+  );
+};
 
 export async function GET(request: Request) {
   try {
@@ -201,6 +220,37 @@ export async function POST(request: Request) {
         );
       }
       idempotencyRecordId = claim.recordId;
+    }
+
+    const forbiddenFields = getForbiddenStockMovementFields(body);
+    if (forbiddenFields.length > 0) {
+      const responseBody = {
+        message:
+          "แท็บบันทึกสต็อกไม่รองรับต้นทุน/อัตราแลกเปลี่ยน กรุณาใช้แท็บสั่งซื้อ (PO) หรือ Month-End Close",
+      };
+      if (idempotencyRecordId) {
+        await safeMarkIdempotencyFailed({
+          recordId: idempotencyRecordId,
+          statusCode: 400,
+          body: responseBody,
+        });
+      }
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        action,
+        entityType: "inventory_movement",
+        result: "FAIL",
+        reasonCode: "VALIDATION_ERROR",
+        metadata: {
+          issues: forbiddenFields,
+        },
+        request,
+      });
+      return NextResponse.json(responseBody, { status: 400 });
     }
 
     const parsed = stockMovementSchema.safeParse(body);
