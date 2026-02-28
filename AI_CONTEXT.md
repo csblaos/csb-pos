@@ -129,12 +129,19 @@ npm run db:migrate
   - `scripts/repair-migrations.mjs` รองรับเติมคอลัมน์ `purchase_orders.updated_by/updated_at` (compat สำหรับฐานที่เคยข้าม migration 0025) เพื่อกัน 500 ใน `GET /api/stock/purchase-orders/[poId]`
   - หน้า `/stock` tab `สั่งซื้อ (PO)` เอาปุ่มลัด `ตั้งค่า PDF` ออกจาก header แล้ว (ไปตั้งค่าที่หน้า `/settings/pdf?tab=po` แทน)
   - หน้า `/stock?tab=purchase` แยกการทำงานเป็น 3 workspace ในหน้าเดียว: `PO Operations` (งานรายวัน), `Month-End Close` (pending rate + bulk settle), `AP by Supplier` (statement/filter/export)
-  - ใน Create PO (Step 1) ช่อง `ชื่อซัพพลายเออร์` เป็น hybrid input แล้ว: เลือกจากรายชื่อ supplier เดิม (datalist จากประวัติ PO) หรือพิมพ์ชื่อใหม่เองได้ในช่องเดียว โดยไม่ต้องเพิ่ม schema ใหม่
+  - ใน Create PO (Step 1) ช่อง `ชื่อซัพพลายเออร์` เป็น hybrid input แล้ว: พิมพ์ชื่อใหม่ได้ และมีปุ่ม `ดูซัพพลายเออร์ทั้งหมด` เปิด list picker (ค้นหา/แตะเลือกจากประวัติ PO) เพื่อให้ใช้งานบน mobile ได้เสถียรกว่า `datalist`
+  - ช่อง `เบอร์ติดต่อ` ใน Create/Edit PO ใช้ `type="tel"` + `inputMode="tel"` แล้ว เพื่อให้มือถือเปิด numeric/tel keyboard โดยตรง
   - ใน Create PO (Step 2) ส่วน `เพิ่มสินค้า` เพิ่มปุ่ม `ดูสินค้าทั้งหมด/ซ่อนรายการสินค้า` แล้ว: ผู้ใช้เลือกสินค้าได้ทันทีจาก list picker โดยไม่ต้องพิมพ์ค้นหาก่อน และยังค้นหาด้วยชื่อ/SKU ได้เหมือนเดิม
+  - ใน Create PO (Step 2/3) ช่องตัวเลข `ราคา/₭`, `ค่าขนส่ง`, `ค่าอื่นๆ` ปรับเป็นค่าว่างเริ่มต้น + `placeholder: 0`; ถ้าไม่กรอกระบบจะตีความเป็น `0` ตอนคำนวณและตอนบันทึกอัตโนมัติ
+  - ใน Create PO/แก้ไข PO ช่องวันที่ `คาดว่าจะได้รับ` และ `ครบกำหนดชำระ` ปรับ responsive ใหม่: mobile แสดงแยกบรรทัด (1 คอลัมน์), จอใหญ่ค่อยจัด 2 คอลัมน์ และเพิ่ม `min-w-0/max-w-full` กัน date input ล้นจอ
+  - เนื่องจาก `input[type=date]` บนมือถือไม่รองรับ placeholder สม่ำเสมอ จึงเพิ่ม helper text + quick actions (`วันนี้`, `+7 วัน`, `สิ้นเดือน`, `ล้างค่า`) สำหรับช่องวันที่ใน Create PO และ Edit PO
+  - เพิ่ม hardening บน mobile สำหรับ PO detail/edit: `SlideUpSheet` content กัน overflow แนวนอน (`overflow-x-hidden`) และ date input ใน Edit PO ใช้ฟอนต์ 16px บนมือถือ (`text-base`) เพื่อลด iOS auto-zoom/อาการล้นจอ
+  - ใน modal `คิว PO รอปิดเรท` (Month-End bulk) ช่องตัวเลข `อัตราแลกเปลี่ยนจริง` และ `ยอดชำระรวมตาม statement` ใช้ placeholder `0` โดยไม่ prefill ค่า `0` ลง input
   - modal `Create PO` ตั้งค่าไม่ให้ปิดเมื่อกด backdrop แล้ว (`closeOnBackdrop=false`) และเพิ่มปุ่ม `ยกเลิก` ที่ footer เพื่อปิดฟอร์มอย่างชัดเจน
   - modal `Create PO` เพิ่ม custom confirm ก่อนปิดเมื่อมีข้อมูลค้าง (ทั้งกดปุ่ม `ยกเลิก` และปุ่ม `X`) เพื่อลดการทิ้งฟอร์มโดยไม่ตั้งใจ
-  - workspace tabs (`PO Operations`/`Month-End Close`/`AP by Supplier`) ถูกแยกเป็นบล็อกนำทางเฉพาะและแสดงก่อน KPI เพื่อลดความสับสนระหว่าง navigation กับ metric card
+  - workspace tabs (`PO Operations`/`Month-End Close`/`AP by Supplier`) ถูกแยกเป็นบล็อกนำทางเฉพาะและแสดงใต้บล็อก KPI เพื่อคง hierarchy `summary ก่อน action`
   - ใน workspace `PO Operations` ค่าเริ่มต้นของรายการเปลี่ยนเป็น `งานเปิด (OPEN)` แทน `ทั้งหมด` เพื่อลด noise ตอนเข้าแท็บ และยังสลับ `ทั้งหมด` ได้จาก filter chip
+  - หน้า `/stock?tab=purchase` ปรับลำดับ section ให้ `ตัวชี้วัดและทางลัด` แสดงก่อน แล้วค่อย `โหมดการทำงาน`; การ์ด KPI ใช้โทนสีปกติ (neutral slate) ทั้งหมด
   - summary strip ด้านบน (`Open PO`, `Pending Rate`, `Overdue AP`, `Outstanding`) เป็น KPI summary-only (ไม่คลิก) และใช้สีคงที่ไม่เปลี่ยนตาม preset; shortcut ใช้ saved preset chip ด้านล่างเพื่อพาไป workspace + ตัวกรองด่วน พร้อมแถบ `Applied filter` สำหรับล้าง/บันทึก preset
   - จำ workspace ล่าสุดด้วย `workspace` query + localStorage และ sync ตัวกรองหลักลง URL (`poStatus`, `due`, `payment`, `sort`) เพื่อแชร์ลิงก์มุมมองเดียวกันในทีมได้
   - `poStatus` จะไม่ถูกใส่ใน URL เมื่อเป็นค่า default (`OPEN`); ถ้าผู้ใช้เลือก `ทั้งหมด` หรือสถานะอื่น ระบบจะเก็บค่าใน URL เพื่อคงมุมมองเดิมหลัง refresh/share link

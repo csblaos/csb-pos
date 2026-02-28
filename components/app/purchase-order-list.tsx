@@ -21,7 +21,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   useCallback,
   useEffect,
-  useId,
   useMemo,
   useRef,
   useState,
@@ -259,6 +258,13 @@ function sortableDateValue(dateStr: string | null): number {
   return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
 }
 
+function toDateInputValue(date: Date): string {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 function sortPendingQueueForSettlement(
   items: PendingRateQueueItem[],
 ): PendingRateQueueItem[] {
@@ -367,8 +373,8 @@ export function PurchaseOrderList({
   const [items, setItems] = useState<
     { productId: string; productName: string; qtyOrdered: string; unitCostPurchase: string }[]
   >([]);
-  const [shippingCost, setShippingCost] = useState("0");
-  const [otherCost, setOtherCost] = useState("0");
+  const [shippingCost, setShippingCost] = useState("");
+  const [otherCost, setOtherCost] = useState("");
   const [otherCostNote, setOtherCostNote] = useState("");
   const [note, setNote] = useState("");
   const [expectedAt, setExpectedAt] = useState("");
@@ -382,6 +388,40 @@ export function PurchaseOrderList({
     { id: string; name: string; sku: string }[]
   >([]);
   const [loadingProducts, setLoadingProducts] = useState(false);
+  const [isSupplierPickerOpen, setIsSupplierPickerOpen] = useState(false);
+
+  const getDateShortcutValue = useCallback(
+    (shortcut: "TODAY" | "PLUS_7" | "END_OF_MONTH" | "CLEAR"): string => {
+      if (shortcut === "CLEAR") return "";
+      const now = new Date();
+      if (shortcut === "TODAY") {
+        return toDateInputValue(now);
+      }
+      if (shortcut === "PLUS_7") {
+        const next = new Date(now);
+        next.setDate(next.getDate() + 7);
+        return toDateInputValue(next);
+      }
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      return toDateInputValue(endOfMonth);
+    },
+    [],
+  );
+
+  const applyCreateDateShortcut = useCallback(
+    (
+      field: "expectedAt" | "dueDate",
+      shortcut: "TODAY" | "PLUS_7" | "END_OF_MONTH" | "CLEAR",
+    ) => {
+      const value = getDateShortcutValue(shortcut);
+      if (field === "expectedAt") {
+        setExpectedAt(value);
+        return;
+      }
+      setDueDate(value);
+    },
+    [getDateShortcutValue],
+  );
 
   const hasCreateDraftChanges = useMemo(() => {
     const hasSupplierDraft =
@@ -1250,11 +1290,12 @@ export function PurchaseOrderList({
     setSupplierContact("");
     setPurchaseCurrency(storeCurrency);
     setExchangeRate("");
+    setIsSupplierPickerOpen(false);
     setProductSearch("");
     setIsProductPickerOpen(false);
     setItems([]);
-    setShippingCost("0");
-    setOtherCost("0");
+    setShippingCost("");
+    setOtherCost("");
     setOtherCostNote("");
     setNote("");
     setExpectedAt("");
@@ -1267,6 +1308,7 @@ export function PurchaseOrderList({
 
   const forceCloseCreateSheet = useCallback(() => {
     setIsCreateCloseConfirmOpen(false);
+    setIsSupplierPickerOpen(false);
     setIsCreateOpen(false);
   }, []);
 
@@ -1291,7 +1333,7 @@ export function PurchaseOrderList({
         productId: product.id,
         productName: product.name,
         qtyOrdered: "1",
-        unitCostPurchase: "0",
+        unitCostPurchase: "",
       },
     ]);
     setProductSearch("");
@@ -1419,7 +1461,7 @@ export function PurchaseOrderList({
 
   /* ── Style helpers ── */
   const fieldClassName =
-    "h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none ring-primary focus:ring-2 disabled:bg-slate-100";
+    "h-11 w-full min-w-0 max-w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none ring-primary focus:ring-2 disabled:bg-slate-100";
 
   const filteredProductOptions = productOptions.filter(
     (p) =>
@@ -1432,7 +1474,6 @@ export function PurchaseOrderList({
     () => filteredProductOptions.slice(0, productSearch ? 10 : 20),
     [filteredProductOptions, productSearch],
   );
-  const createSupplierDatalistId = useId();
   const supplierNameOptions = useMemo(() => {
     const seen = new Set<string>();
     const options: string[] = [];
@@ -1453,6 +1494,19 @@ export function PurchaseOrderList({
     }
     return options;
   }, [poList]);
+  const filteredSupplierOptions = useMemo(() => {
+    const keyword = supplierName.trim().toLocaleLowerCase("en-US");
+    if (!keyword) {
+      return supplierNameOptions;
+    }
+    return supplierNameOptions.filter((name) =>
+      name.toLocaleLowerCase("en-US").includes(keyword),
+    );
+  }, [supplierName, supplierNameOptions]);
+  const visibleSupplierPickerOptions = useMemo(
+    () => filteredSupplierOptions.slice(0, supplierName.trim() ? 10 : 30),
+    [filteredSupplierOptions, supplierName],
+  );
 
   /* ── Status counts for badges ── */
   const statusCounts = useMemo(() => {
@@ -1557,6 +1611,104 @@ export function PurchaseOrderList({
           void reloadFirstPage();
         }}
       />
+      <div className="rounded-2xl border border-slate-200 bg-white p-3">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+          ตัวชี้วัดและทางลัด
+        </p>
+        <p className="mt-1 text-[11px] text-slate-500">
+          การ์ด KPI เป็นข้อมูลสรุป (ไม่รองรับการคลิก)
+        </p>
+        <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-left">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Open PO
+            </p>
+            <p className="mt-0.5 text-sm font-semibold text-slate-900">
+              {workspaceSummary.openPoCount.toLocaleString("th-TH")}
+            </p>
+            <p className="text-[11px] text-slate-500">งานสั่งซื้อรายวัน</p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-left">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Pending Rate
+            </p>
+            <p className="mt-0.5 text-sm font-semibold text-slate-900">
+              {workspaceSummary.pendingRateCount.toLocaleString("th-TH")}
+            </p>
+            <p className="text-[11px] text-slate-500">คิวปิดเรทปลายเดือน</p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-left">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Overdue AP
+            </p>
+            <p className="mt-0.5 text-sm font-semibold text-slate-900">
+              {workspaceSummary.overduePoCount.toLocaleString("th-TH")}
+            </p>
+            <p className="text-[11px] text-slate-500">
+              ใกล้ครบกำหนด {workspaceSummary.dueSoonPoCount.toLocaleString("th-TH")}
+            </p>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-left">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+              Outstanding
+            </p>
+            <p className="mt-0.5 text-sm font-semibold text-slate-900">
+              {fmtPrice(workspaceSummary.outstandingBase, storeCurrency)}
+            </p>
+            <p className="text-[11px] text-slate-500">ดู AP ราย supplier</p>
+          </div>
+        </div>
+        {activeKpiShortcutLabel ? (
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
+            <p className="text-[11px] text-slate-600">
+              Applied filter: {activeKpiShortcutLabel}
+            </p>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
+                onClick={saveCurrentShortcutPreset}
+              >
+                บันทึก preset นี้
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
+                onClick={clearKpiShortcut}
+              >
+                ล้างตัวกรองด่วน
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {savedPresets.length > 0 ? (
+          <div className="mt-2 flex gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {savedPresets.map((preset) => (
+              <div
+                key={preset.id}
+                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1"
+              >
+                <button
+                  type="button"
+                  className="text-[11px] font-medium text-slate-700 hover:text-slate-900"
+                  onClick={() => applyKpiShortcut(preset.shortcut)}
+                >
+                  {preset.label}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+                  onClick={() => removeSavedPreset(preset.id)}
+                  aria-label={`ลบ preset ${preset.label}`}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
       <div className="sticky top-2 z-10 rounded-2xl border border-slate-200 bg-white/95 p-2 backdrop-blur md:static md:z-auto md:bg-white md:p-2 md:backdrop-blur-0">
         <p className="px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
           โหมดการทำงาน
@@ -1622,112 +1774,6 @@ export function PurchaseOrderList({
             );
           })}
         </div>
-      </div>
-
-      <div className="rounded-2xl border border-slate-200 bg-white p-3">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-          ตัวชี้วัดและทางลัด
-        </p>
-        <p className="mt-1 text-[11px] text-slate-500">
-          การ์ด KPI เป็นข้อมูลสรุป (ไม่รองรับการคลิก)
-        </p>
-        <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
-          <div
-            className="rounded-xl border border-blue-200 bg-blue-50 px-2.5 py-2 text-left"
-          >
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-              Open PO
-            </p>
-            <p className="mt-0.5 text-sm font-semibold text-slate-900">
-              {workspaceSummary.openPoCount.toLocaleString("th-TH")}
-            </p>
-            <p className="text-[11px] text-slate-500">งานสั่งซื้อรายวัน</p>
-          </div>
-          <div
-            className="rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-2 text-left"
-          >
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-              Pending Rate
-            </p>
-            <p className="mt-0.5 text-sm font-semibold text-slate-900">
-              {workspaceSummary.pendingRateCount.toLocaleString("th-TH")}
-            </p>
-            <p className="text-[11px] text-slate-500">คิวปิดเรทปลายเดือน</p>
-          </div>
-          <div
-            className="rounded-xl border border-rose-200 bg-rose-50 px-2.5 py-2 text-left"
-          >
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-              Overdue AP
-            </p>
-            <p className="mt-0.5 text-sm font-semibold text-slate-900">
-              {workspaceSummary.overduePoCount.toLocaleString("th-TH")}
-            </p>
-            <p className="text-[11px] text-slate-500">
-              ใกล้ครบกำหนด {workspaceSummary.dueSoonPoCount.toLocaleString("th-TH")}
-            </p>
-          </div>
-          <div
-            className="rounded-xl border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-left"
-          >
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-              Outstanding
-            </p>
-            <p className="mt-0.5 text-sm font-semibold text-slate-900">
-              {fmtPrice(workspaceSummary.outstandingBase, storeCurrency)}
-            </p>
-            <p className="text-[11px] text-slate-500">ดู AP ราย supplier</p>
-          </div>
-        </div>
-        {activeKpiShortcutLabel ? (
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
-            <p className="text-[11px] text-slate-600">
-              Applied filter: {activeKpiShortcutLabel}
-            </p>
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
-                onClick={saveCurrentShortcutPreset}
-              >
-                บันทึก preset นี้
-              </button>
-              <button
-                type="button"
-                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
-                onClick={clearKpiShortcut}
-              >
-                ล้างตัวกรองด่วน
-              </button>
-            </div>
-          </div>
-        ) : null}
-        {savedPresets.length > 0 ? (
-          <div className="mt-2 flex gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {savedPresets.map((preset) => (
-              <div
-                key={preset.id}
-                className="inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1"
-              >
-                <button
-                  type="button"
-                  className="text-[11px] font-medium text-slate-700 hover:text-slate-900"
-                  onClick={() => applyKpiShortcut(preset.shortcut)}
-                >
-                  {preset.label}
-                </button>
-                <button
-                  type="button"
-                  className="rounded-full p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
-                  onClick={() => removeSavedPreset(preset.id)}
-                  aria-label={`ลบ preset ${preset.label}`}
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
-          </div>
-        ) : null}
       </div>
 
       {workspaceTab === "MONTH_END" ? (
@@ -1871,7 +1917,7 @@ export function PurchaseOrderList({
                       className="h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
                       value={bulkRateInput}
                       onChange={(event) => setBulkRateInput(event.target.value)}
-                      placeholder="เช่น 690"
+                      placeholder="0"
                       disabled={isBulkSubmitting}
                     />
                   </div>
@@ -1895,7 +1941,7 @@ export function PurchaseOrderList({
                       className="h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
                       value={bulkStatementTotalInput}
                       onChange={(event) => setBulkStatementTotalInput(event.target.value)}
-                      placeholder={`เช่น 12,500,000 ${storeCurrency}`}
+                      placeholder="0"
                       disabled={isBulkSubmitting}
                     />
                     <p className="text-[10px] text-slate-500">
@@ -2382,26 +2428,64 @@ export function PurchaseOrderList({
             {wizardStep === 1 && (
               <div className="space-y-3">
                 <div className="space-y-2">
-                  <label className="text-xs text-muted-foreground">
-                    ชื่อซัพพลายเออร์ (ไม่บังคับ)
-                  </label>
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs text-muted-foreground">
+                      ชื่อซัพพลายเออร์ (ไม่บังคับ)
+                    </label>
+                    {supplierNameOptions.length > 0 ? (
+                      <button
+                        type="button"
+                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                        onClick={() => setIsSupplierPickerOpen((current) => !current)}
+                      >
+                        {isSupplierPickerOpen ? "ซ่อนรายการซัพพลายเออร์" : "ดูซัพพลายเออร์ทั้งหมด"}
+                      </button>
+                    ) : null}
+                  </div>
                   <input
                     className={fieldClassName}
-                    list={createSupplierDatalistId}
                     value={supplierName}
-                    onChange={(e) => setSupplierName(e.target.value)}
+                    onFocus={() => {
+                      if (supplierNameOptions.length > 0) {
+                        setIsSupplierPickerOpen(true);
+                      }
+                    }}
+                    onChange={(e) => {
+                      setSupplierName(e.target.value);
+                      if (supplierNameOptions.length > 0) {
+                        setIsSupplierPickerOpen(true);
+                      }
+                    }}
                     placeholder="เช่น ร้านสมชาย, ตลาดเช้า"
                   />
                   {supplierNameOptions.length > 0 ? (
                     <p className="text-[11px] text-slate-500">
-                      เลือกชื่อซัพพลายเออร์จากรายการเดิมได้ หรือพิมพ์ชื่อใหม่เอง
+                      พิมพ์เพื่อค้นหาและแตะเลือกจากรายการเดิม หรือพิมพ์ชื่อใหม่เองได้
                     </p>
                   ) : null}
-                  <datalist id={createSupplierDatalistId}>
-                    {supplierNameOptions.map((name) => (
-                      <option key={name} value={name} />
-                    ))}
-                  </datalist>
+                  {supplierNameOptions.length > 0 && (isSupplierPickerOpen || supplierName) ? (
+                    <div className="max-h-36 overflow-y-auto rounded-xl border border-slate-200 bg-white">
+                      {visibleSupplierPickerOptions.length === 0 ? (
+                        <p className="px-3 py-2 text-xs text-slate-400">
+                          ไม่พบชื่อซัพพลายเออร์ที่ตรงกับคำค้นหา (ใช้ชื่อที่พิมพ์ได้เลย)
+                        </p>
+                      ) : (
+                        visibleSupplierPickerOptions.map((name) => (
+                          <button
+                            key={name}
+                            type="button"
+                            className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50"
+                            onClick={() => {
+                              setSupplierName(name);
+                              setIsSupplierPickerOpen(false);
+                            }}
+                          >
+                            {name}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs text-muted-foreground">
@@ -2409,6 +2493,10 @@ export function PurchaseOrderList({
                   </label>
                   <input
                     className={fieldClassName}
+                    type="tel"
+                    inputMode="tel"
+                    autoComplete="tel"
+                    enterKeyHint="next"
                     value={supplierContact}
                     onChange={(e) => setSupplierContact(e.target.value)}
                     placeholder="020-xxxx-xxxx"
@@ -2461,7 +2549,10 @@ export function PurchaseOrderList({
                 )}
                 <Button
                   className="h-11 w-full rounded-xl"
-                  onClick={() => setWizardStep(2)}
+                  onClick={() => {
+                    setIsSupplierPickerOpen(false);
+                    setWizardStep(2);
+                  }}
                 >
                   ถัดไป →
                 </Button>
@@ -2590,6 +2681,7 @@ export function PurchaseOrderList({
                               type="number"
                               inputMode="numeric"
                               value={item.unitCostPurchase}
+                              placeholder="0"
                               onChange={(e) =>
                                 updateItem(
                                   item.productId,
@@ -2648,6 +2740,7 @@ export function PurchaseOrderList({
                       type="number"
                       inputMode="numeric"
                       value={shippingCost}
+                      placeholder="0"
                       onChange={(e) => setShippingCost(e.target.value)}
                     />
                   </div>
@@ -2660,6 +2753,7 @@ export function PurchaseOrderList({
                       type="number"
                       inputMode="numeric"
                       value={otherCost}
+                      placeholder="0"
                       onChange={(e) => setOtherCost(e.target.value)}
                     />
                   </div>
@@ -2677,8 +2771,8 @@ export function PurchaseOrderList({
                     />
                   </div>
                 )}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="space-y-2">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="space-y-2 min-w-0">
                     <label className="text-xs text-muted-foreground">
                       คาดว่าจะได้รับ (ไม่บังคับ)
                     </label>
@@ -2688,8 +2782,41 @@ export function PurchaseOrderList({
                       value={expectedAt}
                       onChange={(e) => setExpectedAt(e.target.value)}
                     />
+                    <p className="text-[11px] text-slate-500">
+                      ยังไม่ระบุได้ เลือกภายหลังได้
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+                        onClick={() => applyCreateDateShortcut("expectedAt", "TODAY")}
+                      >
+                        วันนี้
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+                        onClick={() => applyCreateDateShortcut("expectedAt", "PLUS_7")}
+                      >
+                        +7 วัน
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+                        onClick={() => applyCreateDateShortcut("expectedAt", "END_OF_MONTH")}
+                      >
+                        สิ้นเดือน
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+                        onClick={() => applyCreateDateShortcut("expectedAt", "CLEAR")}
+                      >
+                        ล้างค่า
+                      </button>
+                    </div>
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-2 min-w-0">
                     <label className="text-xs text-muted-foreground">
                       ครบกำหนดชำระ (due date)
                     </label>
@@ -2699,6 +2826,39 @@ export function PurchaseOrderList({
                       value={dueDate}
                       onChange={(e) => setDueDate(e.target.value)}
                     />
+                    <p className="text-[11px] text-slate-500">
+                      ถ้ายังไม่รู้กำหนดจริง ให้เว้นว่างไว้ก่อนได้
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+                        onClick={() => applyCreateDateShortcut("dueDate", "TODAY")}
+                      >
+                        วันนี้
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+                        onClick={() => applyCreateDateShortcut("dueDate", "PLUS_7")}
+                      >
+                        +7 วัน
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+                        onClick={() => applyCreateDateShortcut("dueDate", "END_OF_MONTH")}
+                      >
+                        สิ้นเดือน
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+                        onClick={() => applyCreateDateShortcut("dueDate", "CLEAR")}
+                      >
+                        ล้างค่า
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -2986,6 +3146,38 @@ function PODetailSheet({
     trackingInfo: "",
     items: [] as { productId: string; productName: string; qtyOrdered: string; unitCostPurchase: string }[],
   });
+
+  const getEditDateShortcutValue = useCallback(
+    (shortcut: "TODAY" | "PLUS_7" | "END_OF_MONTH" | "CLEAR"): string => {
+      if (shortcut === "CLEAR") return "";
+      const now = new Date();
+      if (shortcut === "TODAY") {
+        return toDateInputValue(now);
+      }
+      if (shortcut === "PLUS_7") {
+        const next = new Date(now);
+        next.setDate(next.getDate() + 7);
+        return toDateInputValue(next);
+      }
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      return toDateInputValue(endOfMonth);
+    },
+    [],
+  );
+
+  const applyEditDateShortcut = useCallback(
+    (
+      field: "expectedAt" | "dueDate",
+      shortcut: "TODAY" | "PLUS_7" | "END_OF_MONTH" | "CLEAR",
+    ) => {
+      const value = getEditDateShortcutValue(shortcut);
+      setEditForm((prev) => ({
+        ...prev,
+        [field]: value,
+      }));
+    },
+    [getEditDateShortcutValue],
+  );
 
   const refreshDetail = useCallback(
     async (targetPoId: string, keepExisting: boolean): Promise<void> => {
@@ -4063,6 +4255,10 @@ function PODetailSheet({
                           <label className="text-[11px] text-slate-500">เบอร์ติดต่อ</label>
                           <input
                             className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                            type="tel"
+                            inputMode="tel"
+                            autoComplete="tel"
+                            enterKeyHint="next"
                             value={editForm.supplierContact}
                             onChange={(e) =>
                               setEditForm((prev) => ({
@@ -4206,12 +4402,12 @@ function PODetailSheet({
                     </>
                   )}
 
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                    <div className="space-y-1">
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+                    <div className="space-y-1 min-w-0">
                       <label className="text-[11px] text-slate-500">วันที่คาดรับ</label>
                       <input
                         type="date"
-                        className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                        className="h-9 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-2.5 text-base sm:text-sm outline-none focus:ring-2 focus:ring-primary"
                         value={editForm.expectedAt}
                         onChange={(e) =>
                           setEditForm((prev) => ({
@@ -4220,12 +4416,42 @@ function PODetailSheet({
                           }))
                         }
                       />
+                      <div className="flex max-w-full flex-wrap gap-1.5 pt-1">
+                        <button
+                          type="button"
+                          className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+                          onClick={() => applyEditDateShortcut("expectedAt", "TODAY")}
+                        >
+                          วันนี้
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+                          onClick={() => applyEditDateShortcut("expectedAt", "PLUS_7")}
+                        >
+                          +7 วัน
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+                          onClick={() => applyEditDateShortcut("expectedAt", "END_OF_MONTH")}
+                        >
+                          สิ้นเดือน
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+                          onClick={() => applyEditDateShortcut("expectedAt", "CLEAR")}
+                        >
+                          ล้างค่า
+                        </button>
+                      </div>
                     </div>
-                    <div className="space-y-1">
+                    <div className="space-y-1 min-w-0">
                       <label className="text-[11px] text-slate-500">ครบกำหนดชำระ</label>
                       <input
                         type="date"
-                        className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                        className="h-9 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-2.5 text-base sm:text-sm outline-none focus:ring-2 focus:ring-primary"
                         value={editForm.dueDate}
                         onChange={(e) =>
                           setEditForm((prev) => ({
@@ -4234,11 +4460,41 @@ function PODetailSheet({
                           }))
                         }
                       />
+                      <div className="flex max-w-full flex-wrap gap-1.5 pt-1">
+                        <button
+                          type="button"
+                          className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+                          onClick={() => applyEditDateShortcut("dueDate", "TODAY")}
+                        >
+                          วันนี้
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+                          onClick={() => applyEditDateShortcut("dueDate", "PLUS_7")}
+                        >
+                          +7 วัน
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+                          onClick={() => applyEditDateShortcut("dueDate", "END_OF_MONTH")}
+                        >
+                          สิ้นเดือน
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-medium text-slate-600 hover:bg-slate-50"
+                          onClick={() => applyEditDateShortcut("dueDate", "CLEAR")}
+                        >
+                          ล้างค่า
+                        </button>
+                      </div>
                     </div>
-                    <div className="space-y-1">
+                    <div className="space-y-1 min-w-0">
                       <label className="text-[11px] text-slate-500">Tracking</label>
                       <input
-                        className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
+                        className="h-9 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
                         value={editForm.trackingInfo}
                         onChange={(e) =>
                           setEditForm((prev) => ({

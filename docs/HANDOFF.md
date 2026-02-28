@@ -6,6 +6,25 @@
 
 ## Changed (ล่าสุด)
 
+- แก้ปัญหา date input ล้นจอบนมือถือใน PO:
+  - ช่อง `คาดว่าจะได้รับ` และ `ครบกำหนดชำระ` (Create PO) ปรับเป็น 1 คอลัมน์บน mobile และ 2 คอลัมน์บนจอใหญ่ (`md+`)
+  - ฟอร์ม `แก้ไข PO` ส่วนวันที่/tracking ปรับจาก `sm:3 คอลัมน์` เป็น responsive (`1 -> 2 -> 3`) เพื่อลดการบีบช่องบนจอเล็ก
+  - เพิ่ม `min-w-0/max-w-full` ให้ input/group ที่เกี่ยวข้อง เพื่อลดเคส native date control (`dd/mm/yyyy`) ดันความกว้างเกินหน้าจอ
+  - เพิ่ม helper text และ quick actions ในช่องวันที่ของ Create/Edit PO (`วันนี้`, `+7 วัน`, `สิ้นเดือน`, `ล้างค่า`) เพื่อทดแทน placeholder ที่ `input[type=date]` บนมือถือไม่รองรับ
+  - เพิ่ม hardening สำหรับ production mobile:
+    - `SlideUpSheet` content เพิ่ม `overflow-x-hidden` กัน element ดันความกว้างเกิน viewport
+    - date input ใน `Edit PO` ปรับเป็น `text-base` บนมือถือ (16px) แล้วค่อย `sm:text-sm` เพื่อลด iOS auto-zoom ที่ทำให้ดูเหมือน modal ล้นจอ
+  - ใน modal `คิว PO รอปิดเรท` ปรับช่องตัวเลข `อัตราแลกเปลี่ยนจริง` และ `ยอดชำระรวมตาม statement` ให้ใช้ placeholder `0` โดยไม่ prefill `0` จริง
+
+- ปรับ UX ช่องตัวเลขใน modal `Create PO`:
+  - ช่อง `ราคา/₭` (ต่อรายการสินค้า), `ค่าขนส่ง`, `ค่าอื่นๆ` เปลี่ยนเป็นค่าว่างเริ่มต้น (ไม่ prefill `0`)
+  - เพิ่ม placeholder `0` ในทั้ง 3 ช่อง เพื่อลดขั้นตอนที่ผู้ใช้ต้องลบ `0` ก่อนพิมพ์
+  - ถ้าผู้ใช้เว้นว่าง ระบบยังคำนวณ/ส่งค่าเป็น `0` อัตโนมัติผ่าน fallback เดิม (`Number(value) || 0`)
+
+- ปรับ layout บนหน้า `/stock?tab=purchase`:
+  - ย้ายบล็อก `โหมดการทำงาน` ให้ไปอยู่ใต้บล็อก `ตัวชี้วัดและทางลัด`
+  - ปรับการ์ด KPI (`Open PO`, `Pending Rate`, `Overdue AP`, `Outstanding`) เป็นโทนสีปกติ (neutral) เพื่ออ่านง่ายและไม่แย่งสายตา
+
 - เพิ่ม custom confirm ป้องกันการปิดฟอร์มสินค้าโดยไม่ตั้งใจ:
   - modal `เพิ่มสินค้า/แก้ไขสินค้า`: ถ้ามี draft ค้างแล้วกด `ยกเลิก` หรือ `X` จะมี dialog ยืนยันก่อนปิด
   - modal `Product Detail` ตอน `แก้ไขต้นทุน`: ถ้ามีการแก้ไขค้างแล้วกด `ยกเลิก` ในฟอร์มต้นทุนหรือกด `X` ปิดรายละเอียด จะมี dialog ยืนยันก่อนทิ้งข้อมูล
@@ -57,7 +76,8 @@
   - เพิ่ม GitHub Actions workflow `.github/workflows/ap-reminders-cron.yml` เป็น external scheduler fallback (schedule `10 0 * * *` UTC + manual dispatch)
 
 - ปรับ UX หน้า `/stock?tab=purchase` ให้เป็น workspace-first:
-  - ใน modal `Create PO` (Step 1) ช่อง `ชื่อซัพพลายเออร์` เปลี่ยนเป็น hybrid input: เลือกชื่อจากรายการเดิม (ดึงจาก PO history ด้วย `datalist`) หรือพิมพ์ชื่อใหม่แบบ manual ได้ในช่องเดียว (ยังไม่เพิ่ม supplier master/schema)
+  - ใน modal `Create PO` (Step 1) ช่อง `ชื่อซัพพลายเออร์` เป็น hybrid input: พิมพ์ชื่อใหม่ได้ และเพิ่มปุ่ม `ดูซัพพลายเออร์ทั้งหมด` เพื่อเปิด list picker (ค้นหา/แตะเลือกจาก PO history) สำหรับ mobile ที่ `datalist` ทำงานไม่สม่ำเสมอ
+  - ช่อง `เบอร์ติดต่อ` ใน Create/Edit PO ปรับเป็น `type="tel"` + `inputMode="tel"` + `autoComplete="tel"` เพื่อให้มือถือเปิดคีย์บอร์ดตัวเลข/โทรศัพท์ทันที
   - ใน modal `Create PO` (Step 2) เพิ่มปุ่ม `ดูสินค้าทั้งหมด/ซ่อนรายการสินค้า` เพื่อเปิด list picker สินค้าโดยไม่ต้องพิมพ์ก่อน พร้อมคงช่องค้นหาเดิม (ชื่อ/SKU)
   - modal `Create PO` ปิดการปิดด้วย backdrop (กดนอก modal ไม่ปิด) และเพิ่มปุ่ม `ยกเลิก` ที่ footer เพื่อให้มีทางออกที่ชัดเจนทุก step
   - แยกบล็อก `โหมดการทำงาน` (workspace tabs) ออกจากบล็อก KPI/shortcut เพื่อไม่ให้ผู้ใช้สับสนระหว่าง navigation กับตัวเลขสรุป
