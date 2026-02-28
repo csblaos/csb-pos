@@ -104,6 +104,7 @@ export function StockMovementHistory({ movements }: StockMovementHistoryProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const isHistoryTabActive = searchParams.get("tab") === "history";
   const typeFilterFromQuery =
     parseHistoryTypeFilter(searchParams.get(HISTORY_TYPE_QUERY_KEY)) ?? "all";
   const pageFromQuery = parsePositivePage(searchParams.get(HISTORY_PAGE_QUERY_KEY));
@@ -155,6 +156,10 @@ export function StockMovementHistory({ movements }: StockMovementHistoryProps) {
   }, [movements]);
 
   useEffect(() => {
+    if (!isHistoryTabActive) {
+      return;
+    }
+
     const nextTypeFilter =
       parseHistoryTypeFilter(searchParams.get(HISTORY_TYPE_QUERY_KEY)) ?? "all";
     if (nextTypeFilter !== typeFilter) {
@@ -198,6 +203,7 @@ export function StockMovementHistory({ movements }: StockMovementHistoryProps) {
     appliedProductQuery,
     dateFromInput,
     dateToInput,
+    isHistoryTabActive,
     page,
     productQueryInput,
     searchParams,
@@ -317,6 +323,10 @@ export function StockMovementHistory({ movements }: StockMovementHistoryProps) {
   );
 
   useEffect(() => {
+    if (!isHistoryTabActive) {
+      return;
+    }
+
     const controller = new AbortController();
     setScrollTop(0);
     viewportRef.current?.scrollTo({ top: 0 });
@@ -331,7 +341,7 @@ export function StockMovementHistory({ movements }: StockMovementHistoryProps) {
       void fetchHistory({ signal: controller.signal });
     }
     return () => controller.abort();
-  }, [currentCacheKey, fetchHistory]);
+  }, [currentCacheKey, fetchHistory, isHistoryTabActive]);
 
   const totalPages = Math.max(1, Math.ceil(totalItems / ITEMS_PER_PAGE));
   const currentPage = Math.min(page, totalPages);
@@ -343,6 +353,10 @@ export function StockMovementHistory({ movements }: StockMovementHistoryProps) {
   }, [page, totalPages]);
 
   useEffect(() => {
+    if (!isHistoryTabActive) {
+      return;
+    }
+
     const params = new URLSearchParams(searchParams.toString());
     let changed = false;
 
@@ -409,6 +423,7 @@ export function StockMovementHistory({ movements }: StockMovementHistoryProps) {
     appliedDateTo,
     appliedProductQuery,
     currentPage,
+    isHistoryTabActive,
     pathname,
     router,
     searchParams,

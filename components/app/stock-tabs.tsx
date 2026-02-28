@@ -53,11 +53,11 @@ export function StockTabs({
   }, [activeTab]);
 
   useEffect(() => {
-    const tabParam = searchParams.get("tab");
-    if (isTabId(tabParam)) {
-      setActiveTab(tabParam);
+    if (!isTabId(tabFromQuery)) {
+      return;
     }
-  }, [searchParams]);
+    setActiveTab(tabFromQuery);
+  }, [tabFromQuery]);
 
   return (
     <div className="space-y-4">
@@ -76,10 +76,13 @@ export function StockTabs({
                   : "text-slate-500 hover:text-slate-700"
               }`}
               onClick={() => {
+                if (isActive) {
+                  return;
+                }
                 setActiveTab(tab.id);
-                const params = new URLSearchParams(searchParams);
+                const params = new URLSearchParams(searchParams.toString());
                 params.set("tab", tab.id);
-                router.push(`?${params.toString()}`);
+                router.replace(`?${params.toString()}`, { scroll: false });
               }}
             >
               <Icon className="h-4 w-4" />

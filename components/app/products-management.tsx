@@ -219,7 +219,7 @@ const defaultValues = (baseUnitId: string): ProductUpsertFormInput => ({
   name: "",
   barcode: "",
   baseUnitId,
-  priceBase: 0,
+  priceBase: "",
   costBase: 0,
   outStockThreshold: "",
   lowStockThreshold: "",
@@ -3715,6 +3715,7 @@ export function ProductsManagement({
                 step={1}
                 className="h-10 w-full rounded-lg border px-3 text-sm outline-none ring-blue-500 focus:ring-2"
                 disabled={loadingKey !== null}
+                placeholder="0"
                 {...form.register("priceBase")}
               />
               {form.formState.errors.priceBase && (

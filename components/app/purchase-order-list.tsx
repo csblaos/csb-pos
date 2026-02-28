@@ -501,6 +501,7 @@ export function PurchaseOrderList({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const isPurchaseTabActive = searchParams.get("tab") === "purchase";
   const workspaceFromQuery = useMemo(() => {
     const raw = searchParams.get(PURCHASE_WORKSPACE_QUERY_KEY);
     return isPurchaseWorkspace(raw) ? raw : null;
@@ -633,6 +634,21 @@ export function PurchaseOrderList({
     [getDateShortcutValue],
   );
 
+  const applyPendingQueueDateShortcut = useCallback(
+    (
+      field: "receivedFrom" | "receivedTo",
+      shortcut: "TODAY" | "PLUS_7" | "END_OF_MONTH" | "CLEAR",
+    ) => {
+      const value = getDateShortcutValue(shortcut);
+      if (field === "receivedFrom") {
+        setPendingReceivedFrom(value);
+        return;
+      }
+      setPendingReceivedTo(value);
+    },
+    [getDateShortcutValue],
+  );
+
   const hasCreateDraftChanges = useMemo(() => {
     const hasSupplierDraft =
       supplierName.trim().length > 0 || supplierContact.trim().length > 0;
@@ -749,9 +765,11 @@ export function PurchaseOrderList({
   );
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (!isPurchaseTabActive || typeof window === "undefined") {
+      pendingScrollRestoreRef.current = null;
       return;
     }
+
     const pending = pendingScrollRestoreRef.current;
     if (!pending) {
       return;
@@ -767,7 +785,7 @@ export function PurchaseOrderList({
     return () => {
       window.cancelAnimationFrame(rafId);
     };
-  }, [searchParams]);
+  }, [isPurchaseTabActive, searchParams]);
 
   const replaceWorkspaceQuery = useCallback(
     (nextWorkspace: PurchaseWorkspace) => {
@@ -802,6 +820,10 @@ export function PurchaseOrderList({
   );
 
   useEffect(() => {
+    if (!isPurchaseTabActive) {
+      return;
+    }
+
     if (workspaceFromQuery) {
       setWorkspaceTab(workspaceFromQuery);
       if (typeof window !== "undefined") {
@@ -828,13 +850,19 @@ export function PurchaseOrderList({
       window.localStorage.removeItem(legacyKey);
     }
     replaceWorkspaceQuery(savedWorkspace);
-  }, [replaceWorkspaceQuery, workspaceFromQuery, workspaceStorageKey]);
+  }, [isPurchaseTabActive, replaceWorkspaceQuery, workspaceFromQuery, workspaceStorageKey]);
 
   useEffect(() => {
+    if (!isPurchaseTabActive) {
+      return;
+    }
     setStatusFilter(statusFromQuery ?? DEFAULT_PO_STATUS_FILTER);
-  }, [statusFromQuery]);
+  }, [isPurchaseTabActive, statusFromQuery]);
 
   useEffect(() => {
+    if (!isPurchaseTabActive) {
+      return;
+    }
     replacePurchaseQuery((params) => {
       if (statusFilter === DEFAULT_PO_STATUS_FILTER) {
         params.delete(PURCHASE_STATUS_QUERY_KEY);
@@ -842,7 +870,7 @@ export function PurchaseOrderList({
         params.set(PURCHASE_STATUS_QUERY_KEY, statusFilter);
       }
     });
-  }, [replacePurchaseQuery, statusFilter]);
+  }, [isPurchaseTabActive, replacePurchaseQuery, statusFilter]);
 
   const handleApFiltersChange = useCallback(
     (filters: {
@@ -1132,16 +1160,6 @@ export function PurchaseOrderList({
     poDetailPendingRef.current.delete(poId);
   }, []);
 
-  const prefetchPoDetail = useCallback(
-    (poId: string) => {
-      if (poDetailCacheRef.current.has(poId) || poDetailPendingRef.current.has(poId)) {
-        return;
-      }
-      void loadPoDetail(poId, { preferCache: false });
-    },
-    [loadPoDetail],
-  );
-
   const loadPurchaseOrders = useCallback(
     async (page: number, replace = false) => {
       try {
@@ -1243,6 +1261,8 @@ export function PurchaseOrderList({
   }, [hasMore, isLoadingMore, loadPurchaseOrders, poPage]);
 
   useEffect(() => {
+    if (!isPurchaseTabActive) return;
+
     const target = loadMoreRef.current;
     if (!target || !hasMore) return;
 
@@ -1257,20 +1277,14 @@ export function PurchaseOrderList({
 
     observer.observe(target);
     return () => observer.disconnect();
-  }, [hasMore, loadMore]);
+  }, [hasMore, isPurchaseTabActive, loadMore]);
 
   useEffect(() => {
-    const likelyNext = filteredList.slice(0, 3).map((po) => po.id);
-    if (likelyNext.length === 0) return;
-    const timer = window.setTimeout(() => {
-      likelyNext.forEach((poId) => prefetchPoDetail(poId));
-    }, 120);
-    return () => window.clearTimeout(timer);
-  }, [filteredList, prefetchPoDetail]);
-
-  useEffect(() => {
+    if (!isPurchaseTabActive) {
+      return;
+    }
     void loadPendingQueue();
-  }, [loadPendingQueue]);
+  }, [isPurchaseTabActive, loadPendingQueue]);
 
   useEffect(() => {
     setSelectedPendingQueueIds((prev) =>
@@ -1984,7 +1998,7 @@ export function PurchaseOrderList({
                 type="button"
                 className={`inline-flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors ${
                   isActive
-                    ? "border-slate-900 bg-slate-900 text-white"
+                    ? "border-primary bg-primary text-primary-foreground"
                     : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
                 }`}
                 onClick={() => handleWorkspaceChange(workspace.id)}
@@ -1994,7 +2008,9 @@ export function PurchaseOrderList({
                 {workspace.badge > 0 ? (
                   <span
                     className={`inline-flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-semibold ${
-                      isActive ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600"
+                      isActive
+                        ? "bg-primary-foreground/20 text-primary-foreground"
+                        : "bg-slate-200 text-slate-600"
                     }`}
                   >
                     {workspace.badge.toLocaleString("th-TH")}
@@ -2002,7 +2018,7 @@ export function PurchaseOrderList({
                 ) : null}
                 <span
                   className={`hidden text-[11px] sm:inline ${
-                    isActive ? "text-white/80" : "text-slate-500"
+                    isActive ? "text-primary-foreground/80" : "text-slate-500"
                   }`}
                 >
                   {workspace.desc}
@@ -2035,25 +2051,96 @@ export function PurchaseOrderList({
             Export CSV
           </button>
         </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <input
-            className="h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
-            placeholder="กรองซัพพลายเออร์"
-            value={pendingSupplierFilter}
-            onChange={(event) => setPendingSupplierFilter(event.target.value)}
-          />
-          <input
-            type="date"
-            className="po-date-input h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
-            value={pendingReceivedFrom}
-            onChange={(event) => setPendingReceivedFrom(event.target.value)}
-          />
-          <input
-            type="date"
-            className="po-date-input h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
-            value={pendingReceivedTo}
-            onChange={(event) => setPendingReceivedTo(event.target.value)}
-          />
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+          <div className="space-y-1">
+            <label className="text-[11px] text-amber-700">ซัพพลายเออร์</label>
+            <input
+              className="h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
+              placeholder="กรองซัพพลายเออร์"
+              value={pendingSupplierFilter}
+              onChange={(event) => setPendingSupplierFilter(event.target.value)}
+            />
+          </div>
+          <div className="space-y-1 min-w-0">
+            <label className="text-[11px] text-amber-700">วันที่รับตั้งแต่</label>
+            <PurchaseDatePickerField
+              value={pendingReceivedFrom}
+              onChange={setPendingReceivedFrom}
+              triggerClassName="h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-left text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300 flex items-center justify-between gap-2"
+              placeholder="dd/mm/yyyy"
+              ariaLabel="เลือกวันที่รับตั้งแต่ในคิว PO รอปิดเรท"
+            />
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
+                onClick={() => applyPendingQueueDateShortcut("receivedFrom", "TODAY")}
+              >
+                วันนี้
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
+                onClick={() => applyPendingQueueDateShortcut("receivedFrom", "PLUS_7")}
+              >
+                +7 วัน
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
+                onClick={() => applyPendingQueueDateShortcut("receivedFrom", "END_OF_MONTH")}
+              >
+                สิ้นเดือน
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
+                onClick={() => applyPendingQueueDateShortcut("receivedFrom", "CLEAR")}
+              >
+                ล้างค่า
+              </button>
+            </div>
+          </div>
+          <div className="space-y-1 min-w-0">
+            <label className="text-[11px] text-amber-700">วันที่รับถึง</label>
+            <PurchaseDatePickerField
+              value={pendingReceivedTo}
+              onChange={setPendingReceivedTo}
+              triggerClassName="h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-left text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300 flex items-center justify-between gap-2"
+              placeholder="dd/mm/yyyy"
+              ariaLabel="เลือกวันที่รับถึงในคิว PO รอปิดเรท"
+            />
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
+                onClick={() => applyPendingQueueDateShortcut("receivedTo", "TODAY")}
+              >
+                วันนี้
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
+                onClick={() => applyPendingQueueDateShortcut("receivedTo", "PLUS_7")}
+              >
+                +7 วัน
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
+                onClick={() => applyPendingQueueDateShortcut("receivedTo", "END_OF_MONTH")}
+              >
+                สิ้นเดือน
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
+                onClick={() => applyPendingQueueDateShortcut("receivedTo", "CLEAR")}
+              >
+                ล้างค่า
+              </button>
+            </div>
+          </div>
         </div>
         {isLoadingPendingQueue ? (
           <p className="text-xs text-amber-700">กำลังโหลดคิวรอปิดเรท...</p>
@@ -2338,7 +2425,6 @@ export function PurchaseOrderList({
         onFiltersChange={handleApFiltersChange}
         onAfterBulkSettle={reloadFirstPage}
         onOpenPurchaseOrder={(poId) => {
-          prefetchPoDetail(poId);
           setSelectedPO(poId);
         }}
       />
@@ -2462,9 +2548,6 @@ export function PurchaseOrderList({
                 key={po.id}
                 type="button"
                 className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-colors hover:bg-slate-50"
-                onMouseEnter={() => prefetchPoDetail(po.id)}
-                onFocus={() => prefetchPoDetail(po.id)}
-                onTouchStart={() => prefetchPoDetail(po.id)}
                 onClick={() => setSelectedPO(po.id)}
               >
                 <div className="flex items-start justify-between gap-2">

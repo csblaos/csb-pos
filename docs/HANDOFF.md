@@ -2,9 +2,39 @@
 
 ## Snapshot Date
 
-- February 27, 2026
+- February 28, 2026
 
 ## Changed (ล่าสุด)
+
+- แก้ issue หน้า `/stock` ที่แท็บ `ประวัติ` มีอาการเด้งแท็บ/โหลดข้อมูลซ้ำระหว่างใช้งาน:
+  - สาเหตุหลัก: `StockMovementHistory` ถูก keep-mounted และยังทำ URL sync + fetch แม้แท็บไม่ active ทำให้เกิด race กับ query update จากแท็บอื่น
+  - แพตช์: จำกัดให้ logic sync query (`router.replace`) และ data fetch ของ History ทำงานเฉพาะเมื่อ `tab=history` เท่านั้น
+  - ผลลัพธ์: ลดการแย่งอัปเดต query ข้ามแท็บ และลดการโหลดข้อมูลที่ไม่จำเป็นตอนผู้ใช้อยู่แท็บอื่น
+
+- แก้ issue เด้งแท็บ/โหลดซ้ำใน `/stock` เพิ่มเติม และปิด prefetch PO ตามที่ต้องการ:
+  - `StockRecordingForm` และ `PurchaseOrderList` จำกัด logic sync/query side-effect ให้ทำงานเฉพาะตอนแท็บตัวเอง active (`tab=recording` / `tab=purchase`) ลด race จาก keep-mounted tabs
+  - `StockTabs` ปรับการเปลี่ยนแท็บเป็น `router.replace(..., { scroll: false })` และไม่ยิง navigation ซ้ำเมื่อกดแท็บเดิม
+  - ยกเลิก PO detail prefetch แบบ intent-driven (hover/focus/touch + auto prefetch รายการต้น ๆ) เหลือโหลดรายละเอียดแบบ on-demand เมื่อผู้ใช้เปิด PO จริง
+
+- ปรับ UX ฟอร์ม `เพิ่มสินค้า` ในหน้า `/products`:
+  - ช่อง `ราคาขาย` เปลี่ยนค่าเริ่มต้นจาก `0` เป็นค่าว่าง และเพิ่ม `placeholder: 0`
+  - ถ้าผู้ใช้ไม่กรอกราคาขาย ระบบยัง submit เป็น `0` ตาม schema/coercion เดิม (ไม่เปลี่ยน API contract)
+  - เป้าหมายคือให้ผู้ใช้พิมพ์ราคาได้ทันที โดยไม่ต้องลบ `0` เดิมก่อน
+
+- ปรับ visual state ของ workspace tabs ในหน้า `/stock?tab=purchase`:
+  - ปุ่ม active ของ `PO Operations` / `Month-End Close` / `AP by Supplier` เปลี่ยนจากโทน slate เป็น `primary theme` (`bg-primary`, `text-primary-foreground`)
+  - badge และคำอธิบายใต้ชื่อ tab (ตอน active) ปรับโทนเป็น `primary-foreground` เพื่อคง contrast และอ่านง่าย
+
+- ปรับตัวกรองวันที่ใน `คิว PO รอปิดเรท` (`/stock?tab=purchase` -> workspace `Month-End Close`) ให้ใช้ custom datepicker แบบเดียวกับ `Create PO`:
+  - เปลี่ยน `receivedFrom/receivedTo` จาก native `input[type=date]` เป็น `PurchaseDatePickerField` (calendar popover + เก็บค่า `YYYY-MM-DD`)
+  - เพิ่ม quick actions (`วันนี้`, `+7 วัน`, `สิ้นเดือน`, `ล้างค่า`) ทั้งช่องวันที่เริ่มและสิ้นสุด เพื่อให้ interaction ของวันที่ตรงกับฟอร์มสร้าง PO
+  - คง API/filter contract เดิม (`receivedFrom`, `receivedTo`) จึงไม่ต้องแก้ backend route
+
+- ปรับตัวกรองวันที่ใน `AP by Supplier` (`statement/filter/export`) ให้ใช้ custom datepicker แบบเดียวกับ `Create PO`:
+  - เปลี่ยน `dueFrom/dueTo` จาก native `input[type=date]` เป็น `PurchaseDatePickerField` (calendar popover + เก็บค่า `YYYY-MM-DD`)
+  - เพิ่ม quick actions (`วันนี้`, `+7 วัน`, `สิ้นเดือน`, `ล้าง`) แยกทั้งช่องเริ่มและสิ้นสุด
+  - จัด layout filter ใหม่โดยย้าย `Due ตั้งแต่/Due ถึง` ลงบรรทัดถัดไปใต้ตัวกรองหลัก เพื่อแก้ปัญหาความแคบบนหน้าจอเล็ก
+  - คง API/filter/export query contract เดิม (`dueFrom`, `dueTo`) จึงไม่ต้องแก้ endpoint `statement` และ `export-csv`
 
 - ปรับ flow แท็บ `/stock?tab=recording` ให้แยกจากงานบัญชี/PO ชัดขึ้น:
   - เพิ่ม guardrail card ว่า Recording ใช้สำหรับปรับจำนวนสต็อกเท่านั้น (ไม่บันทึกต้นทุน/เรท) และเพิ่มปุ่มลัด `ไปแท็บสั่งซื้อ (PO)`
@@ -176,7 +206,7 @@
 
 - ปรับ performance ของหน้า `/stock` tab `สั่งซื้อ (PO)` เพิ่มเติม:
   - เพิ่ม cache รายละเอียด PO ต่อ `poId` ที่ระดับแท็บ เพื่อให้เปิดรายการเดิมซ้ำได้เร็วทันที
-  - เพิ่ม intent-driven prefetch ตอนผู้ใช้ `hover/focus/touch` แถวรายการ PO (โหลดเฉพาะรายการที่มีแนวโน้มถูกกด)
+  - เดิมเคยมี intent-driven prefetch ตอนผู้ใช้ `hover/focus/touch` แถวรายการ PO แต่รอบล่าสุดปิดแล้ว (เหลือ on-demand) เพื่อลดโหลดที่ไม่จำเป็นและลด race ข้ามแท็บ
   - ปรับ PO detail sheet ให้ใช้ cache ก่อนโหลดจริง, มีปุ่ม retry ตอนโหลด detail fail และ invalidate cache เมื่อแก้ไข/เปลี่ยนสถานะ PO
 
 - ปรับ Phase 2 ของหน้า `/stock` (History tab):
@@ -344,6 +374,21 @@
   - เพิ่ม Phase 1 สแกนบาร์โค้ดในฟอร์มออเดอร์ (เพิ่มสินค้าอัตโนมัติ + fallback ค้นหาเองเมื่อไม่พบ)
 
 ## Impact
+
+- ลดอาการเด้งแท็บในหน้า `/stock` โดยเฉพาะตอนสลับไป/กลับแท็บ `ประวัติ`
+- ลดการยิงโหลดข้อมูลประวัติที่ไม่จำเป็นเมื่อผู้ใช้อยู่แท็บอื่น (เพราะ keep-mounted แต่ไม่ active)
+
+- ลด friction ตอนคีย์ `ราคาขาย` ในฟอร์มเพิ่มสินค้า เพราะเริ่มจากช่องว่าง (ไม่ต้องลบ `0` ก่อนพิมพ์)
+- คง behavior backend เดิม: ถ้าเว้นว่าง `ราคาขาย` จะถูกตีความเป็น `0` ตอนบันทึก
+
+- ผู้ใช้มองเห็น tab ที่ active ชัดขึ้นในหน้า PO เพราะสี active สอดคล้องกับ `primary` ของระบบ (ไม่กลืนกับกลุ่ม neutral)
+- visual language ของ navigation ในหน้า PO สอดคล้องกับ theme หลักมากขึ้น โดยไม่เปลี่ยน workflow/filter logic เดิม
+
+- ลดความสับสนเวลาใช้งานช่วงปิดเดือน เพราะรูปแบบเลือกวันที่ในคิว `PO รอปิดเรท` ตรงกับ `Create PO` (พฤติกรรม/ปุ่มลัดเหมือนกัน)
+- ลด friction บน mobile/iOS จาก native date input เดิมในคิว pending-rate และช่วยกรองช่วงวันที่ได้เร็วขึ้นด้วย quick actions
+- ผู้ใช้หน้า `AP by Supplier` กรองช่วง due date และ export CSV ได้ด้วย UX วันที่แบบเดียวกับ `Create PO` ลดการสลับ mental model ระหว่าง workspace
+- ลดปัญหา native date input บนมือถือใน filter `dueFrom/dueTo` โดยยังคงผลลัพธ์ statement/export เท่าเดิม (query format เดิม)
+- ฟอร์มตัวกรองใน `AP by Supplier` อ่านง่ายขึ้นบนจอแคบ เพราะตัวกรองวันที่ถูกแยกออกจากแถว filter หลัก ลดการอัดหลายคอนโทรลในบรรทัดเดียว
 
 - ปิดงานปลายเดือนได้เร็วขึ้นมากในกรณีจ่ายบัตรแบบ top-up ก้อนเดียว (ลดการคีย์ PO ทีละใบ)
 - ลดความผิดพลาดจากการใส่ reference ไม่สม่ำเสมอ เพราะ bulk flow บังคับใช้ `paymentReference` เดียวกันทั้งรอบ

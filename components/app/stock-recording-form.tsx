@@ -78,6 +78,7 @@ export function StockRecordingForm({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const isRecordingTabActive = searchParams.get("tab") === "recording";
   const movementTypeFromQuery = parseMovementTypeQuery(
     searchParams.get(RECORDING_MOVEMENT_QUERY_KEY),
   );
@@ -201,6 +202,10 @@ export function StockRecordingForm({
   }, [movementType, movementTypeOptions]);
 
   useEffect(() => {
+    if (!isRecordingTabActive) {
+      return;
+    }
+
     const nextMovementType = parseMovementTypeQuery(
       searchParams.get(RECORDING_MOVEMENT_QUERY_KEY),
     );
@@ -227,10 +232,15 @@ export function StockRecordingForm({
     movementTypeOptions,
     productId,
     productItems,
+    isRecordingTabActive,
     searchParams,
   ]);
 
   useEffect(() => {
+    if (!isRecordingTabActive) {
+      return;
+    }
+
     const params = new URLSearchParams(searchParams.toString());
     const defaultMovementType = movementTypeOptions[0] ?? "IN";
     let changed = false;
@@ -263,7 +273,15 @@ export function StockRecordingForm({
     router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, {
       scroll: false,
     });
-  }, [movementType, movementTypeOptions, pathname, productId, router, searchParams]);
+  }, [
+    isRecordingTabActive,
+    movementType,
+    movementTypeOptions,
+    pathname,
+    productId,
+    router,
+    searchParams,
+  ]);
 
   const selectedProduct = useMemo(
     () => productItems.find((item) => item.productId === productId),

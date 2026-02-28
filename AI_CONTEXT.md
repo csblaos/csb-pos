@@ -81,6 +81,7 @@ npm run db:migrate
   - หน้า `/products` ใช้ server-side pagination สำหรับรายการสินค้า (รองรับ `q/category/status/sort/page/pageSize`) และปุ่ม `โหลดเพิ่มเติม` จะดึงหน้าถัดไปจาก API จริง
   - เพิ่มโครงสร้างฐานข้อมูล Variant แบบ Phase 1 แล้ว (`product_models`, `product_model_attributes`, `product_model_attribute_values` + คอลัมน์เชื่อมใน `products`) โดยยังไม่บังคับเปลี่ยน UX เดิมทันที
   - ฟอร์ม `เพิ่ม/แก้ไขสินค้า` ใน `/products` รองรับโหมด Variant แล้ว (กำหนด `model`, `variant label`, `sort order`, และ option key/value) โดย backend จะผูก `products.model_id` และเติม dictionary ใน `product_model_attributes`/`product_model_attribute_values` ให้อัตโนมัติ
+  - ฟอร์ม `เพิ่มสินค้า` ช่อง `ราคาขาย` ปรับเป็นค่าว่างเริ่มต้น + `placeholder: 0`; หากผู้ใช้ไม่กรอก ระบบยังตีความค่าเป็น `0` ตอน submit (ลดการต้องลบ `0` ก่อนพิมพ์)
   - ปรับ UX ฟอร์ม Variant ให้ชัดว่า "1 ฟอร์ม = 1 SKU" โดยเปลี่ยนคำเป็น `คุณสมบัติของ SKU นี้` และเพิ่มปุ่ม `บันทึกและเพิ่ม Variant ถัดไป` สำหรับสร้างรุ่นย่อยต่อเนื่อง
   - ในฟอร์ม Variant ผู้ใช้กรอกเฉพาะ `ชื่อคุณสมบัติ/ค่า` ได้เลย (ระบบสร้าง `attributeCode/valueCode` อัตโนมัติ); ช่องรหัสถูกย้ายไปปุ่ม `แสดงช่องรหัส (ขั้นสูง)`
   - ปรับ layout ส่วน Variant เป็น mobile-first: ลด grid ที่ล้นจอบนมือถือ, ปรับแถว option ให้ซ้อนในจอเล็ก, และเพิ่มปุ่มพับ/ขยาย Matrix เพื่อไม่ให้ modal ยาวเกินจำเป็น (รองรับ tablet/desktop ด้วย)
@@ -139,10 +140,14 @@ npm run db:migrate
   - เพิ่ม hardening บน mobile สำหรับ PO detail/edit: `SlideUpSheet` content กัน overflow แนวนอน (`overflow-x-hidden`) และ date input ใน Edit PO ใช้ฟอนต์ 16px บนมือถือ (`text-base`) เพื่อลด iOS auto-zoom/อาการล้นจอ
   - เพิ่มคลาส `po-date-input` + global CSS (coarse pointer) เพื่อบังคับ `width/max-width/min-width` และควบคุม `::-webkit-datetime-edit` สำหรับ native date input ลดเคสล้นจอบนมือถือจริง (Create/Edit PO + Month-End filters)
   - ช่อง `คาดว่าจะได้รับ` / `ครบกำหนดชำระ` ใน Create PO และ Edit PO เปลี่ยนเป็น custom datepicker (calendar popover + เก็บค่า `YYYY-MM-DD`) แล้ว เพื่อลด dependency กับ native date control บน iOS
+  - ตัวกรองวันที่ใน `คิว PO รอปิดเรท` (`receivedFrom/receivedTo`) เปลี่ยนเป็น custom datepicker แบบเดียวกับ Create PO แล้ว พร้อม quick actions (`วันนี้`, `+7 วัน`, `สิ้นเดือน`, `ล้างค่า`) เพื่อให้ UX วันที่สอดคล้องกันทั้ง flow
+  - ตัวกรองวันที่ใน `AP by Supplier` (`dueFrom/dueTo`) เปลี่ยนเป็น custom datepicker แบบเดียวกับ Create PO แล้ว พร้อม quick actions (`วันนี้`, `+7 วัน`, `สิ้นเดือน`, `ล้าง`) โดยยังคง query contract เดิมเพื่อใช้กับทั้ง statement และ export CSV
+  - ใน panel `AP by Supplier` ย้ายบล็อก `Due ตั้งแต่/Due ถึง` ลงบรรทัดใหม่ใต้ตัวกรองหลัก (ค้นหา/สถานะ/sort) เพื่อเพิ่มพื้นที่ใช้งานบนจอแคบและลดการบีบช่อง date picker
   - ใน modal `คิว PO รอปิดเรท` (Month-End bulk) ช่องตัวเลข `อัตราแลกเปลี่ยนจริง` และ `ยอดชำระรวมตาม statement` ใช้ placeholder `0` โดยไม่ prefill ค่า `0` ลง input
   - modal `Create PO` ตั้งค่าไม่ให้ปิดเมื่อกด backdrop แล้ว (`closeOnBackdrop=false`) และเพิ่มปุ่ม `ยกเลิก` ที่ footer เพื่อปิดฟอร์มอย่างชัดเจน
   - modal `Create PO` เพิ่ม custom confirm ก่อนปิดเมื่อมีข้อมูลค้าง (ทั้งกดปุ่ม `ยกเลิก` และปุ่ม `X`) เพื่อลดการทิ้งฟอร์มโดยไม่ตั้งใจ
   - workspace tabs (`PO Operations`/`Month-End Close`/`AP by Supplier`) ถูกแยกเป็นบล็อกนำทางเฉพาะและแสดงใต้บล็อก KPI เพื่อคง hierarchy `summary ก่อน action`
+  - สี active ของ workspace tabs (`PO Operations`/`Month-End Close`/`AP by Supplier`) ใช้ `primary` theme (`bg-primary` + `text-primary-foreground`) แล้ว เพื่อให้สอดคล้องกับโทนหลักของระบบ
   - ใน workspace `PO Operations` ค่าเริ่มต้นของรายการเปลี่ยนเป็น `งานเปิด (OPEN)` แทน `ทั้งหมด` เพื่อลด noise ตอนเข้าแท็บ และยังสลับ `ทั้งหมด` ได้จาก filter chip
   - หน้า `/stock?tab=purchase` ปรับลำดับ section ให้ `ตัวชี้วัดและทางลัด` แสดงก่อน แล้วค่อย `โหมดการทำงาน`; การ์ด KPI ใช้โทนสีปกติ (neutral slate) ทั้งหมด
   - summary strip ด้านบน (`Open PO`, `Pending Rate`, `Overdue AP`, `Outstanding`) เป็น KPI summary-only (ไม่คลิก) และใช้สีคงที่ไม่เปลี่ยนตาม preset; shortcut ใช้ saved preset chip ด้านล่างเพื่อพาไป workspace + ตัวกรองด่วน พร้อมแถบ `Applied filter` สำหรับล้าง/บันทึก preset
@@ -177,7 +182,7 @@ npm run db:migrate
     - รองรับ `manual-first reconcile`: กรอก `ยอด statement` ได้ครั้งเดียวต่อรอบ แล้วระบบจะ auto-match ยอดลง PO ตาม `dueDate` เก่าสุดก่อน (oldest due first); ถ้าไม่กรอกยอด statement จะชำระเต็มยอดค้างของรายการที่เลือก
   - `purchase_orders` เก็บ baseline เรท (`exchangeRateInitial`) + due date (`dueDate`) + summary ชำระ (`paymentStatus/paidAt/paidBy/paymentReference/paymentNote`)
   - ledger การชำระอยู่ที่ `purchase_order_payments` (`PAYMENT`/`REVERSAL`) และคำนวณยอด `totalPaidBase/outstandingBase` จาก ledger
-  - แท็บ `สั่งซื้อ (PO)` เพิ่ม cache รายละเอียด PO ต่อ `poId` และ prefetch แบบ intent-driven (hover/focus/touch) เพื่อเปิด detail ได้เร็วขึ้น พร้อม invalidate cache เมื่อมีการแก้ไข/เปลี่ยนสถานะ
+  - แท็บ `สั่งซื้อ (PO)` ใช้ cache รายละเอียด PO ต่อ `poId` แบบ on-demand (ยกเลิก intent-driven prefetch hover/focus/touch) และยัง invalidate cache เมื่อมีการแก้ไข/เปลี่ยนสถานะ
   - หน้า `/stock` ใช้ `StockTabs` แบบ keep-mounted (mount ครั้งแรกตามแท็บที่เข้าแล้วคง state เดิมไว้) ลดการรีเซ็ตฟอร์ม/รายการเมื่อสลับแท็บ
   - ทั้ง 3 แท็บหลัก (`สั่งซื้อ`, `บันทึกสต็อก`, `ประวัติ`) มี toolbar มาตรฐาน: `รีเฟรชแท็บนี้` + เวลา `อัปเดตล่าสุด HH:mm`
   - เพิ่ม state มาตรฐานต่อแท็บ: loading skeleton / empty state / error + ปุ่ม retry
@@ -187,10 +192,13 @@ npm run db:migrate
   - ใน mobile ของแท็บ `บันทึกสต็อก` เพิ่มปุ่ม sticky `บันทึกสต็อก` ที่ก้นจอ และเพิ่มปุ่ม `ดูสินค้าทั้งหมด` เปิด list picker (ค้นหาชื่อ/SKU แล้วแตะเลือกได้)
   - `POST /api/stock/movements` จะ reject field กลุ่มต้นทุน/เรท (`cost/costBase/rate/exchangeRate/...`) ด้วย 400 เพื่อบังคับ separation ระหว่างงาน Recording vs PO/Month-End
   - แท็บ `บันทึกสต็อก` sync filter หลักลง URL แล้ว (`recordingType`, `recordingProductId`) เพื่อแชร์ลิงก์มุมมอง/สินค้าเป้าหมายในทีมได้ โดยใช้ `router.replace(..., { scroll: false })`
+  - แท็บ `บันทึกสต็อก` จะทำ URL sync/query restore เฉพาะตอน active tab เป็น `recording` เพื่อลด race condition เขียน query ข้ามแท็บ
   - ลิงก์ `ดูประวัติทั้งหมด` ในแท็บบันทึกสต็อก เปลี่ยนเป็น `router.push(?tab=history)` (ไม่ hard reload)
   - แท็บ `ประวัติ` ใช้ server-side pagination/filter ผ่าน `GET /api/stock/movements?view=history` รองรับกรอง `ประเภท/สินค้า/ช่วงวันที่`
   - แท็บ `ประวัติ` รองรับ filter type เพิ่ม `RESERVE/RELEASE` แล้ว และ sync filter/page ลง URL (`historyType`, `historyQ`, `historyDateFrom`, `historyDateTo`, `historyPage`) เพื่อแชร์มุมมองได้
+  - แท็บ `ประวัติ` จะ sync query/fetch เฉพาะตอน active tab เป็น `history` แล้ว เพื่อลด race condition ที่เคยเด้งแท็บ/โหลดซ้ำเมื่อมีหลายแท็บถูก keep-mounted พร้อมกัน
   - แท็บ `ประวัติ` เพิ่ม in-memory cache ต่อ filter key (`type/page/q/date`) เพื่อให้สลับ chip ประเภทเดิมแล้วแสดงผลได้ไวขึ้นทันที ก่อน revalidate เบื้องหลัง
+  - `StockTabs` ปรับการสลับแท็บเป็น `router.replace(..., { scroll: false })` และไม่ยิงซ้ำเมื่อคลิกแท็บเดิม เพื่อลด navigation churn
   - query history ปรับ date filter เป็นช่วงเวลา (`createdAt >= dayStart` และ `< nextDayStart`) แทน `date(createdAt)` เพื่อใช้ index ได้ดีขึ้น
   - เพิ่ม composite index ที่ `inventory_movements` สำหรับงาน history (`store_id, created_at, id` และ `store_id, type, created_at, id`)
   - เพื่อเลี่ยงตัวเลขชวนสับสนจากข้อมูลรายหน้า (pagination) filter chip ในแท็บ `ประวัติ` ปรับเป็น label-only (เอาจำนวนใน chip ออก)
