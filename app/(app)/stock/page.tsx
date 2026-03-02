@@ -148,6 +148,7 @@ export default async function StockPage({
       );
 
     const initialProducts = stockProductRows.slice(0, PRODUCT_PAGE_SIZE);
+    const initialHasMoreProducts = stockProductRows.length > PRODUCT_PAGE_SIZE;
     const hasMorePO = purchaseOrderRows.length > PO_PAGE_SIZE;
     const initialPOs = purchaseOrderRows.slice(0, PO_PAGE_SIZE);
 
@@ -197,6 +198,8 @@ export default async function StockPage({
               products={initialProducts}
               storeOutStockThreshold={storeOutStockThreshold}
               storeLowStockThreshold={storeLowStockThreshold}
+              pageSize={PRODUCT_PAGE_SIZE}
+              initialHasMore={initialHasMoreProducts}
             />
           }
           historyTab={<StockMovementHistory movements={movements} />}

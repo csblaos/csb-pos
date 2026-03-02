@@ -2,9 +2,19 @@
 
 ## Snapshot Date
 
-- February 28, 2026
+- March 2, 2026
 
 ## Changed (ล่าสุด)
+
+- ปรับแท็บ `/stock?tab=inventory` (ดูสต็อก) ให้ใช้งานจริงได้ครบขึ้น:
+  - เพิ่ม toolbar มาตรฐานของแท็บ (`รีเฟรชแท็บนี้` + `อัปเดตล่าสุด`)
+  - เพิ่ม data flow แบบแบ่งหน้า (`GET /api/stock/products?page&pageSize`) พร้อมปุ่ม `โหลดเพิ่ม` แทนการเห็นเฉพาะ 20 รายการแรก
+  - sync ตัวกรองหลักลง URL (`inventoryQ`, `inventoryFilter`, `inventorySort`) เฉพาะตอนแท็บ `inventory` active เพื่อแชร์ลิงก์มุมมองเดียวกันได้โดยไม่ชนกับแท็บอื่น
+  - ปรับ logic สแกนบาร์โค้ดให้ resolve ผ่าน `GET /api/products/search?q&includeStock=true` (exact barcode ก่อน แล้ว fallback รายการแรก)
+  - standardize scanner UX/logic ให้ตรงกับหน้า `/products` โดยย้ายไปใช้คอมโพเนนต์กลาง `components/app/barcode-scanner-panel.tsx` (camera dropdown, pause/resume, torch/zoom, manual barcode fallback, และ cleanup ตอนปิด)
+  - ปรับการ์ดสรุปในแท็บดูสต็อกให้ label `ทั้งหมด` สอดคล้องกับ filter `all`
+  - แท็บ `/stock?tab=recording` เปลี่ยนมาใช้ scanner คอมโพเนนต์กลางเดียวกันและปรับ permission sheet ให้ใช้โครงเดียวกับ `/products` (`ยกเลิก` + `อนุญาตและสแกน`)
+  - `components/app/stock-ledger.tsx` (legacy component ที่ยังไม่ถูก mount ใน route `/stock` ปัจจุบัน) ถูกย้ายมาใช้ `BarcodeScannerPanel` และ permission/scanner sheet style เดียวกับ `/products` แล้ว เพื่อป้องกัน logic/UI drift
 
 - แก้ issue หน้า `/stock` ที่แท็บ `ประวัติ` มีอาการเด้งแท็บ/โหลดข้อมูลซ้ำระหว่างใช้งาน:
   - สาเหตุหลัก: `StockMovementHistory` ถูก keep-mounted และยังทำ URL sync + fetch แม้แท็บไม่ active ทำให้เกิด race กับ query update จากแท็บอื่น
@@ -15,6 +25,17 @@
   - `StockRecordingForm` และ `PurchaseOrderList` จำกัด logic sync/query side-effect ให้ทำงานเฉพาะตอนแท็บตัวเอง active (`tab=recording` / `tab=purchase`) ลด race จาก keep-mounted tabs
   - `StockTabs` ปรับการเปลี่ยนแท็บเป็น `router.replace(..., { scroll: false })` และไม่ยิง navigation ซ้ำเมื่อกดแท็บเดิม
   - ยกเลิก PO detail prefetch แบบ intent-driven (hover/focus/touch + auto prefetch รายการต้น ๆ) เหลือโหลดรายละเอียดแบบ on-demand เมื่อผู้ใช้เปิด PO จริง
+
+- ปรับ UX แท็บ `/stock?tab=history` ให้เรียบง่ายและลดการสลับมุมมองเอง:
+  - เอาแถวปุ่มประเภท (`ทั้งหมด/รับเข้า/เบิกออก/จอง/ยกเลิกจอง/ปรับสต็อก/รับคืน`) ออก แล้วเปลี่ยนเป็น `ประเภท` แบบ dropdown เดียว
+  - แยก draft filter ออกจาก applied filter: เปลี่ยนค่าช่องกรองแล้วยังไม่ fetch/ไม่ sync URL จนกด `ใช้ตัวกรอง`
+  - เพิ่ม summary ของตัวกรองที่กำลังใช้จริงใต้ปุ่ม action และคงปุ่ม `ล้างตัวกรอง` เพื่อให้ flow ไม่ซับซ้อนบนมือถือ
+  - แก้บั๊กที่ค่าช่องกรอง (dropdown/วันที่) เด้งกลับค่าเดิมระหว่างผู้ใช้แก้ไข: URL-to-form sync ของแท็บ history เปลี่ยนเป็น update เฉพาะตอน query เปลี่ยนจริง ลดอาการพิมพ์ไม่เข้า/เลือกไม่ติด
+  - เปลี่ยนช่องวันที่ใน history filter เป็น custom datepicker (calendar popover) แบบเดียวกับ PO เพื่อให้ UX บนมือถือสม่ำเสมอและเลี่ยงปัญหา native `input[type=date]`
+
+- เพิ่ม policy กลางของ date input ฝั่ง UI:
+  - ฟีเจอร์ใหม่ที่มีช่องวันที่ต้องใช้ custom datepicker มาตรฐานเดียวกันทั้งระบบ (calendar popover + ค่า `YYYY-MM-DD`)
+  - native `input[type=date]` ให้ใช้เฉพาะกรณี internal/admin ที่ไม่กระทบประสบการณ์ผู้ใช้ปลายทาง
 
 - ปรับ UX ฟอร์ม `เพิ่มสินค้า` ในหน้า `/products`:
   - ช่อง `ราคาขาย` เปลี่ยนค่าเริ่มต้นจาก `0` เป็นค่าว่าง และเพิ่ม `placeholder: 0`
@@ -682,7 +703,7 @@ npm run build
 - ไปที่ `/products?status=inactive` แล้ว hard refresh: ต้องคงแท็บ `ปิดใช้งาน`
 - สลับแท็บสถานะใน `/products`: URL query `status` ต้องเปลี่ยนตาม และกด back/forward แล้วแท็บต้องตาม URL
 - เปิดหน้า `/stock` แล้วตรวจว่าไม่มีปุ่ม `รีเฟรช` ระดับหน้าใน header แล้ว
-- ตรวจทุกแท็บ (`PO/Recording/History`) ว่ามีปุ่ม `รีเฟรชแท็บนี้` และทำงานได้ตามแท็บนั้น
+- ตรวจทุกแท็บ (`Inventory/PO/Recording/History`) ว่ามีปุ่ม `รีเฟรชแท็บนี้` และทำงานได้ตามแท็บนั้น
 - เปิด `/products` > เพิ่มสินค้าใหม่ บนมือถือ แล้วโฟกัสช่องกรอกล่าง ๆ (เช่น threshold/conversion) เพื่อตรวจว่าหน้าฟอร์มเลื่อนตามและไม่ถูกคีย์บอร์ดบัง
 - เปิด `/products` > แก้ไขสินค้า บนมือถือ แล้วสลับโฟกัสช่องบน/ล่างซ้ำหลายครั้งขณะคีย์บอร์ดเปิดอยู่ เพื่อตรวจว่าช่องที่โฟกัสยังอยู่ในมุมมองเสมอ
 - เปิด modal บนมือถือแล้วลองลากลงจากแถบ header: ต้องปิดได้เหมือนลากจาก handle และปุ่ม `X` ต้องกดปิดได้ปกติ

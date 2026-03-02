@@ -323,6 +323,22 @@
   - saved preset แบบ localStorage ผูกกับ browser/device เดียว; หากต้องการ sync ข้ามอุปกรณ์ต้องทำ server-side preference ในเฟสถัดไป
   - การขยายฟีเจอร์ถัดไป (เช่น queue เพิ่ม, policy action) จะเพิ่มใน workspace ที่เกี่ยวข้องได้โดยไม่ทำให้หน้าแน่นเกินไป
 
+## ADR-021: Date Input มาตรฐานใช้ Custom Datepicker ทั่วระบบ
+
+- Date: March 2, 2026
+- Status: Accepted
+- Decision:
+  - กำหนด default ของฟิลด์วันที่ใน UI เป็น custom datepicker เดียวกันทั้งระบบ (calendar popover)
+  - ฟอร์แมตค่าที่เก็บ/ส่ง API ยังคงเป็น `YYYY-MM-DD` ตาม contract เดิม
+  - native `input[type=date]` ใช้ได้เฉพาะหน้าภายในเชิงเทคนิค/แอดมินที่ไม่กระทบ UX ผู้ใช้ปลายทาง
+- Reason:
+  - native date input ให้พฤติกรรมไม่สม่ำเสมอระหว่าง browser/device โดยเฉพาะบนมือถือ (placeholder, layout, keyboard, overflow)
+  - ลดความซับซ้อนในการใช้งานและทำให้ interaction ของวันที่คงที่ทุก flow
+- Consequence:
+  - ฟอร์มที่เพิ่มช่องวันที่ใหม่ต้อง reuse component datepicker มาตรฐานแทนการใช้ native date input
+  - ทีมต้องดูแล accessibility และ keyboard interaction ของ component กลางให้ครบ เพราะถูกใช้งานหลายหน้า
+  - ไม่ต้องเปลี่ยน backend schema/API เนื่องจากยังส่งค่า `YYYY-MM-DD` เหมือนเดิม
+
 ## Template สำหรับ ADR ใหม่
 
 - Date: YYYY-MM-DD

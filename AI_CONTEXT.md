@@ -142,6 +142,7 @@ npm run db:migrate
   - ช่อง `คาดว่าจะได้รับ` / `ครบกำหนดชำระ` ใน Create PO และ Edit PO เปลี่ยนเป็น custom datepicker (calendar popover + เก็บค่า `YYYY-MM-DD`) แล้ว เพื่อลด dependency กับ native date control บน iOS
   - ตัวกรองวันที่ใน `คิว PO รอปิดเรท` (`receivedFrom/receivedTo`) เปลี่ยนเป็น custom datepicker แบบเดียวกับ Create PO แล้ว พร้อม quick actions (`วันนี้`, `+7 วัน`, `สิ้นเดือน`, `ล้างค่า`) เพื่อให้ UX วันที่สอดคล้องกันทั้ง flow
   - ตัวกรองวันที่ใน `AP by Supplier` (`dueFrom/dueTo`) เปลี่ยนเป็น custom datepicker แบบเดียวกับ Create PO แล้ว พร้อม quick actions (`วันนี้`, `+7 วัน`, `สิ้นเดือน`, `ล้าง`) โดยยังคง query contract เดิมเพื่อใช้กับทั้ง statement และ export CSV
+  - นโยบาย UI วันที่ทั้งระบบ: ให้ใช้ custom datepicker มาตรฐานเดียวกัน (calendar popover + เก็บค่า `YYYY-MM-DD`) แทน native `input[type=date]` เป็นค่าเริ่มต้น; native ใช้ได้เฉพาะกรณี internal/admin ที่ไม่กระทบ UX ผู้ใช้ปลายทาง
   - ใน panel `AP by Supplier` ย้ายบล็อก `Due ตั้งแต่/Due ถึง` ลงบรรทัดใหม่ใต้ตัวกรองหลัก (ค้นหา/สถานะ/sort) เพื่อเพิ่มพื้นที่ใช้งานบนจอแคบและลดการบีบช่อง date picker
   - ใน modal `คิว PO รอปิดเรท` (Month-End bulk) ช่องตัวเลข `อัตราแลกเปลี่ยนจริง` และ `ยอดชำระรวมตาม statement` ใช้ placeholder `0` โดยไม่ prefill ค่า `0` ลง input
   - modal `Create PO` ตั้งค่าไม่ให้ปิดเมื่อกด backdrop แล้ว (`closeOnBackdrop=false`) และเพิ่มปุ่ม `ยกเลิก` ที่ footer เพื่อปิดฟอร์มอย่างชัดเจน
@@ -184,7 +185,12 @@ npm run db:migrate
   - ledger การชำระอยู่ที่ `purchase_order_payments` (`PAYMENT`/`REVERSAL`) และคำนวณยอด `totalPaidBase/outstandingBase` จาก ledger
   - แท็บ `สั่งซื้อ (PO)` ใช้ cache รายละเอียด PO ต่อ `poId` แบบ on-demand (ยกเลิก intent-driven prefetch hover/focus/touch) และยัง invalidate cache เมื่อมีการแก้ไข/เปลี่ยนสถานะ
   - หน้า `/stock` ใช้ `StockTabs` แบบ keep-mounted (mount ครั้งแรกตามแท็บที่เข้าแล้วคง state เดิมไว้) ลดการรีเซ็ตฟอร์ม/รายการเมื่อสลับแท็บ
-  - ทั้ง 3 แท็บหลัก (`สั่งซื้อ`, `บันทึกสต็อก`, `ประวัติ`) มี toolbar มาตรฐาน: `รีเฟรชแท็บนี้` + เวลา `อัปเดตล่าสุด HH:mm`
+  - ทั้ง 4 แท็บหลัก (`ดูสต็อก`, `สั่งซื้อ`, `บันทึกสต็อก`, `ประวัติ`) มี toolbar มาตรฐาน: `รีเฟรชแท็บนี้` + เวลา `อัปเดตล่าสุด HH:mm`
+  - แท็บ `ดูสต็อก` ใช้ `GET /api/stock/products?page&pageSize` แบบแบ่งหน้า (เริ่มจากชุดแรก + ปุ่ม `โหลดเพิ่ม`) และมี `รีเฟรชแท็บนี้` เพื่อดึงสถานะล่าสุดของรายการสินค้า
+  - แท็บ `ดูสต็อก` sync state ลง URL แล้ว (`inventoryQ`, `inventoryFilter`, `inventorySort`) และจะ sync เฉพาะตอน active tab เป็น `inventory` เพื่อลด race condition เขียน query ข้ามแท็บ
+  - สแกนบาร์โค้ดในแท็บ `ดูสต็อก` จะ resolve ด้วย `GET /api/products/search?q&includeStock=true` (exact barcode ก่อน fallback) และ scanner modal จะเริ่มกล้องเฉพาะตอนเปิดจริง เพื่อลดความเสี่ยงเปิดกล้องค้างตอนปิดแผ่นสแกน
+  - scanner ในแท็บ `ดูสต็อก` และ `บันทึกสต็อก` ใช้ UI/logic ชุดเดียวกับหน้า `/products` ผ่านคอมโพเนนต์กลาง `components/app/barcode-scanner-panel.tsx` (มี camera dropdown, pause/resume, torch/zoom, manual barcode fallback, และ cleanup ตอนปิด)
+  - คอมโพเนนต์ legacy `components/app/stock-ledger.tsx` (ยังไม่ถูก mount ใน `/stock` ปัจจุบัน) ปรับ scanner ให้ใช้คอมโพเนนต์กลางเดียวกันแล้ว เพื่อคงพฤติกรรมเปิด/ปิดกล้องและ permission flow มาตรฐานเดียวกับ `/products`
   - เพิ่ม state มาตรฐานต่อแท็บ: loading skeleton / empty state / error + ปุ่ม retry
   - `บันทึกสต็อก` เพิ่ม quick preset (`รับเข้า`, `ปรับยอด`, `ของเสีย`) พร้อม note template และส่ง `Idempotency-Key` ตอน `POST /api/stock/movements` จาก client
   - แท็บ `บันทึกสต็อก` เพิ่ม guardrail ชัดเจนว่า flow นี้ไม่บันทึกต้นทุน/อัตราแลกเปลี่ยน พร้อม CTA ไปแท็บ `สั่งซื้อ (PO)` สำหรับงานซื้อเข้า
@@ -196,8 +202,11 @@ npm run db:migrate
   - ลิงก์ `ดูประวัติทั้งหมด` ในแท็บบันทึกสต็อก เปลี่ยนเป็น `router.push(?tab=history)` (ไม่ hard reload)
   - แท็บ `ประวัติ` ใช้ server-side pagination/filter ผ่าน `GET /api/stock/movements?view=history` รองรับกรอง `ประเภท/สินค้า/ช่วงวันที่`
   - แท็บ `ประวัติ` รองรับ filter type เพิ่ม `RESERVE/RELEASE` แล้ว และ sync filter/page ลง URL (`historyType`, `historyQ`, `historyDateFrom`, `historyDateTo`, `historyPage`) เพื่อแชร์มุมมองได้
+  - ปรับ UX แท็บ `ประวัติ` จากแถวปุ่มประเภทหลายปุ่ม เป็นฟอร์มตัวกรองเรียบง่าย (`ประเภท` dropdown + `ค้นหา` + `ช่วงวันที่`) และค่อย apply ตอนกด `ใช้ตัวกรอง`
+  - แก้บั๊กในฟอร์มกรองแท็บ `ประวัติ`: ค่า dropdown/วันที่ไม่ถูก reset กลับจาก URL ระหว่างพิมพ์แล้ว (URL sync จะดันค่าเข้าฟอร์มเฉพาะตอน query เปลี่ยนจริง)
+  - ช่องวันที่ในแท็บ `ประวัติ` เปลี่ยนเป็น custom datepicker (calendar popover) แบบเดียวกับ PO เพื่อลดปัญหา native date input บนมือถือ
   - แท็บ `ประวัติ` จะ sync query/fetch เฉพาะตอน active tab เป็น `history` แล้ว เพื่อลด race condition ที่เคยเด้งแท็บ/โหลดซ้ำเมื่อมีหลายแท็บถูก keep-mounted พร้อมกัน
-  - แท็บ `ประวัติ` เพิ่ม in-memory cache ต่อ filter key (`type/page/q/date`) เพื่อให้สลับ chip ประเภทเดิมแล้วแสดงผลได้ไวขึ้นทันที ก่อน revalidate เบื้องหลัง
+  - แท็บ `ประวัติ` เพิ่ม in-memory cache ต่อ filter key (`type/page/q/date`) เพื่อให้สลับมุมมองที่เคยเปิดแล้วแสดงผลได้ไวขึ้นทันที ก่อน revalidate เบื้องหลัง
   - `StockTabs` ปรับการสลับแท็บเป็น `router.replace(..., { scroll: false })` และไม่ยิงซ้ำเมื่อคลิกแท็บเดิม เพื่อลด navigation churn
   - query history ปรับ date filter เป็นช่วงเวลา (`createdAt >= dayStart` และ `< nextDayStart`) แทน `date(createdAt)` เพื่อใช้ index ได้ดีขึ้น
   - เพิ่ม composite index ที่ `inventory_movements` สำหรับงาน history (`store_id, created_at, id` และ `store_id, type, created_at, id`)
