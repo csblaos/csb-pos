@@ -6,6 +6,12 @@
 
 ## Changed (ล่าสุด)
 
+- ปรับ scanner ของหน้า `/orders` และ `/orders/new` ให้ใช้มาตรฐานเดียวกับหน้าอื่น:
+  - ย้ายจาก scanner logic ที่ฝังใน `orders-management.tsx` มาใช้คอมโพเนนต์กลาง `components/app/barcode-scanner-panel.tsx`
+  - เพิ่ม permission sheet ก่อนเปิดกล้อง (`ยกเลิก` + `อนุญาตและสแกน`) แบบเดียวกับ `/products` และ `/stock`
+  - พฤติกรรมเปิด/ปิดกล้อง, เลือกกล้อง, manual barcode fallback, และ cleanup stream ตอนปิด ถูก unify กับหน้าที่ใช้ scanner อื่น ๆ แล้ว
+  - policy สำหรับงานถัดไป: หากเพิ่มปุ่ม `สแกนบาร์โค้ด` ในหน้าใหม่ ให้ใช้ `BarcodeScannerPanel` + permission sheet มาตรฐานเดียวกัน (ไม่แยกเขียน logic กล้องใหม่ในหน้า)
+
 - เพิ่มหน้าใหม่ `/orders/new` สำหรับสร้างออเดอร์แบบหน้าเต็ม (full create flow):
   - หน้า `/orders` ปรับบทบาทเป็น “จัดการออเดอร์” และแยก action เป็น 2 แบบ: `สร้างด่วน` (modal เดิม) กับ `สร้างออเดอร์` (ไป `/orders/new`)
   - `/orders/new` ใช้คอมโพเนนต์/validation/API ชุดเดียวกับ flow เดิม (`POST /api/orders`) เพื่อลด drift

@@ -77,6 +77,7 @@ npm run db:migrate
     - Touch device (POS tablet/mobile) แสดงได้เมื่อเปิด `NEXT_PUBLIC_POS_ALLOW_FULLSCREEN_ON_TOUCH=true`
     - กดซ้ำเพื่อออก หรือกด `Esc`
     - ในฟอร์มสร้างออเดอร์รองรับสแกนบาร์โค้ดเพิ่มสินค้าอัตโนมัติ และ fallback ค้นหาเองเมื่อไม่พบ barcode
+    - scanner ของ `/orders` และ `/orders/new` ใช้คอมโพเนนต์กลาง `components/app/barcode-scanner-panel.tsx` แล้ว พร้อม permission sheet มาตรฐาน (`ยกเลิก` + `อนุญาตและสแกน`) แบบเดียวกับ `/products` และ `/stock`
     - ฟอร์มสร้างออเดอร์ปรับเป็น POS-lite สำหรับ mobile/tablet: มี quick add card (ค้นหา SKU/ชื่อ/บาร์โค้ดแล้วแตะเพิ่ม), แสดง cart preview แบบย่อบนมือถือ, และมี `ตะกร้าสินค้า` sheet แยกสำหรับแก้จำนวน/หน่วย/ลบรายการก่อนบันทึก
   - UX `/orders/new`:
     - หน้าเต็มแบบ POS layout (ตัด heading/description หน้า create ออก): แถบ `ค้นหา + สแกน` ด้านบน, product card grid ตรงกลาง, และ cart action bar ด้านล่าง
@@ -214,6 +215,7 @@ npm run db:migrate
   - สแกนบาร์โค้ดในแท็บ `ดูสต็อก` จะ resolve ด้วย `GET /api/products/search?q&includeStock=true` (exact barcode ก่อน fallback) และ scanner modal จะเริ่มกล้องเฉพาะตอนเปิดจริง เพื่อลดความเสี่ยงเปิดกล้องค้างตอนปิดแผ่นสแกน
   - scanner ในแท็บ `ดูสต็อก` และ `บันทึกสต็อก` ใช้ UI/logic ชุดเดียวกับหน้า `/products` ผ่านคอมโพเนนต์กลาง `components/app/barcode-scanner-panel.tsx` (มี camera dropdown, pause/resume, torch/zoom, manual barcode fallback, และ cleanup ตอนปิด)
   - คอมโพเนนต์ legacy `components/app/stock-ledger.tsx` (ยังไม่ถูก mount ใน `/stock` ปัจจุบัน) ปรับ scanner ให้ใช้คอมโพเนนต์กลางเดียวกันแล้ว เพื่อคงพฤติกรรมเปิด/ปิดกล้องและ permission flow มาตรฐานเดียวกับ `/products`
+  - นโยบาย scanner กลางของระบบ: หากเพิ่มปุ่ม `สแกนบาร์โค้ด` ใหม่ในหน้าอื่น ให้ reuse `BarcodeScannerPanel` + permission sheet มาตรฐานเดียวกันเสมอ เพื่อคง UX/permission/camera cleanup ให้สอดคล้องทั้งระบบ
   - เพิ่ม state มาตรฐานต่อแท็บ: loading skeleton / empty state / error + ปุ่ม retry
   - `บันทึกสต็อก` เพิ่ม quick preset (`รับเข้า`, `ปรับยอด`, `ของเสีย`) พร้อม note template และส่ง `Idempotency-Key` ตอน `POST /api/stock/movements` จาก client
   - แท็บ `บันทึกสต็อก` เพิ่ม guardrail ชัดเจนว่า flow นี้ไม่บันทึกต้นทุน/อัตราแลกเปลี่ยน พร้อม CTA ไปแท็บ `สั่งซื้อ (PO)` สำหรับงานซื้อเข้า

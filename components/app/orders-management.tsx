@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   type ColumnDef,
   flexRender,
@@ -13,6 +13,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 
+import { BarcodeScannerPanel } from "@/components/app/barcode-scanner-panel";
 import { Button } from "@/components/ui/button";
 import { SlideUpSheet } from "@/components/ui/slide-up-sheet";
 import { authFetch } from "@/lib/auth/client-token";
@@ -102,6 +103,7 @@ const checkoutFlowLabel: Record<CheckoutFlow, string> = {
   PICKUP_LATER: "มารับที่ร้านภายหลัง",
   ONLINE_DELIVERY: "สั่งออนไลน์/จัดส่ง",
 };
+const SCANNER_PERMISSION_STORAGE_KEY = "scanner-permission-seen";
 
 const defaultValues = (catalog: OrderCatalog): CreateOrderFormInput => ({
   channel: "WALK_IN",
@@ -135,7 +137,9 @@ export function OrdersManagement(props: OrdersManagementProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [createFormOpen, setCreateFormOpen] = useState(false);
+  const [showScannerPermissionSheet, setShowScannerPermissionSheet] = useState(false);
   const [showScannerSheet, setShowScannerSheet] = useState(false);
+  const [hasSeenScannerPermission, setHasSeenScannerPermission] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -634,6 +638,19 @@ export function OrdersManagement(props: OrdersManagementProps) {
     };
   }, [form.formState.isDirty, isCreateOnlyMode, watchedItems.length]);
 
+  useEffect(() => {
+    const seen = window.localStorage.getItem(SCANNER_PERMISSION_STORAGE_KEY) === "1";
+    setHasSeenScannerPermission(seen);
+  }, []);
+
+  const openScannerSheet = useCallback(() => {
+    if (hasSeenScannerPermission) {
+      setShowScannerSheet(true);
+      return;
+    }
+    setShowScannerPermissionSheet(true);
+  }, [hasSeenScannerPermission]);
+
   const renderCreateOrderForm = (options?: { inSheet?: boolean }) => {
     const inSheet = options?.inSheet ?? false;
     const isProductStep = isCreateOnlyMode ? createStep === "products" : true;
@@ -820,7 +837,7 @@ export function OrdersManagement(props: OrdersManagementProps) {
                 type="button"
                 className="text-xs font-medium text-blue-700"
                 disabled={loading || !hasCatalogProducts}
-                onClick={() => setShowScannerSheet(true)}
+                onClick={openScannerSheet}
               >
                 สแกนเพิ่มสินค้า
               </button>
@@ -955,7 +972,7 @@ export function OrdersManagement(props: OrdersManagementProps) {
                   <button
                     type="button"
                     className="h-10 rounded-md border border-amber-300 px-3 text-xs font-medium text-amber-700"
-                    onClick={() => setShowScannerSheet(true)}
+                    onClick={openScannerSheet}
                     disabled={loading}
                   >
                     สแกนใหม่
@@ -1410,7 +1427,7 @@ export function OrdersManagement(props: OrdersManagementProps) {
               variant="outline"
               className="h-10 px-3 text-xs"
               disabled={loading || !hasCatalogProducts}
-              onClick={() => setShowScannerSheet(true)}
+              onClick={openScannerSheet}
             >
               สแกน
             </Button>
@@ -1500,7 +1517,7 @@ export function OrdersManagement(props: OrdersManagementProps) {
                 <button
                   type="button"
                   className="h-10 rounded-md border border-amber-300 px-3 text-xs font-medium text-amber-700"
-                  onClick={() => setShowScannerSheet(true)}
+                  onClick={openScannerSheet}
                   disabled={loading}
                 >
                   สแกนใหม่
@@ -1858,18 +1875,62 @@ export function OrdersManagement(props: OrdersManagementProps) {
         </>
       )}
       <SlideUpSheet
+        isOpen={showScannerPermissionSheet}
+        onClose={() => setShowScannerPermissionSheet(false)}
+        title="ขออนุญาตใช้กล้อง"
+        description="ระบบต้องใช้กล้องเพื่อสแกนบาร์โค้ดสินค้า"
+      >
+        <div className="space-y-3">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+            <p className="font-medium text-slate-700">ทำไมต้องใช้กล้อง?</p>
+            <ul className="mt-2 list-disc space-y-1 pl-4">
+              <li>สแกนบาร์โค้ดได้เร็วขึ้น</li>
+              <li>ลดความผิดพลาดจากการพิมพ์</li>
+              <li>ใช้งานได้ทันทีในหน้านี้</li>
+            </ul>
+          </div>
+
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 flex-1"
+              onClick={() => setShowScannerPermissionSheet(false)}
+            >
+              ยกเลิก
+            </Button>
+            <Button
+              type="button"
+              className="h-10 flex-1"
+              onClick={() => {
+                window.localStorage.setItem(SCANNER_PERMISSION_STORAGE_KEY, "1");
+                setHasSeenScannerPermission(true);
+                setShowScannerPermissionSheet(false);
+                setShowScannerSheet(true);
+              }}
+            >
+              อนุญาตและสแกน
+            </Button>
+          </div>
+        </div>
+      </SlideUpSheet>
+      <SlideUpSheet
         isOpen={showScannerSheet}
         onClose={() => setShowScannerSheet(false)}
         title="สแกนบาร์โค้ดสินค้า"
         description="สแกนแล้วเพิ่มสินค้าเข้าออเดอร์อัตโนมัติ"
         disabled={loading}
       >
-        <OrderBarcodeScanner
-          isOpen={showScannerSheet}
-          onResult={onScanBarcodeResult}
-          onClose={() => setShowScannerSheet(false)}
-          disabled={loading}
-        />
+        <div className="p-4">
+          {showScannerSheet ? (
+            <BarcodeScannerPanel
+              isOpen={showScannerSheet}
+              onResult={onScanBarcodeResult}
+              onClose={() => setShowScannerSheet(false)}
+              cameraSelectId="orders-barcode-scanner-camera-select"
+            />
+          ) : null}
+        </div>
       </SlideUpSheet>
       <SlideUpSheet
         isOpen={showCartSheet}
@@ -2015,249 +2076,5 @@ export function OrdersManagement(props: OrdersManagementProps) {
       {successMessage ? <p className="text-sm text-emerald-700">{successMessage}</p> : null}
       {errorMessage ? <p className="text-sm text-red-600">{errorMessage}</p> : null}
     </section>
-  );
-}
-
-function OrderBarcodeScanner({
-  isOpen,
-  onResult,
-  onClose,
-  disabled,
-}: {
-  isOpen: boolean;
-  onResult: (barcode: string) => void;
-  onClose: () => void;
-  disabled: boolean;
-}) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const controlsRef = useRef<import("@zxing/browser").IScannerControls | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-
-  const [status, setStatus] = useState<
-    "opening" | "scanning" | "paused" | "no-permission" | "no-camera" | "error"
-  >("opening");
-  const [error, setError] = useState<string | null>(null);
-  const [manualBarcode, setManualBarcode] = useState("");
-  const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
-  const [activeDeviceId, setActiveDeviceId] = useState<string | null>(null);
-
-  const stopScanner = useCallback(() => {
-    if (controlsRef.current) {
-      controlsRef.current.stop();
-      controlsRef.current = null;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-  }, []);
-
-  const refreshDevices = useCallback(async () => {
-    if (!navigator.mediaDevices?.enumerateDevices) {
-      setDevices([]);
-      return;
-    }
-    const deviceList = await navigator.mediaDevices.enumerateDevices();
-    const cameras = deviceList.filter((device) => device.kind === "videoinput");
-    setDevices(cameras);
-  }, []);
-
-  const startScanner = useCallback(
-    async (deviceId?: string) => {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        setStatus("no-camera");
-        setError("อุปกรณ์นี้ไม่รองรับการเปิดกล้อง");
-        return;
-      }
-
-      setError(null);
-      setStatus("opening");
-
-      try {
-        const { BrowserMultiFormatReader } = await import("@zxing/browser");
-        const { BarcodeFormat, DecodeHintType } = await import("@zxing/library");
-
-        const constraints: MediaStreamConstraints = {
-          video: deviceId
-            ? { deviceId: { exact: deviceId } }
-            : { facingMode: "environment" },
-        };
-
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        streamRef.current = stream;
-        const activeTrack = stream.getVideoTracks()[0];
-        const activeCameraId = activeTrack?.getSettings?.().deviceId ?? null;
-        setActiveDeviceId(activeCameraId);
-        if (activeCameraId) {
-          window.localStorage.setItem("scanner-camera-id", activeCameraId);
-        }
-
-        await refreshDevices();
-
-        const hints = new Map();
-        hints.set(DecodeHintType.POSSIBLE_FORMATS, [
-          BarcodeFormat.EAN_13,
-          BarcodeFormat.EAN_8,
-          BarcodeFormat.CODE_128,
-          BarcodeFormat.CODE_39,
-          BarcodeFormat.UPC_A,
-          BarcodeFormat.UPC_E,
-          BarcodeFormat.QR_CODE,
-        ]);
-        hints.set(DecodeHintType.TRY_HARDER, true);
-
-        const reader = new BrowserMultiFormatReader(hints, {
-          delayBetweenScanAttempts: 200,
-        });
-
-        if (!videoRef.current) {
-          stopScanner();
-          return;
-        }
-
-        controlsRef.current = await reader.decodeFromStream(stream, videoRef.current, (result) => {
-          if (!result) {
-            return;
-          }
-          const code = result.getText().trim();
-          if (!code) {
-            return;
-          }
-          stopScanner();
-          onResult(code);
-        });
-
-        setStatus("scanning");
-      } catch (scanError) {
-        if (scanError instanceof DOMException && scanError.name === "NotAllowedError") {
-          setStatus("no-permission");
-          setError("ไม่ได้รับอนุญาตให้ใช้กล้อง");
-        } else if (scanError instanceof DOMException && scanError.name === "NotFoundError") {
-          setStatus("no-camera");
-          setError("ไม่พบกล้องในอุปกรณ์นี้");
-        } else {
-          setStatus("error");
-          setError("เปิดสแกนเนอร์ไม่สำเร็จ กรุณาพิมพ์บาร์โค้ดเอง");
-        }
-        stopScanner();
-      }
-    },
-    [onResult, refreshDevices, stopScanner],
-  );
-
-  useEffect(() => {
-    if (!isOpen) {
-      stopScanner();
-      setStatus("paused");
-      return;
-    }
-
-    const savedCameraId = window.localStorage.getItem("scanner-camera-id");
-    void startScanner(savedCameraId || undefined);
-
-    return () => {
-      stopScanner();
-    };
-  }, [isOpen, startScanner, stopScanner]);
-
-  const submitManualBarcode = () => {
-    const code = manualBarcode.trim();
-    if (!code) {
-      return;
-    }
-    stopScanner();
-    onResult(code);
-    setManualBarcode("");
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="relative mx-auto w-full max-w-sm">
-        <video ref={videoRef} className="mx-auto aspect-[3/2] w-full rounded-xl bg-black" muted playsInline />
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-          <div className="h-[46%] w-[80%] rounded-lg border-2 border-blue-400/80" />
-        </div>
-      </div>
-
-      <p className="text-center text-[11px] text-slate-500">
-        วางบาร์โค้ดให้อยู่กลางกรอบ แล้วระบบจะเพิ่มสินค้าให้อัตโนมัติ
-      </p>
-
-      {status === "opening" ? (
-        <p className="text-center text-xs text-slate-500">กำลังเปิดกล้อง...</p>
-      ) : null}
-      {status === "no-permission" ? (
-        <p className="text-center text-xs text-amber-600">ไม่ได้รับอนุญาตให้ใช้กล้อง</p>
-      ) : null}
-      {status === "no-camera" ? <p className="text-center text-xs text-amber-600">ไม่พบกล้อง</p> : null}
-      {status === "error" && error ? <p className="text-center text-xs text-amber-600">{error}</p> : null}
-
-      <div className="flex items-center gap-2">
-        {devices.length > 1 ? (
-          <Button
-            type="button"
-            variant="outline"
-            className="h-10 flex-1"
-            disabled={disabled}
-            onClick={async () => {
-              if (devices.length <= 1) {
-                return;
-              }
-              const currentIndex = Math.max(
-                0,
-                devices.findIndex((device) => device.deviceId === activeDeviceId),
-              );
-              const nextDevice = devices[(currentIndex + 1) % devices.length];
-              stopScanner();
-              await startScanner(nextDevice?.deviceId);
-            }}
-          >
-            สลับกล้อง
-          </Button>
-        ) : null}
-        <Button
-          type="button"
-          variant="outline"
-          className="h-10 flex-1"
-          disabled={disabled}
-          onClick={async () => {
-            if (status === "paused") {
-              await startScanner(activeDeviceId ?? undefined);
-              return;
-            }
-            stopScanner();
-            setStatus("paused");
-          }}
-        >
-          {status === "paused" ? "เปิดกล้อง" : "พักกล้อง"}
-        </Button>
-      </div>
-
-      <div className="space-y-2 rounded-lg border border-slate-200 p-3">
-        <p className="text-xs text-slate-500">หรือพิมพ์บาร์โค้ดเอง</p>
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            className="h-10 flex-1 rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
-            value={manualBarcode}
-            onChange={(event) => setManualBarcode(event.target.value)}
-            placeholder="เช่น 8851234567890"
-            disabled={disabled}
-          />
-          <Button
-            type="button"
-            className="h-10"
-            onClick={submitManualBarcode}
-            disabled={disabled || !manualBarcode.trim()}
-          >
-            เพิ่ม
-          </Button>
-        </div>
-      </div>
-
-      <Button type="button" variant="outline" className="h-10 w-full" onClick={onClose} disabled={disabled}>
-        ปิด
-      </Button>
-    </div>
   );
 }
