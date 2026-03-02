@@ -12,6 +12,7 @@ import {
 } from "@/lib/inventory/queries";
 
 const paidStatuses = ["PAID", "PACKED", "SHIPPED"] as const;
+const pendingStatuses = ["PENDING_PAYMENT", "READY_FOR_PICKUP"] as const;
 
 export async function getTodaySales(storeId: string) {
   const [row] = await timeDb("dashboard.repo.todaySales", async () =>
@@ -59,7 +60,7 @@ export async function getPendingPaymentCount(storeId: string) {
         value: sql<number>`count(*)`,
       })
       .from(orders)
-      .where(and(eq(orders.storeId, storeId), eq(orders.status, "PENDING_PAYMENT"))),
+      .where(and(eq(orders.storeId, storeId), inArray(orders.status, pendingStatuses))),
   );
 
   return Number(row?.value ?? 0);

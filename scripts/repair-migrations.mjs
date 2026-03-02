@@ -858,6 +858,14 @@ async function ensureSchemaCompatForLatestAuthChanges() {
   );
   console.info("[db:repair] ensured products variant indexes");
 
+  // ── product_units.price_per_unit (migration 0034) ──
+  if (await tableExists("product_units")) {
+    if (!(await columnExists("product_units", "price_per_unit"))) {
+      await client.execute("alter table `product_units` add `price_per_unit` integer");
+      console.info("[db:repair] added column product_units.price_per_unit");
+    }
+  }
+
   // ── purchase_orders + purchase_order_items (migration 0023) ──
 
   await client.execute(`

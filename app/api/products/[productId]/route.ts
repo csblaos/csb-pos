@@ -302,6 +302,7 @@ export async function PATCH(
               productId,
               unitId: conversion.unitId,
               multiplierToBase: conversion.multiplierToBase,
+              pricePerUnit: conversion.pricePerUnit ?? null,
             })),
           );
         }

@@ -149,6 +149,7 @@ export async function POST(request: Request) {
               productId,
               unitId: conversion.unitId,
               multiplierToBase: conversion.multiplierToBase,
+              pricePerUnit: conversion.pricePerUnit ?? null,
             })),
           );
         }

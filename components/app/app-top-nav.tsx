@@ -167,6 +167,9 @@ export function AppTopNav({
 
     return undefined;
   }, [pathname]);
+  const backButtonLabel = pathname.startsWith("/orders/new")
+    ? "กลับรายการออเดอร์"
+    : "ย้อนกลับ";
 
   useEffect(() => {
     if (!pathname.startsWith("/settings/superadmin/")) {
@@ -534,6 +537,7 @@ export function AppTopNav({
           roots={navRoots}
           backHref={backHref}
           className="-ml-1 shrink-0"
+          label={backButtonLabel}
           showLabelOnMobile
         />
         {showStoreIdentity ? (

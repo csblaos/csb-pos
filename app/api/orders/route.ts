@@ -2,8 +2,9 @@ import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db/client";
-import { auditEvents, orderItems, orders } from "@/lib/db/schema";
+import { auditEvents, inventoryMovements, orderItems, orders } from "@/lib/db/schema";
 import { parseStoreCurrency } from "@/lib/finance/store-financial";
+import { getInventoryBalancesByStore } from "@/lib/inventory/queries";
 import { computeOrderTotals } from "@/lib/orders/totals";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { createOrderSchema } from "@/lib/orders/validation";
@@ -168,6 +169,34 @@ export async function POST(request: Request) {
     }
 
     const payload = parsed.data;
+    const isPickupLater = payload.checkoutFlow === "PICKUP_LATER";
+
+    if (isPickupLater && payload.channel !== "WALK_IN") {
+      if (idempotencyRecordId) {
+        await safeMarkIdempotencyFailed({
+          recordId: idempotencyRecordId,
+          statusCode: 400,
+          body: { message: "ออเดอร์รับที่ร้านต้องใช้ช่องทาง Walk-in" },
+        });
+      }
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        action,
+        entityType: "order",
+        result: "FAIL",
+        reasonCode: "INVALID_PICKUP_CHANNEL",
+        metadata: {
+          checkoutFlow: payload.checkoutFlow,
+          channel: payload.channel,
+        },
+        request,
+      });
+      return NextResponse.json({ message: "ออเดอร์รับที่ร้านต้องใช้ช่องทาง Walk-in" }, { status: 400 });
+    }
 
     const catalog = await getOrderCatalogForStore(storeId);
 
@@ -216,14 +245,14 @@ export async function POST(request: Request) {
       }
 
       const qtyBase = item.qty * unit.multiplierToBase;
-      const lineTotal = qtyBase * product.priceBase;
+      const lineTotal = item.qty * unit.pricePerUnit;
 
       return {
         productId: product.productId,
         unitId: unit.unitId,
         qty: item.qty,
         qtyBase,
-        priceBaseAtSale: product.priceBase,
+        priceBaseAtSale: unit.pricePerUnit,
         costBaseAtSale: product.costBase,
         lineTotal,
       };
@@ -252,12 +281,93 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "กรุณาเพิ่มสินค้าอย่างน้อย 1 รายการ" }, { status: 400 });
     }
 
+    if (isPickupLater) {
+      const requiredByProduct = new Map<string, number>();
+      for (const item of normalizedItems) {
+        requiredByProduct.set(
+          item.productId,
+          (requiredByProduct.get(item.productId) ?? 0) + item.qtyBase,
+        );
+      }
+
+      const balanceRows = await getInventoryBalancesByStore(storeId);
+      const balanceMap = new Map(balanceRows.map((item) => [item.productId, item.available]));
+
+      const insufficient = Array.from(requiredByProduct.entries())
+        .map(([productId, requiredQtyBase]) => ({
+          productId,
+          productName: productMap.get(productId)?.name ?? productId,
+          requiredQtyBase,
+          availableQtyBase: balanceMap.get(productId) ?? 0,
+        }))
+        .filter((item) => item.requiredQtyBase > item.availableQtyBase);
+
+      if (insufficient.length > 0) {
+        const insufficientMessage = insufficient
+          .map((item) => `${item.productName} (ต้องใช้ ${item.requiredQtyBase}, คงเหลือ ${item.availableQtyBase})`)
+          .join(", ");
+        if (idempotencyRecordId) {
+          await safeMarkIdempotencyFailed({
+            recordId: idempotencyRecordId,
+            statusCode: 400,
+            body: { message: `สต็อกพร้อมขายไม่พอสำหรับจองรับที่ร้าน: ${insufficientMessage}` },
+          });
+        }
+        await safeLogAuditEvent({
+          scope: "STORE",
+          storeId,
+          actorUserId: session.userId,
+          actorName: session.displayName,
+          actorRole: session.activeRoleName,
+          action,
+          entityType: "order",
+          result: "FAIL",
+          reasonCode: "INSUFFICIENT_STOCK_PICKUP",
+          metadata: {
+            checkoutFlow: payload.checkoutFlow,
+            insufficientCount: insufficient.length,
+          },
+          request,
+        });
+        return NextResponse.json(
+          { message: `สต็อกพร้อมขายไม่พอสำหรับจองรับที่ร้าน: ${insufficientMessage}` },
+          { status: 400 },
+        );
+      }
+    }
+
     const subtotal = normalizedItems.reduce((sum, item) => sum + item.lineTotal, 0);
     const selectedPaymentCurrency = parseStoreCurrency(
       payload.paymentCurrency ?? catalog.storeCurrency,
       parseStoreCurrency(catalog.storeCurrency),
     );
     const selectedPaymentMethod = payload.paymentMethod ?? "CASH";
+    if (isPickupLater && selectedPaymentMethod === "COD") {
+      if (idempotencyRecordId) {
+        await safeMarkIdempotencyFailed({
+          recordId: idempotencyRecordId,
+          statusCode: 400,
+          body: { message: "ออเดอร์รับที่ร้านไม่รองรับการชำระแบบ COD" },
+        });
+      }
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        action,
+        entityType: "order",
+        result: "FAIL",
+        reasonCode: "INVALID_PICKUP_PAYMENT_METHOD",
+        metadata: {
+          checkoutFlow: payload.checkoutFlow,
+          paymentMethod: selectedPaymentMethod,
+        },
+        request,
+      });
+      return NextResponse.json({ message: "ออเดอร์รับที่ร้านไม่รองรับการชำระแบบ COD" }, { status: 400 });
+    }
     if (!catalog.supportedCurrencies.includes(selectedPaymentCurrency)) {
       if (idempotencyRecordId) {
         await safeMarkIdempotencyFailed({
@@ -426,6 +536,7 @@ export async function POST(request: Request) {
 
     const initialPaymentStatus =
       selectedPaymentMethod === "COD" ? "COD_PENDING_SETTLEMENT" : "UNPAID";
+    const initialStatus = isPickupLater ? "READY_FOR_PICKUP" : "DRAFT";
 
     const totals = computeOrderTotals({
       subtotal,
@@ -436,7 +547,14 @@ export async function POST(request: Request) {
       shippingFeeCharged: payload.shippingFeeCharged,
     });
 
-    const customerName = payload.customerName?.trim() || selectedContact?.displayName || null;
+    const customerNameFallback =
+      payload.checkoutFlow === "PICKUP_LATER"
+        ? "ลูกค้ารับที่ร้าน"
+        : payload.channel === "WALK_IN"
+          ? "ลูกค้าหน้าร้าน"
+          : "ลูกค้าออนไลน์";
+    const customerName =
+      payload.customerName?.trim() || selectedContact?.displayName || customerNameFallback;
     const customerPhone = payload.customerPhone?.trim() || selectedContact?.phone || null;
 
     let orderNo = await generateOrderNo(storeId);
@@ -460,7 +578,7 @@ export async function POST(request: Request) {
           storeId,
           orderNo,
           channel: payload.channel,
-          status: "DRAFT",
+          status: initialStatus,
           contactId: payload.channel === "WALK_IN" ? null : payload.contactId || null,
           customerName,
           customerPhone,
@@ -498,6 +616,21 @@ export async function POST(request: Request) {
         })),
       );
 
+      if (isPickupLater && normalizedItems.length > 0) {
+        await tx.insert(inventoryMovements).values(
+          normalizedItems.map((item) => ({
+            storeId,
+            productId: item.productId,
+            type: "RESERVE" as const,
+            qtyBase: item.qtyBase,
+            refType: "ORDER" as const,
+            refId: orderId,
+            note: `จองสต็อกสำหรับรับที่ร้าน ${orderNo}`,
+            createdBy: session.userId,
+          })),
+        );
+      }
+
       await tx.insert(auditEvents).values(
         buildAuditEventValues({
           scope: "STORE",
@@ -513,7 +646,8 @@ export async function POST(request: Request) {
             channel: payload.channel,
             itemCount: normalizedItems.length,
             paymentMethod: selectedPaymentMethod,
-            status: "DRAFT",
+            status: initialStatus,
+            checkoutFlow: payload.checkoutFlow ?? "WALK_IN_NOW",
           },
           request,
         }),

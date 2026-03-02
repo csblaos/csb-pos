@@ -30,6 +30,7 @@ type OrderDetailViewProps = {
 const statusLabel: Record<OrderDetail["status"], string> = {
   DRAFT: "ร่าง",
   PENDING_PAYMENT: "รอชำระ",
+  READY_FOR_PICKUP: "รอรับที่ร้าน",
   PAID: "ชำระแล้ว",
   PACKED: "แพ็กแล้ว",
   SHIPPED: "จัดส่งแล้ว",
@@ -89,15 +90,20 @@ export function OrderDetailView({
   const shippingLabelFileInputRef = useRef<HTMLInputElement | null>(null);
   const shippingLabelCameraInputRef = useRef<HTMLInputElement | null>(null);
 
-  const canConfirmPaid = canMarkPaid && order.status === "PENDING_PAYMENT";
+  const canConfirmPaid =
+    canMarkPaid &&
+    (order.status === "PENDING_PAYMENT" || order.status === "READY_FOR_PICKUP");
   const canSubmitSlip =
-    canUpdate && order.status === "PENDING_PAYMENT" && order.paymentMethod === "LAO_QR";
+    canUpdate &&
+    (order.status === "PENDING_PAYMENT" || order.status === "READY_FOR_PICKUP") &&
+    order.paymentMethod === "LAO_QR";
   const canMarkPacked = canPack && order.status === "PAID";
   const canMarkShipped = canShip && order.status === "PACKED";
   const canOrderCancel =
     canCancel &&
     (order.status === "DRAFT" ||
       order.status === "PENDING_PAYMENT" ||
+      order.status === "READY_FOR_PICKUP" ||
       order.status === "PAID" ||
       order.status === "PACKED" ||
       order.status === "SHIPPED");

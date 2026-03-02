@@ -29,6 +29,7 @@ export type ProductConversionView = {
   unitCode: string;
   unitNameTh: string;
   multiplierToBase: number;
+  pricePerUnit: number | null;
 };
 
 export type ProductCostTrackingSource = "MANUAL" | "PURCHASE_ORDER" | "UNKNOWN";
@@ -113,6 +114,7 @@ type ProductRowWithConversion = {
   conversionUnitCode: string | null;
   conversionUnitNameTh: string | null;
   multiplierToBase: number | null;
+  conversionPricePerUnit: number | null;
 };
 
 export async function listUnits(storeId: string): Promise<UnitOption[]> {
@@ -192,6 +194,7 @@ const mapProductRows = (rows: ProductRowWithConversion[]): ProductListItem[] => 
           unitCode: row.conversionUnitCode,
           unitNameTh: row.conversionUnitNameTh,
           multiplierToBase: row.multiplierToBase,
+          pricePerUnit: row.conversionPricePerUnit ?? null,
         });
       }
     }
@@ -356,6 +359,7 @@ async function listStoreProductsByIds(
       conversionUnitCode: conversionUnits.code,
       conversionUnitNameTh: conversionUnits.nameTh,
       multiplierToBase: productUnits.multiplierToBase,
+      conversionPricePerUnit: productUnits.pricePerUnit,
     })
     .from(products)
     .innerJoin(baseUnits, eq(products.baseUnitId, baseUnits.id))

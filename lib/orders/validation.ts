@@ -8,6 +8,11 @@ export const orderPaymentMethodSchema = z.enum([
   "COD",
   "BANK_TRANSFER",
 ]);
+export const orderCheckoutFlowSchema = z.enum([
+  "WALK_IN_NOW",
+  "PICKUP_LATER",
+  "ONLINE_DELIVERY",
+]);
 
 export const createOrderItemSchema = z.object({
   productId: z.string().min(1, "กรุณาเลือกสินค้า"),
@@ -40,6 +45,7 @@ export const createOrderSchema = z
     paymentCurrency: orderPaymentCurrencySchema.optional(),
     paymentMethod: orderPaymentMethodSchema.optional(),
     paymentAccountId: z.string().trim().optional().or(z.literal("")),
+    checkoutFlow: orderCheckoutFlowSchema.optional(),
     items: z.array(createOrderItemSchema).min(1, "กรุณาเพิ่มสินค้าอย่างน้อย 1 รายการ").max(100),
   })
   .superRefine((payload, ctx) => {
@@ -62,6 +68,25 @@ export const createOrderSchema = z
           payload.paymentMethod === "LAO_QR"
             ? "กรุณาเลือกบัญชี QR สำหรับออเดอร์นี้"
             : "กรุณาเลือกบัญชีโอนเงินสำหรับออเดอร์นี้",
+        });
+    }
+
+    if (payload.checkoutFlow === "ONLINE_DELIVERY" && payload.channel === "WALK_IN") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["channel"],
+        message: "ออเดอร์จัดส่งต้องเลือกช่องทางออนไลน์",
+      });
+    }
+
+    if (
+      (payload.checkoutFlow === "WALK_IN_NOW" || payload.checkoutFlow === "PICKUP_LATER") &&
+      payload.channel !== "WALK_IN"
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["channel"],
+        message: "ออเดอร์หน้าร้าน/รับที่ร้านต้องใช้ช่องทาง Walk-in",
       });
     }
   });

@@ -12,7 +12,14 @@ export type OrderForShipmentLabel = {
   id: string;
   storeId: string;
   orderNo: string;
-  status: "DRAFT" | "PENDING_PAYMENT" | "PAID" | "PACKED" | "SHIPPED" | "CANCELLED";
+  status:
+    | "DRAFT"
+    | "PENDING_PAYMENT"
+    | "READY_FOR_PICKUP"
+    | "PAID"
+    | "PACKED"
+    | "SHIPPED"
+    | "CANCELLED";
   customerName: string | null;
   customerAddress: string | null;
   customerPhone: string | null;

@@ -549,10 +549,12 @@ export function ProductsManagement({
   const watchedSkuValue = form.watch("sku");
   const watchedNameValue = form.watch("name");
   const watchedCategoryIdValue = form.watch("categoryId");
+  const watchedPriceBaseValue = form.watch("priceBase");
   const watchedSku = typeof watchedSkuValue === "string" ? watchedSkuValue : "";
   const watchedName = typeof watchedNameValue === "string" ? watchedNameValue : "";
   const watchedCategoryId =
     typeof watchedCategoryIdValue === "string" ? watchedCategoryIdValue : "";
+  const watchedPriceBase = Number(watchedPriceBaseValue ?? 0) || 0;
   const watchedVariantModelName =
     typeof variantForm?.modelName === "string" ? variantForm.modelName : "";
   const watchedVariantLabel =
@@ -1234,6 +1236,7 @@ export function ProductsManagement({
       conversions: product.conversions.map((c) => ({
         unitId: c.unitId,
         multiplierToBase: c.multiplierToBase,
+        pricePerUnit: c.pricePerUnit ?? "",
       })),
       variant: hasVariantMeta
         ? {
@@ -1447,6 +1450,7 @@ export function ProductsManagement({
       conversions: product.conversions.map((c) => ({
         unitId: c.unitId,
         multiplierToBase: c.multiplierToBase,
+        pricePerUnit: c.pricePerUnit ?? "",
       })),
       variant: hasVariantMeta
         ? {
@@ -1561,6 +1565,7 @@ export function ProductsManagement({
                   unitCode: u.code,
                   unitNameTh: u.nameTh,
                   multiplierToBase: c.multiplierToBase,
+                  pricePerUnit: c.pricePerUnit ?? null,
                 },
               ]
             : [];
@@ -2478,6 +2483,7 @@ export function ProductsManagement({
     append({
       unitId,
       multiplierToBase: Math.max(2, Math.trunc(multiplierToBase)),
+      pricePerUnit: undefined,
     });
   };
 
@@ -3842,6 +3848,9 @@ export function ProductsManagement({
             <p className="text-[11px] text-muted-foreground">
               ตัวคูณต้องเทียบกับหน่วยหลักเสมอ เช่น 1 PACK = 12 {baseUnit?.code ?? "หน่วยหลัก"}, 1 BOX = 60 {baseUnit?.code ?? "หน่วยหลัก"}
             </p>
+            <p className="text-[11px] text-muted-foreground">
+              ราคาหน่วยแปลงใส่ได้แบบ optional ถ้าไม่ใส่ระบบจะคำนวณจาก ราคาขายหน่วยหลัก x ตัวคูณ
+            </p>
 
             {fields.length === 0 && (
               <p className="text-xs text-muted-foreground">
@@ -3853,13 +3862,27 @@ export function ProductsManagement({
               const selUnit = unitById.get(
                 watchedConversions[idx]?.unitId ?? "",
               );
-              const mult = watchedConversions[idx]?.multiplierToBase;
+              const mult = Number(watchedConversions[idx]?.multiplierToBase ?? 0);
+              const overridePriceRaw = watchedConversions[idx]?.pricePerUnit;
+              const overridePriceParsed = Number(overridePriceRaw ?? 0);
+              const hasOverridePrice =
+                overridePriceRaw !== undefined &&
+                overridePriceRaw !== null &&
+                String(overridePriceRaw).trim().length > 0 &&
+                Number.isFinite(overridePriceParsed);
+              const computedPricePerUnit = Math.max(
+                0,
+                Math.round(watchedPriceBase * Math.max(mult, 0)),
+              );
+              const effectivePricePerUnit = hasOverridePrice
+                ? Math.max(0, Math.round(overridePriceParsed))
+                : computedPricePerUnit;
 
               return (
                 <div key={field.id} className="space-y-1 rounded-lg border p-2">
-                  <div className="grid grid-cols-[1fr_80px_auto] items-center gap-2">
+                  <div className="grid grid-cols-2 items-center gap-2 sm:grid-cols-[1fr_72px_110px_auto]">
                     <select
-                      className="h-9 rounded-md border px-2 text-sm outline-none ring-blue-500 focus:ring-2"
+                      className="order-1 h-9 rounded-md border px-2 text-sm outline-none ring-blue-500 focus:ring-2 sm:order-1"
                       disabled={loadingKey !== null}
                       {...form.register(`conversions.${idx}.unitId`)}
                     >
@@ -3873,15 +3896,24 @@ export function ProductsManagement({
                       type="number"
                       min={2}
                       step={1}
-                      className="h-9 rounded-md border px-2 text-sm outline-none ring-blue-500 focus:ring-2"
+                      className="order-3 h-9 rounded-md border px-2 text-sm outline-none ring-blue-500 focus:ring-2 sm:order-2"
                       disabled={loadingKey !== null}
                       {...form.register(
                         `conversions.${idx}.multiplierToBase`,
                       )}
                     />
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      placeholder="ราคา (ไม่บังคับ)"
+                      className="order-4 h-9 rounded-md border px-2 text-sm outline-none ring-blue-500 focus:ring-2 sm:order-3"
+                      disabled={loadingKey !== null}
+                      {...form.register(`conversions.${idx}.pricePerUnit`)}
+                    />
                     <button
                       type="button"
-                      className="text-xs text-red-600"
+                      className="order-2 inline-flex h-9 w-9 items-center justify-center justify-self-end rounded-md border border-red-200 text-red-600 sm:order-4 sm:justify-self-auto"
                       onClick={() => remove(idx)}
                       disabled={loadingKey !== null}
                     >
@@ -3889,11 +3921,19 @@ export function ProductsManagement({
                     </button>
                   </div>
 
-                  {selUnit && baseUnit && mult ? (
-                    <p className="text-[11px] text-blue-700">
-                      1 {selUnit.code} ={" "}
-                      {Number(mult).toLocaleString("th-TH")} {baseUnit.code}
-                    </p>
+                  {selUnit && baseUnit && mult > 0 ? (
+                    <>
+                      <p className="text-[11px] text-blue-700">
+                        1 {selUnit.code} ={" "}
+                        {mult.toLocaleString("th-TH")} {baseUnit.code}
+                      </p>
+                      <p className="text-[11px] text-slate-600">
+                        ราคาขาย 1 {selUnit.code} = {fmtPrice(effectivePricePerUnit, currency)}
+                        {hasOverridePrice
+                          ? ` (กำหนดเอง, สูตรเดิม ${fmtPrice(computedPricePerUnit, currency)})`
+                          : " (อัตโนมัติจากหน่วยหลัก)"}
+                      </p>
+                    </>
                   ) : null}
 
                   {form.formState.errors.conversions?.[idx] && (
@@ -3901,7 +3941,9 @@ export function ProductsManagement({
                       {form.formState.errors.conversions[idx]?.unitId
                         ?.message ??
                         form.formState.errors.conversions[idx]
-                          ?.multiplierToBase?.message}
+                          ?.multiplierToBase?.message ??
+                        form.formState.errors.conversions[idx]?.pricePerUnit
+                          ?.message}
                     </p>
                   )}
                 </div>
@@ -4192,7 +4234,8 @@ export function ProductsManagement({
                             </span>
                             <span className="text-sm font-semibold">
                               {fmtPrice(
-                                detailProduct.priceBase * c.multiplierToBase,
+                                c.pricePerUnit ??
+                                  detailProduct.priceBase * c.multiplierToBase,
                                 currency,
                               )}
                             </span>
@@ -4382,6 +4425,13 @@ export function ProductsManagement({
                           <span className="text-xs text-muted-foreground">
                             1 {c.unitCode} = {fmtNumber(c.multiplierToBase)}{" "}
                             {detailProduct.baseUnitCode}
+                          </span>
+                          <span className="text-xs font-medium text-slate-700">
+                            {fmtPrice(
+                              c.pricePerUnit ??
+                                detailProduct.priceBase * c.multiplierToBase,
+                              currency,
+                            )}
                           </span>
                         </div>
                       ))

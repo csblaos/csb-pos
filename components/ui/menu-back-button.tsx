@@ -5,6 +5,7 @@ import { useEffect, useMemo } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
+import { hasNewOrderDraftFlag } from "@/lib/orders/new-order-draft";
 import { cn } from "@/lib/utils";
 
 type MenuBackButtonProps = {
@@ -52,6 +53,20 @@ export function MenuBackButton({
     return null;
   }
 
+  const handleNavigate = () => {
+    const isCreateOrderPath =
+      pathname === "/orders/new" || pathname.startsWith("/orders/new/");
+    if (isCreateOrderPath && hasNewOrderDraftFlag()) {
+      const confirmed = window.confirm(
+        "มีข้อมูลออเดอร์ที่ยังไม่บันทึก ต้องการออกจากหน้านี้หรือไม่?",
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+    router.push(targetHref);
+  };
+
   return (
     <Button
       type="button"
@@ -65,7 +80,7 @@ export function MenuBackButton({
       )}
       onMouseEnter={() => router.prefetch(targetHref)}
       onTouchStart={() => router.prefetch(targetHref)}
-      onClick={() => router.push(targetHref)}
+      onClick={handleNavigate}
     >
       <ArrowLeft className="h-4 w-4" />
       {showLabelOnMobile ? (

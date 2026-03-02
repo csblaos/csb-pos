@@ -6,6 +6,7 @@ import { defaultStoreVatMode, parseStoreCurrency } from "@/lib/finance/store-fin
 import {
   contacts,
   orderItems,
+  productCategories,
   orders,
   productUnits,
   products,
@@ -27,7 +28,14 @@ export type OrderListItem = {
   id: string;
   orderNo: string;
   channel: "WALK_IN" | "FACEBOOK" | "WHATSAPP";
-  status: "DRAFT" | "PENDING_PAYMENT" | "PAID" | "PACKED" | "SHIPPED" | "CANCELLED";
+  status:
+    | "DRAFT"
+    | "PENDING_PAYMENT"
+    | "READY_FOR_PICKUP"
+    | "PAID"
+    | "PACKED"
+    | "SHIPPED"
+    | "CANCELLED";
   customerName: string | null;
   contactDisplayName: string | null;
   total: number;
@@ -57,7 +65,14 @@ export type OrderDetail = {
   id: string;
   orderNo: string;
   channel: "WALK_IN" | "FACEBOOK" | "WHATSAPP";
-  status: "DRAFT" | "PENDING_PAYMENT" | "PAID" | "PACKED" | "SHIPPED" | "CANCELLED";
+  status:
+    | "DRAFT"
+    | "PENDING_PAYMENT"
+    | "READY_FOR_PICKUP"
+    | "PAID"
+    | "PACKED"
+    | "SHIPPED"
+    | "CANCELLED";
   paymentStatus:
     | "UNPAID"
     | "PENDING_PROOF"
@@ -113,12 +128,16 @@ export type OrderCatalogProductUnit = {
   unitCode: string;
   unitNameTh: string;
   multiplierToBase: number;
+  pricePerUnit: number;
 };
 
 export type OrderCatalogProduct = {
   productId: string;
   sku: string;
   barcode: string | null;
+  imageUrl: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
   name: string;
   priceBase: number;
   costBase: number;
@@ -172,7 +191,7 @@ export type PaginatedOrderList = {
 
 const listFilter = (tab: OrderListTab) => {
   if (tab === "PENDING_PAYMENT") {
-    return eq(orders.status, "PENDING_PAYMENT");
+    return inArray(orders.status, ["PENDING_PAYMENT", "READY_FOR_PICKUP"]);
   }
 
   if (tab === "PAID") {
@@ -492,6 +511,9 @@ export async function getOrderCatalogForStore(storeId: string): Promise<OrderCat
           productId: products.id,
           sku: products.sku,
           barcode: products.barcode,
+          imageUrl: products.imageUrl,
+          categoryId: products.categoryId,
+          categoryName: productCategories.name,
           name: products.name,
           priceBase: products.priceBase,
           costBase: products.costBase,
@@ -501,6 +523,7 @@ export async function getOrderCatalogForStore(storeId: string): Promise<OrderCat
         })
         .from(products)
         .innerJoin(baseUnits, eq(products.baseUnitId, baseUnits.id))
+        .leftJoin(productCategories, eq(products.categoryId, productCategories.id))
         .where(and(eq(products.storeId, storeId), eq(products.active, true)))
         .orderBy(asc(products.name)),
     ),
@@ -512,6 +535,7 @@ export async function getOrderCatalogForStore(storeId: string): Promise<OrderCat
           unitCode: units.code,
           unitNameTh: units.nameTh,
           multiplierToBase: productUnits.multiplierToBase,
+          pricePerUnit: productUnits.pricePerUnit,
         })
         .from(productUnits)
         .innerJoin(products, eq(productUnits.productId, products.id))
@@ -563,7 +587,16 @@ export async function getOrderCatalogForStore(storeId: string): Promise<OrderCat
   ]);
 
   const balanceMap = new Map(balances.map((item) => [item.productId, item]));
-  const conversionMap = new Map<string, OrderCatalogProductUnit[]>();
+  const conversionMap = new Map<
+    string,
+    Array<{
+      unitId: string;
+      unitCode: string;
+      unitNameTh: string;
+      multiplierToBase: number;
+      pricePerUnit: number | null;
+    }>
+  >();
 
   for (const row of conversionRows) {
     const current = conversionMap.get(row.productId) ?? [];
@@ -572,6 +605,7 @@ export async function getOrderCatalogForStore(storeId: string): Promise<OrderCat
       unitCode: row.unitCode,
       unitNameTh: row.unitNameTh,
       multiplierToBase: row.multiplierToBase,
+      pricePerUnit: row.pricePerUnit ?? null,
     });
     conversionMap.set(row.productId, current);
   }
@@ -586,14 +620,25 @@ export async function getOrderCatalogForStore(storeId: string): Promise<OrderCat
         unitCode: product.baseUnitCode,
         unitNameTh: product.baseUnitNameTh,
         multiplierToBase: 1,
+        pricePerUnit: product.priceBase,
       },
-      ...conversions,
+      ...conversions.map((conversion) => ({
+        unitId: conversion.unitId,
+        unitCode: conversion.unitCode,
+        unitNameTh: conversion.unitNameTh,
+        multiplierToBase: conversion.multiplierToBase,
+        pricePerUnit:
+          conversion.pricePerUnit ?? product.priceBase * conversion.multiplierToBase,
+      })),
     ].sort((a, b) => a.multiplierToBase - b.multiplierToBase);
 
     return {
       productId: product.productId,
       sku: product.sku,
       barcode: product.barcode,
+      imageUrl: product.imageUrl,
+      categoryId: product.categoryId,
+      categoryName: product.categoryName,
       name: product.name,
       priceBase: product.priceBase,
       costBase: product.costBase,

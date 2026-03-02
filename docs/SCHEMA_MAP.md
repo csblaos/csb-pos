@@ -101,6 +101,7 @@
 - `product_model_attribute_values.attribute_id -> product_model_attributes.id`
 - `product_units.product_id -> products.id`
 - `product_units.unit_id -> units.id`
+- `product_units.price_per_unit` = ราคาขายต่อหน่วยแปลงแบบ optional (ถ้า `null` ให้ใช้ราคาหน่วยหลักคูณตัวคูณ)
 - `inventory_movements.store_id -> stores.id`
 - `inventory_movements.product_id -> products.id`
 
@@ -168,7 +169,7 @@
   - `REQUESTED`
   - `READY`
   - `FAILED`
-- order status: `DRAFT | PENDING_PAYMENT | PAID | PACKED | SHIPPED | CANCELLED`
+- order status: `DRAFT | PENDING_PAYMENT | READY_FOR_PICKUP | PAID | PACKED | SHIPPED | CANCELLED`
 
 ### Reliability
 

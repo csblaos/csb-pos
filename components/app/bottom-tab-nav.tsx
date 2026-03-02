@@ -54,6 +54,8 @@ const getGridColumnsClass = (tabCount: number) => {
   return "grid-cols-1";
 };
 
+const HIDE_NAV_PATH_PREFIXES = ["/orders/new"];
+
 export function BottomTabNav({ permissionKeys, storeType }: BottomTabNavProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -66,6 +68,13 @@ export function BottomTabNav({ permissionKeys, storeType }: BottomTabNavProps) {
     () => getActiveTabHref(currentPath, visibleTabs.map((tab) => tab.href)),
     [currentPath, visibleTabs],
   );
+  const shouldHideNav = useMemo(
+    () =>
+      HIDE_NAV_PATH_PREFIXES.some(
+        (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+      ),
+    [pathname],
+  );
 
   useEffect(() => {
     visibleTabs.forEach((tab) => {
@@ -76,6 +85,19 @@ export function BottomTabNav({ permissionKeys, storeType }: BottomTabNavProps) {
   useEffect(() => {
     setOptimisticPath(null);
   }, [pathname]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (shouldHideNav) {
+      root.style.setProperty("--bottom-tab-nav-height", "0px");
+      return () => {
+        root.style.removeProperty("--bottom-tab-nav-height");
+      };
+    }
+
+    root.style.removeProperty("--bottom-tab-nav-height");
+    return undefined;
+  }, [shouldHideNav]);
 
   const navigateToTab = (href: string) => {
     if (getActiveTabHref(pathname, visibleTabs.map((tab) => tab.href)) === href) {
@@ -99,7 +121,7 @@ export function BottomTabNav({ permissionKeys, storeType }: BottomTabNavProps) {
     });
   };
 
-  if (visibleTabs.length === 0) {
+  if (visibleTabs.length === 0 || shouldHideNav) {
     return null;
   }
 

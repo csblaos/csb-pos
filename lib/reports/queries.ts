@@ -14,6 +14,7 @@ import { getLowStockProducts, getStoreStockThresholds } from "@/lib/inventory/qu
 import { timeAsync, timeDbQuery } from "@/lib/perf/server";
 
 const paidStatuses = ["PAID", "PACKED", "SHIPPED"] as const;
+const pendingStatuses = ["PENDING_PAYMENT", "READY_FOR_PICKUP"] as const;
 
 export type DashboardMetrics = {
   todaySales: number;
@@ -154,7 +155,7 @@ async function fetchDashboardMetrics(storeId: string): Promise<DashboardMetrics>
           value: sql<number>`count(*)`,
         })
         .from(orders)
-        .where(and(eq(orders.storeId, storeId), eq(orders.status, "PENDING_PAYMENT"))),
+        .where(and(eq(orders.storeId, storeId), inArray(orders.status, pendingStatuses))),
     ),
     getStoreStockThresholds(storeId).then((thresholds) =>
       getLowStockProducts(storeId, thresholds),

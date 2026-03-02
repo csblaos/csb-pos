@@ -57,6 +57,7 @@ export const orderShippingLabelStatusEnum = [
 export const orderStatusEnum = [
   "DRAFT",
   "PENDING_PAYMENT",
+  "READY_FOR_PICKUP",
   "PAID",
   "PACKED",
   "SHIPPED",
@@ -563,6 +564,7 @@ export const productUnits = sqliteTable(
       .notNull()
       .references(() => units.id, { onDelete: "restrict" }),
     multiplierToBase: integer("multiplier_to_base").notNull(),
+    pricePerUnit: integer("price_per_unit"),
   },
   (table) => ({
     productUnitsProductIdIdx: index("product_units_product_id_idx").on(

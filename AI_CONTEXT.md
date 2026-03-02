@@ -68,14 +68,33 @@ npm run db:migrate
   - `POST /api/orders/[orderId]/shipments/label`
   - `POST /api/orders/[orderId]/shipments/upload-label`
   - UX `/orders`:
+    - หน้า `/orders` โฟกัสงานจัดการออเดอร์ที่สร้างแล้ว และมี 2 action สร้างออเดอร์: `สร้างด่วน` (modal) + `สร้างออเดอร์` (ไปหน้าเต็ม `/orders/new`)
     - ใช้ `SlideUpSheet` ตัวเดียวกันทั้งสองอุปกรณ์
     - Mobile = slide-up sheet (ปัดลงจาก handle หรือ header/กดนอกกล่อง/กด X เพื่อปิด)
     - Desktop = centered modal (กดนอกกล่อง/กด X/Escape เพื่อปิด)
     - มีปุ่มไอคอน `Full Screen` แบบ toggle ที่ navbar:
       - Desktop (`lg` ขึ้นไป) แสดงเสมอเมื่อ browser รองรับ fullscreen
-      - Touch device (POS tablet/mobile) แสดงได้เมื่อเปิด `NEXT_PUBLIC_POS_ALLOW_FULLSCREEN_ON_TOUCH=true`
-      - กดซ้ำเพื่อออก หรือกด `Esc`
+    - Touch device (POS tablet/mobile) แสดงได้เมื่อเปิด `NEXT_PUBLIC_POS_ALLOW_FULLSCREEN_ON_TOUCH=true`
+    - กดซ้ำเพื่อออก หรือกด `Esc`
     - ในฟอร์มสร้างออเดอร์รองรับสแกนบาร์โค้ดเพิ่มสินค้าอัตโนมัติ และ fallback ค้นหาเองเมื่อไม่พบ barcode
+    - ฟอร์มสร้างออเดอร์ปรับเป็น POS-lite สำหรับ mobile/tablet: มี quick add card (ค้นหา SKU/ชื่อ/บาร์โค้ดแล้วแตะเพิ่ม), แสดง cart preview แบบย่อบนมือถือ, และมี `ตะกร้าสินค้า` sheet แยกสำหรับแก้จำนวน/หน่วย/ลบรายการก่อนบันทึก
+  - UX `/orders/new`:
+    - หน้าเต็มแบบ POS layout (ตัด heading/description หน้า create ออก): แถบ `ค้นหา + สแกน` ด้านบน, product card grid ตรงกลาง, และ cart action bar ด้านล่าง
+    - desktop app shell ปรับกว้างขึ้นเป็น `76rem` เพื่อเพิ่มพื้นที่ใช้งานในหน้า POS/ตารางงานหลัก โดยยังคง mobile-first layout เดิม
+    - ซ่อน bottom tab navigation อัตโนมัติเมื่ออยู่หน้า `/orders/new` เพื่อให้โหมดสร้างออเดอร์แบบโฟกัสและได้พื้นที่แนวตั้งมากขึ้นบนมือถือ
+    - ปุ่ม back บน navbar ใช้ label `กลับรายการออเดอร์` และมี confirm ก่อนออกเมื่อมี draft ที่ยังไม่บันทึกในหน้า create order
+    - product card แสดงรูปย่อสินค้า (`imageUrl`) พร้อม fallback placeholder เมื่อไม่มีรูป
+    - product card ในหน้า POS ถูกย่อให้ compact ขึ้นบนมือถือ (padding/thumbnail/typography เล็กลงเล็กน้อย) เพื่อให้เห็นสินค้าได้ต่อหน้าจอมากขึ้น
+    - product picker มี category chips ใต้ search (`ทั้งหมด` + หมวดหมู่สินค้า) และใช้งานร่วมกับ filter `เฉพาะมีสต็อก` + sort (`แนะนำ/ชื่อ/ราคาต่ำ-สูง/ราคาสูง-ต่ำ`)
+    - sticky checkout bar บนมือถือปรับเป็น flow เดียว `แก้ตะกร้า` + ปุ่มหลัก `ถัดไป: ชำระเงิน` พร้อมสรุปจำนวนรายการ/ชิ้น เพื่อลดความสับสนจากหลายปุ่ม action
+    - checkout เพิ่มตัวเลือก `ประเภทออเดอร์` 3 flow (`Walk-in ทันที` / `มารับที่ร้านภายหลัง` / `สั่งออนไลน์/จัดส่ง`) และแสดง field แบบ dynamic ตาม flow
+    - validation ฝั่ง client ใน checkout เป็นแบบตาม flow: `มารับที่ร้านภายหลัง` บังคับเบอร์โทร, `สั่งออนไลน์/จัดส่ง` บังคับที่อยู่จัดส่งและเปิดตัวเลือก COD เฉพาะ flow ออนไลน์
+    - เมื่อสร้างออเดอร์แบบ `มารับที่ร้านภายหลัง` ระบบจะสร้างสถานะ `READY_FOR_PICKUP` และจองสต็อกทันทีตั้งแต่ตอน create (ไม่ต้องกด submit_for_payment ซ้ำ)
+    - การยืนยันชำระ (`confirm_paid`) รองรับทั้งสถานะ `PENDING_PAYMENT` และ `READY_FOR_PICKUP`; การยกเลิกจาก `READY_FOR_PICKUP` จะปล่อยจองสต็อกกลับ
+    - flow เป็น `เลือกสินค้าในหน้า POS` -> `เปิดตะกร้า/กดชำระเงิน` -> `Checkout sheet` เพื่อกรอกลูกค้า/ชำระเงิน/ที่อยู่ แล้วค่อยบันทึก
+    - reuse logic validation/API ชุดเดียวกับฟอร์มสร้างออเดอร์เดิมเพื่อลด drift ระหว่าง quick mode กับ full mode
+    - การคำนวณราคาในตะกร้า/ตอนสร้างออเดอร์ใช้ "ราคาต่อหน่วยที่เลือก" โดยรองรับราคาหน่วยแปลงแบบกำหนดเองจากสินค้า (ถ้าไม่กำหนดจะ fallback เป็น `ราคาหน่วยหลัก x ตัวคูณ`)
+    - ในขั้นตอน checkout ถ้าไม่กรอกชื่อลูกค้า ระบบจะ fallback อัตโนมัติเป็น `ลูกค้าหน้าร้าน` หรือ `ลูกค้าออนไลน์` ตาม channel
 - Products:
   - หน้า `/products` มีปุ่ม `รีเฟรช` แบบ manual ที่ header (ไม่มี auto-refresh)
   - หน้า `/products` ใช้ server-side pagination สำหรับรายการสินค้า (รองรับ `q/category/status/sort/page/pageSize`) และปุ่ม `โหลดเพิ่มเติม` จะดึงหน้าถัดไปจาก API จริง
@@ -98,7 +117,10 @@ npm run db:migrate
   - ฟอร์มแก้ไขสินค้าใช้โครงเดียวกับ create ในส่วนช่วยสร้าง SKU แล้ว (มี `ชื่ออ้างอิงอังกฤษ (optional)` + ปุ่ม `สร้างใหม่`) แต่ยังคง policy ว่า edit ไม่ auto เปลี่ยน SKU เอง
   - ตอนสร้างสินค้าใหม่ หาก `SKU` ซ้ำ ระบบจะเติม suffix (`-2`, `-3`, ...) แล้วลองบันทึกใหม่อัตโนมัติจนได้ SKU ที่ไม่ซ้ำ (ภายในจำนวนครั้งที่กำหนด)
   - ส่วน `การแปลงหน่วย` ใน create/edit product มีปุ่มลัดเพิ่มหน่วย (`PACK(12)` / `BOX(60)` เมื่อมีหน่วยนั้นในระบบ), ปุ่ม `+ เพิ่มหน่วย` จะเลือกหน่วยที่ยังไม่ถูกใช้ก่อน และมี helper text ย้ำว่าตัวคูณต้องเทียบหน่วยหลักเสมอ
+  - หน่วยแปลงรองรับ `ราคาขายต่อหน่วยแปลง` แบบ optional (เช่น EA=1,000 แต่ PACK(12)=10,000 ได้) โดยถ้าไม่กรอกจะใช้สูตรอัตโนมัติจากหน่วยหลัก
+  - UI ส่วน `การแปลงหน่วย` ปรับ mobile-first เป็น 2 แถวต่อรายการบนมือถือ (`หน่วย+ลบ` / `ตัวคูณ+ราคา`) และคงแถวเดียวบน tablet/desktop
   - `scripts/repair-migrations.mjs` รองรับ fallback สำหรับโครงสร้าง Variant Phase 1 แล้ว (ใช้ได้กับฐานที่ขาดบาง migration)
+  - `scripts/repair-migrations.mjs` รองรับเติมคอลัมน์ `product_units.price_per_unit` (ราคาหน่วยแปลงแบบกำหนดเอง) สำหรับฐานเก่าที่ข้าม migration ล่าสุด
   - `scripts/seed.mjs` เติม dummy data สำหรับสินค้าแบบ variant แล้ว (เช่น กล่องอาหารหลายขนาด, เสื้อยืดหลายสี/ไซซ์) เพื่อ demo flow ได้ทันทีหลัง `npm run db:seed`
   - รายการสินค้าในหน้า `/products` รองรับ swipe-left action บน mobile/tablet เพื่อเปิดปุ่ม `ปิดใช้งาน/เปิดใช้งาน` แบบรวดเร็ว
   - ฟอร์มใน `SlideUpSheet` รองรับ keyboard-aware บนมือถือ (เพิ่ม bottom inset ตาม virtual keyboard + ติดตาม viewport resize/scroll เพื่อเลื่อนช่องที่โฟกัสให้อยู่ในจอ)

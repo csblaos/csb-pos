@@ -38,9 +38,9 @@
 | Endpoint | Methods | Access Control | Notes |
 |---|---|---|---|
 | `/api/orders` | `GET` | `Permission:orders.view` | list orders |
-| `/api/orders` | `POST` | `Permission:orders.create` | create order + idempotency |
+| `/api/orders` | `POST` | `Permission:orders.create` | create order + idempotency (คำนวณ `lineTotal` ตามราคาของหน่วยที่เลือก; รองรับราคาหน่วยแปลงแบบกำหนดเองจากสินค้า; ถ้าไม่ส่ง `customerName` จะ fallback อัตโนมัติเป็น `ลูกค้าหน้าร้าน` หรือ `ลูกค้าออนไลน์` ตาม channel; รองรับ `checkoutFlow` (optional) และถ้าเป็น `PICKUP_LATER` จะตั้งสถานะ `READY_FOR_PICKUP` พร้อมจองสต็อกทันที) |
 | `/api/orders/[orderId]` | `GET` | `Permission:orders.view` | order detail |
-| `/api/orders/[orderId]` | `PATCH` | `Permission:orders.view` + internal action checks | submit payment/paid/pack/ship/cancel/update shipping |
+| `/api/orders/[orderId]` | `PATCH` | `Permission:orders.view` + internal action checks | submit payment/paid/pack/ship/cancel/update shipping (สถานะ `READY_FOR_PICKUP` รองรับ `submit_payment_slip`/`confirm_paid` และ `cancel` จะปล่อยจองสต็อก) |
 | `/api/orders/[orderId]/send-qr` | `POST` | `Permission:orders.update` | ส่ง QR message (stub/manual mode) |
 | `/api/orders/[orderId]/shipments/label` | `POST` | `Permission:orders.ship` | สร้าง shipping label + idempotency |
 | `/api/orders/[orderId]/shipments/upload-label` | `POST` | `Permission:orders.update` | อัปโหลดรูปบิล/ป้ายจากเครื่องหรือกล้องขึ้น R2 |
@@ -51,8 +51,8 @@
 | Endpoint | Methods | Access Control | Notes |
 |---|---|---|---|
 | `/api/products` | `GET` | `Permission:products.view` | รายการสินค้าแบบ pagination (`q`,`categoryId`,`status`,`sort`,`page`,`pageSize`) + คืน `total`,`hasMore`,`summary`, ข้อมูล variant (`modelName`,`variantLabel`,`variantOptions`), ค่าสต็อก (`stockOnHand`,`stockReserved`,`stockAvailable`) และ `costTracking` (source/time/actor/reason/reference) |
-| `/api/products` | `POST` | `Permission:products.create` | เพิ่มสินค้า (รองรับ payload `variant` เพื่อผูก/สร้าง model และบันทึก options) |
-| `/api/products/[productId]` | `PATCH` | หลัก `Permission:products.update` | มี action ย่อยบางตัวใช้ `hasPermission` เพิ่ม และ action `update` รองรับ payload `variant`; action `update_cost` ต้องมี `reason` และจะเขียน audit event `product.cost.manual_update` |
+| `/api/products` | `POST` | `Permission:products.create` | เพิ่มสินค้า (รองรับ payload `variant` เพื่อผูก/สร้าง model และบันทึก options; `conversions[]` รองรับ `pricePerUnit` แบบ optional สำหรับตั้งราคาหน่วยแปลง) |
+| `/api/products/[productId]` | `PATCH` | หลัก `Permission:products.update` | มี action ย่อยบางตัวใช้ `hasPermission` เพิ่ม และ action `update` รองรับ payload `variant` + `conversions[].pricePerUnit`; action `update_cost` ต้องมี `reason` และจะเขียน audit event `product.cost.manual_update` |
 | `/api/products/models` | `GET` | `Permission:products.view` | ดึงรายการชื่อ Model สำหรับ auto-suggest (`q`,`limit`) และคืน `nextSortOrder` + `variantLabels` เมื่อส่ง `name` (รองรับ `variantQ`) เพื่อ auto ตั้ง `ลำดับแสดง` และแนะนำ `ชื่อ Variant` |
 | `/api/products/search` | `GET` | `Permission:products.view` | search |
 | `/api/products/generate-barcode` | `POST` | `Permission:products.create` | generate barcode |

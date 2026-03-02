@@ -339,6 +339,23 @@
   - ทีมต้องดูแล accessibility และ keyboard interaction ของ component กลางให้ครบ เพราะถูกใช้งานหลายหน้า
   - ไม่ต้องเปลี่ยน backend schema/API เนื่องจากยังส่งค่า `YYYY-MM-DD` เหมือนเดิม
 
+## ADR-022: ราคาขายหน่วยแปลงแบบ Optional Override
+
+- Date: March 2, 2026
+- Status: Accepted
+- Decision:
+  - เพิ่มคอลัมน์ `product_units.price_per_unit` (nullable) สำหรับเก็บราคาขายของหน่วยแปลงโดยตรง
+  - หน้า create/edit product ให้กรอก `pricePerUnit` ต่อหน่วยแปลงได้ แต่ไม่บังคับ
+  - Flow สร้างออเดอร์ (`/orders`, `/orders/new`, `POST /api/orders`) ใช้ "ราคาของหน่วยที่เลือก" ในการคำนวณ `lineTotal`
+  - ถ้า `price_per_unit` ไม่มีค่า ให้ fallback เป็นสูตรเดิม `products.price_base x multiplier_to_base`
+- Reason:
+  - รองรับเคสธุรกิจจริงที่ราคาแพ็กไม่เป็นสัดส่วนตรงกับหน่วยย่อย (เช่น EA=1,000 แต่ PACK(12)=10,000)
+  - ลดการบิดข้อมูลด้วยการเปลี่ยนราคาหน่วยหลักเพื่อบังคับให้แพ็กราคาถูกลง/แพงขึ้น
+- Consequence:
+  - `order_items.price_base_at_sale` จะเก็บราคาต่อหน่วยที่ขายจริง (ตาม unit ที่เลือก) เพื่อสะท้อนยอดขายจริงของบรรทัดนั้น
+  - รายงานรายได้ยังอิง `order_items.line_total` เหมือนเดิม และฝั่ง COGS ยังอิง `qty_base x cost_base_at_sale`
+  - ต้องคง fallback rule ให้ครบทั้ง UI และ API เพื่อลด regression กับข้อมูลเก่าที่ไม่มี `price_per_unit`
+
 ## Template สำหรับ ADR ใหม่
 
 - Date: YYYY-MM-DD

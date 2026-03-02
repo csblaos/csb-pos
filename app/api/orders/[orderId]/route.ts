@@ -502,8 +502,8 @@ export async function PATCH(
 
     if (payload.data.action === "submit_payment_slip") {
       const slipPayload = payload.data;
-      if (order.status !== "PENDING_PAYMENT") {
-        return failAction("INVALID_STATUS", "ออเดอร์นี้ยังไม่อยู่ในสถานะรอชำระ", 400, {
+      if (order.status !== "PENDING_PAYMENT" && order.status !== "READY_FOR_PICKUP") {
+        return failAction("INVALID_STATUS", "ออเดอร์นี้ยังไม่อยู่ในสถานะรอชำระ/รอรับที่ร้าน", 400, {
           status: order.status,
           orderNo: order.orderNo,
         });
@@ -558,7 +558,7 @@ export async function PATCH(
     }
 
     if (action === "confirm_paid") {
-      if (order.status !== "PENDING_PAYMENT") {
+      if (order.status !== "PENDING_PAYMENT" && order.status !== "READY_FOR_PICKUP") {
         return failAction("INVALID_STATUS", "ออเดอร์นี้ยังไม่พร้อมยืนยันชำระ", 400, {
           status: order.status,
           orderNo: order.orderNo,
@@ -629,7 +629,7 @@ export async function PATCH(
             entityId: order.id,
             metadata: {
               orderNo: order.orderNo,
-              fromStatus: "PENDING_PAYMENT",
+              fromStatus: order.status,
               toStatus: "PAID",
               stockOutItems: orderItems.length,
             },
@@ -758,7 +758,10 @@ export async function PATCH(
       );
     }
 
-    const stockReleaseItems = order.status === "PENDING_PAYMENT" ? orderItems.length : 0;
+    const stockReleaseItems =
+      order.status === "PENDING_PAYMENT" || order.status === "READY_FOR_PICKUP"
+        ? orderItems.length
+        : 0;
     const stockReturnItems =
       order.status === "PAID" || order.status === "PACKED" || order.status === "SHIPPED"
         ? orderItems.length
@@ -770,7 +773,10 @@ export async function PATCH(
         : "FAILED";
 
     await db.transaction(async (tx) => {
-      if (order.status === "PENDING_PAYMENT" && orderItems.length > 0) {
+      if (
+        (order.status === "PENDING_PAYMENT" || order.status === "READY_FOR_PICKUP") &&
+        orderItems.length > 0
+      ) {
         await tx.insert(inventoryMovements).values(
           orderItems.map((item) => ({
             storeId,

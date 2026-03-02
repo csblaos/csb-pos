@@ -6,6 +6,44 @@
 
 ## Changed (ล่าสุด)
 
+- เพิ่มหน้าใหม่ `/orders/new` สำหรับสร้างออเดอร์แบบหน้าเต็ม (full create flow):
+  - หน้า `/orders` ปรับบทบาทเป็น “จัดการออเดอร์” และแยก action เป็น 2 แบบ: `สร้างด่วน` (modal เดิม) กับ `สร้างออเดอร์` (ไป `/orders/new`)
+  - `/orders/new` ใช้คอมโพเนนต์/validation/API ชุดเดียวกับ flow เดิม (`POST /api/orders`) เพื่อลด drift
+  - `/orders/new` ปรับเป็น POS-style UI: ตัด heading/description ของหน้า create ออก, แถบ `ค้นหา + สแกน`, product card grid, และ sticky cart/checkout action bar บนมือถือ
+  - เพิ่มความกว้าง app shell บน desktop จาก `70rem` เป็น `76rem` เพื่อให้หน้า POS/หน้าจัดการข้อมูลมีพื้นที่ใช้งานมากขึ้น
+  - product card รองรับรูปย่อสินค้า (`imageUrl`) พร้อม fallback placeholder
+  - ย่อ product card ในหน้า `/orders/new` ให้ compact ขึ้นบนมือถือ (ลด padding/ขนาดรูป/ขนาดตัวอักษรเล็กน้อย) เพื่อเพิ่มจำนวนสินค้าที่เห็นต่อจอ
+  - product picker รองรับ `ค้นหา + สแกนบาร์โค้ด + category chips + filter เฉพาะมีสต็อก + sort`
+  - checkout เพิ่มตัวเลือก `ประเภทออเดอร์` 3 แบบ: `Walk-in ทันที` / `มารับที่ร้านภายหลัง` / `สั่งออนไลน์/จัดส่ง`
+  - ฟอร์ม checkout แสดง field แบบ dynamic ตามประเภทออเดอร์ (เช่น ช่องทาง+ลูกค้า+ที่อยู่จะแสดงเฉพาะ flow ออนไลน์)
+  - validation ฝั่ง client ตาม flow: `มารับที่ร้านภายหลัง` ต้องมีเบอร์โทร, `สั่งออนไลน์/จัดส่ง` ต้องมีที่อยู่จัดส่ง และเปิด `COD` เฉพาะ flow ออนไลน์
+  - ฝั่ง API `POST /api/orders` รองรับ `checkoutFlow` (optional) และถ้าเป็น `PICKUP_LATER` จะสร้างออเดอร์เป็นสถานะ `READY_FOR_PICKUP` พร้อมบันทึก movement `RESERVE` ทันที
+  - ฝั่ง API `PATCH /api/orders/[orderId]` เปิดให้ `confirm_paid`/`submit_payment_slip` ใช้ได้กับสถานะ `READY_FOR_PICKUP` และการ `cancel` จากสถานะนี้จะปล่อยจองสต็อก (`RELEASE`) กลับ
+  - ผู้ใช้เลือกสินค้าในหน้า POS ก่อน แล้วกด `ชำระเงิน / กรอกรายละเอียด` เพื่อเปิด Checkout sheet (ลูกค้า/ชำระเงิน/ที่อยู่)
+  - sticky action bar บนมือถือปรับเป็น summary + ปุ่มลัด `แก้ตะกร้า` และปุ่มหลักเดียว `ถัดไป: ชำระเงิน` เพื่อให้ flow checkout ง่ายขึ้น
+  - Cart sheet มี action ต่อไป Checkout ได้ทันที และยังกลับไปเลือกสินค้าได้
+  - เพิ่ม guard permission ในหน้าใหม่: ถ้าไม่มี `orders.view` จะไม่ให้เข้า และถ้าไม่มี `orders.create` จะเห็นข้อความไม่มีสิทธิ์สร้าง
+  - ซ่อน bottom tab navigation อัตโนมัติเมื่ออยู่หน้า `/orders/new` และลดความสูงจองพื้นที่ nav เพื่อให้โหมด create บนมือถือโฟกัสมากขึ้น
+  - ปุ่ม back บน navbar สำหรับหน้า `/orders/new` เปลี่ยน label เป็น `กลับรายการออเดอร์` และมี confirm ก่อนออกเมื่อมี draft ค้าง
+  - ถอดลิงก์ `กลับไปหน้ารายการขาย` ด้านล่างหน้าออก เพื่อลดปุ่มซ้ำและให้ผู้ใช้ใช้ปุ่ม back ใน navbar เป็นทางหลัก
+  - checkout sheet ปรับให้ flow กระชับขึ้นโดยตัดปุ่ม `เปิดตะกร้า` ใน step รายละเอียดออก (คงปุ่มกลับไปเลือกสินค้า)
+  - เพิ่ม fallback ชื่อลูกค้าอัตโนมัติทั้งฝั่ง client+API เมื่อไม่กรอกชื่อ (`ลูกค้าหน้าร้าน` / `ลูกค้าออนไลน์`)
+
+- เพิ่มฟีเจอร์ราคาขายหน่วยแปลงแบบกำหนดเอง (optional):
+  - schema `product_units` เพิ่มคอลัมน์ `price_per_unit` (nullable)
+  - ฟอร์มเพิ่ม/แก้ไขสินค้าใน `/products` เพิ่มช่องราคาต่อหน่วยแปลงต่อแถว (เช่น PACK) โดยถ้าไม่กรอกจะใช้สูตรเดิม `ราคาหน่วยหลัก x ตัวคูณ`
+  - การคำนวณยอดใน `/orders` และ `/orders/new` รวมถึง `POST /api/orders` เปลี่ยนเป็นใช้ราคาของหน่วยที่ผู้ใช้เลือกจริง
+  - fallback compatibility: ข้อมูลสินค้าเดิมที่ไม่มี `price_per_unit` ยังทำงานได้เหมือนเดิม
+  - อัปเดต `scripts/repair-migrations.mjs` ให้เติมคอลัมน์ `product_units.price_per_unit` อัตโนมัติสำหรับฐานที่ข้าม migration
+  - ปรับ UI มือถือในส่วน `การแปลงหน่วย` ให้แถวกรอกข้อมูลเป็น 2 บรรทัด (บรรทัดแรกเลือกหน่วย+ลบ, บรรทัดสองกรอกตัวคูณ+ราคา) เพื่อลดความแคบและพิมพ์ผิด
+
+- ปรับ UX ฟอร์มสร้างออเดอร์หน้า `/orders` ให้เป็น mobile-first แบบ POS-lite:
+  - เพิ่ม quick add section (`ค้นหา SKU/ชื่อ/บาร์โค้ด`) และการ์ดสินค้าแบบแตะครั้งเดียวเพื่อเพิ่มเข้าตะกร้า
+  - คง flow สแกนบาร์โค้ด + fallback manual search เดิม แต่จัด hierarchy ให้เพิ่มสินค้าได้เร็วขึ้น
+  - บนมือถือ แสดง cart preview แบบย่อ (2 รายการแรก) และปุ่ม sticky `ดูตะกร้า`
+  - เพิ่ม `ตะกร้าสินค้า` sheet สำหรับแก้จำนวน (+/-), เปลี่ยนหน่วย, ลบรายการ และดูยอดรวมก่อนกดสร้างออเดอร์
+  - บน tablet/desktop คง row editor รายการสินค้าแบบเดิมเพื่อแก้รายละเอียดได้รวดเร็ว
+
 - ปรับแท็บ `/stock?tab=inventory` เพิ่ม filter หมวดหมู่สินค้า:
   - หน้า `ดูสต็อก` เพิ่ม dropdown `ทุกหมวดหมู่/หมวดหมู่สินค้า` และผูกกับ URL query `inventoryCategoryId`
   - ขยาย API `GET /api/stock/products` ให้รองรับ query `categoryId` เพื่อกรองข้อมูลแบบ server-side ให้ตรงกับ pagination
@@ -404,6 +442,12 @@
 
 ## Impact
 
+- รองรับการตั้งราคาขายแพ็ก/กล่องที่ไม่ต้องเป็นสัดส่วนตรงกับหน่วยย่อย (เช่น EA 1,000 แต่ PACK 12 = 10,000)
+- ลดข้อผิดพลาดในยอดออเดอร์เมื่อขายด้วยหน่วยแปลง เพราะ UI/API ใช้ราคาต่อหน่วยที่เลือกตรงกัน
+- ลดความหนาแน่นของฟอร์มบนมือถือในหน้าเพิ่ม/แก้ไขสินค้า ทำให้กรอกตัวคูณและราคาแพ็กได้ง่ายขึ้น
+- ลดการกดหลุด flow ระหว่างสร้างออเดอร์ เพราะหน้า `/orders/new` ไม่แสดงเมนูล่างหลักชั่วคราว
+- ลดการออกจากหน้า create order โดยไม่ตั้งใจ เพราะปุ่ม back จะยืนยันก่อนออกเมื่อมีข้อมูลค้าง
+- เอกสารออเดอร์/สลิป/งานพิมพ์ไม่ว่างชื่อผู้รับ แม้ผู้ใช้ไม่กรอกชื่อเอง
 - ลดอาการเด้งแท็บในหน้า `/stock` โดยเฉพาะตอนสลับไป/กลับแท็บ `ประวัติ`
 - ลดการยิงโหลดข้อมูลประวัติที่ไม่จำเป็นเมื่อผู้ใช้อยู่แท็บอื่น (เพราะ keep-mounted แต่ไม่ active)
 
@@ -509,6 +553,26 @@
 
 ## Files (สำคัญ)
 
+- `lib/db/schema/tables.ts`
+- `drizzle/0034_spooky_talos.sql`
+- `drizzle/meta/0034_snapshot.json`
+- `drizzle/meta/_journal.json`
+- `scripts/repair-migrations.mjs`
+- `lib/products/validation.ts`
+- `lib/products/service.ts`
+- `components/app/products-management.tsx`
+- `app/api/products/route.ts`
+- `app/api/products/[productId]/route.ts`
+- `lib/orders/queries.ts`
+- `components/app/orders-management.tsx`
+- `components/app/bottom-tab-nav.tsx`
+- `components/app/app-top-nav.tsx`
+- `components/ui/menu-back-button.tsx`
+- `lib/orders/new-order-draft.ts`
+- `app/(app)/orders/new/page.tsx`
+- `app/api/orders/route.ts`
+- `docs/API_INVENTORY.md`
+- `docs/SCHEMA_MAP.md`
 - `components/app/purchase-order-list.tsx`
 - `docs/UI_ROUTE_MAP.md`
 - `docs/DECISIONS.md`
@@ -643,6 +707,20 @@ npm run build
 ```
 
 4. Functional check
+- เปิด `/products` > เพิ่ม/แก้ไขสินค้า:
+  - ตั้งตัวอย่าง `ราคาหน่วยหลัก (EA)=1000`
+  - เพิ่มหน่วยแปลง `PACK` ตัวคูณ `12` แล้วกรอก `ราคาต่อหน่วยแปลง=10000`
+  - บันทึกแล้วเปิด Product Detail tab `ราคา` ต้องเห็นราคา PACK เป็น `10000` (ไม่ใช่ `12000`)
+- เปิด `/orders/new` หรือ modal สร้างออเดอร์ใน `/orders`:
+  - เพิ่มสินค้าตัวอย่างข้างต้น แล้วเปลี่ยนหน่วยเป็น `PACK`
+  - ยอดรวมบรรทัดต้องคำนวณตาม `10000 x จำนวน` และยอดรวมทั้งออเดอร์ต้องตรงกันกับฝั่ง API ตอนบันทึก
+- เปิด `/orders/new` แล้วเพิ่มสินค้าอย่างน้อย 1 รายการ จากนั้นกดปุ่ม back บน navbar:
+  - ต้องเห็น confirm เตือนข้อมูลค้าง
+  - กด `ยกเลิก` ต้องยังอยู่หน้าเดิมและข้อมูลไม่หาย
+  - กด `ตกลง` ต้องกลับ `/orders`
+- เปิด `/orders/new` แล้วไม่กรอกชื่อลูกค้า จากนั้นบันทึกออเดอร์:
+  - ถ้า channel = `WALK_IN` ชื่อในออเดอร์ต้อง fallback เป็น `ลูกค้าหน้าร้าน`
+  - ถ้า channel = `FACEBOOK/WHATSAPP` ชื่อในออเดอร์ต้อง fallback เป็น `ลูกค้าออนไลน์` (เมื่อไม่มีชื่อจาก contact)
 - เปิด `/stock?tab=purchase` ในการ์ด `คิว PO รอปิดเรท`:
   - เลือกหลาย PO สกุลเดียวกัน แล้วกด `ปิดเรท + ชำระปลายเดือน`
   - กรอก `อัตราแลกเปลี่ยน`, `วันที่ชำระ`, และ `paymentReference` แล้วเริ่มประมวลผล

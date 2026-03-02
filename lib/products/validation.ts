@@ -21,6 +21,7 @@ export const productConversionSchema = z.object({
     .number({ message: "กรอกตัวคูณให้ถูกต้อง" })
     .int("ตัวคูณต้องเป็นจำนวนเต็ม")
     .min(2, "ตัวคูณต้องมากกว่า 1"),
+  pricePerUnit: optionalNonNegativeInt,
 });
 
 const productVariantOptionSchema = z.object({
