@@ -143,11 +143,13 @@ export async function getStockProductsPage(params: {
   storeId: string;
   limit: number;
   offset: number;
+  categoryId?: string | null;
 }): Promise<StockProductOption[]> {
   return listStockProductsByStorePage(
     params.storeId,
     params.limit,
     params.offset,
+    params.categoryId,
   );
 }
 

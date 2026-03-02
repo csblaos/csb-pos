@@ -302,8 +302,12 @@ export async function getStockProductsForStorePage(
   storeId: string,
   limit: number,
   offset: number,
+  categoryId?: string | null,
 ): Promise<StockProductOption[]> {
   const baseUnits = alias(units, "base_units");
+  const whereClause = categoryId
+    ? and(eq(products.storeId, storeId), eq(products.categoryId, categoryId))
+    : eq(products.storeId, storeId);
 
   const productRows = await db
     .select({
@@ -319,7 +323,7 @@ export async function getStockProductsForStorePage(
     })
     .from(products)
     .innerJoin(baseUnits, eq(products.baseUnitId, baseUnits.id))
-    .where(eq(products.storeId, storeId))
+    .where(whereClause)
     .orderBy(asc(products.name))
     .limit(limit)
     .offset(offset);

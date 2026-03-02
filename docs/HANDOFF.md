@@ -6,6 +6,14 @@
 
 ## Changed (ล่าสุด)
 
+- ปรับแท็บ `/stock?tab=inventory` เพิ่ม filter หมวดหมู่สินค้า:
+  - หน้า `ดูสต็อก` เพิ่ม dropdown `ทุกหมวดหมู่/หมวดหมู่สินค้า` และผูกกับ URL query `inventoryCategoryId`
+  - ขยาย API `GET /api/stock/products` ให้รองรับ query `categoryId` เพื่อกรองข้อมูลแบบ server-side ให้ตรงกับ pagination
+  - เมื่อเปลี่ยนหมวดหมู่ ระบบจะ reload หน้า 1 อัตโนมัติ (ไม่ใช้แค่กรอง client-side บนข้อมูลที่โหลดมาแล้ว)
+
+- ปรับ UI หน้า `/products` (mobile):
+  - แก้ตำแหน่งปุ่มลอย `เพิ่มสินค้า` (FAB) จาก `bottom-20` เป็นการคำนวณจาก `--bottom-tab-nav-height + env(safe-area-inset-bottom)` เพื่อลดเคสปุ่มทับ bottom tab bar ตอนเลื่อนหน้า
+
 - ปรับแท็บ `/stock?tab=inventory` (ดูสต็อก) ให้ใช้งานจริงได้ครบขึ้น:
   - เพิ่ม toolbar มาตรฐานของแท็บ (`รีเฟรชแท็บนี้` + `อัปเดตล่าสุด`)
   - เพิ่ม data flow แบบแบ่งหน้า (`GET /api/stock/products?page&pageSize`) พร้อมปุ่ม `โหลดเพิ่ม` แทนการเห็นเฉพาะ 20 รายการแรก

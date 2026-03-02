@@ -16,6 +16,7 @@ import {
   getStockProductsPage,
 } from "@/server/services/stock.service";
 import { getPurchaseOrderListPage } from "@/server/services/purchase.service";
+import { listCategories } from "@/lib/products/service";
 
 const StockRecordingForm = dynamic(
   () =>
@@ -113,7 +114,7 @@ export default async function StockPage({
     const PRODUCT_PAGE_SIZE = 20;
     const PO_PAGE_SIZE = 20;
 
-    const [movements, purchaseOrderRows, stockProductRows, storeRow] =
+    const [movements, purchaseOrderRows, stockProductRows, storeRow, categories] =
       await perf.step("service.getStockAndPO", async () =>
         Promise.all([
           getRecentStockMovements({
@@ -144,6 +145,7 @@ export default async function StockPage({
             .where(eq(stores.id, activeStoreId))
             .limit(1)
             .then((rows) => rows[0] ?? null),
+          listCategories(activeStoreId),
         ]),
       );
 
@@ -166,8 +168,8 @@ export default async function StockPage({
     const storeOutStockThreshold = storeRow?.outStockThreshold ?? 0;
     const storeLowStockThreshold = storeRow?.lowStockThreshold ?? 10;
     const params = await searchParams;
-    const initialTab = params?.tab === "purchase" 
-      ? "purchase" 
+    const initialTab = params?.tab === "purchase"
+      ? "purchase"
       : params?.tab === "inventory"
         ? "inventory"
         : params?.tab === "history"
@@ -196,6 +198,7 @@ export default async function StockPage({
           inventoryTab={
             <StockInventoryView
               products={initialProducts}
+              categories={categories}
               storeOutStockThreshold={storeOutStockThreshold}
               storeLowStockThreshold={storeLowStockThreshold}
               pageSize={PRODUCT_PAGE_SIZE}

@@ -103,6 +103,7 @@ npm run db:migrate
   - รายการสินค้าในหน้า `/products` รองรับ swipe-left action บน mobile/tablet เพื่อเปิดปุ่ม `ปิดใช้งาน/เปิดใช้งาน` แบบรวดเร็ว
   - ฟอร์มใน `SlideUpSheet` รองรับ keyboard-aware บนมือถือ (เพิ่ม bottom inset ตาม virtual keyboard + ติดตาม viewport resize/scroll เพื่อเลื่อนช่องที่โฟกัสให้อยู่ในจอ)
   - ฟอร์มเพิ่ม/แก้ไขสินค้าใน `/products` มีปุ่ม `ยกเลิก` คู่กับ `บันทึก` ที่ footer ของ `SlideUpSheet` (ชิดล่างและไม่ลอยจากขอบ)
+  - ปุ่มลอย `เพิ่มสินค้า` (FAB) บนมือถือในหน้า `/products` ปรับตำแหน่งจากค่าคงที่เป็นค่าที่ผูกกับ `--bottom-tab-nav-height + safe-area` เพื่อลดเคสปุ่มทับ bottom tab bar ตอนเลื่อนหน้า
   - ฟอร์มแก้ไขสินค้าแสดงรูปปัจจุบันก่อน และจะสลับเป็น preview รูปใหม่เมื่อผู้ใช้เลือกรูปใหม่
   - ปุ่มรูปสินค้าใช้ `border-dashed` เฉพาะตอนยังไม่มีรูป และสลับเป็น `border-solid` เมื่อมีรูปแล้ว
   - การลบรูปสินค้าเป็นแบบ pending ในฟอร์มแก้ไข (ลบจริงเมื่อกด `บันทึก` เท่านั้น; กดยกเลิก/ปิดฟอร์มจะไม่ลบ)
@@ -186,8 +187,8 @@ npm run db:migrate
   - แท็บ `สั่งซื้อ (PO)` ใช้ cache รายละเอียด PO ต่อ `poId` แบบ on-demand (ยกเลิก intent-driven prefetch hover/focus/touch) และยัง invalidate cache เมื่อมีการแก้ไข/เปลี่ยนสถานะ
   - หน้า `/stock` ใช้ `StockTabs` แบบ keep-mounted (mount ครั้งแรกตามแท็บที่เข้าแล้วคง state เดิมไว้) ลดการรีเซ็ตฟอร์ม/รายการเมื่อสลับแท็บ
   - ทั้ง 4 แท็บหลัก (`ดูสต็อก`, `สั่งซื้อ`, `บันทึกสต็อก`, `ประวัติ`) มี toolbar มาตรฐาน: `รีเฟรชแท็บนี้` + เวลา `อัปเดตล่าสุด HH:mm`
-  - แท็บ `ดูสต็อก` ใช้ `GET /api/stock/products?page&pageSize` แบบแบ่งหน้า (เริ่มจากชุดแรก + ปุ่ม `โหลดเพิ่ม`) และมี `รีเฟรชแท็บนี้` เพื่อดึงสถานะล่าสุดของรายการสินค้า
-  - แท็บ `ดูสต็อก` sync state ลง URL แล้ว (`inventoryQ`, `inventoryFilter`, `inventorySort`) และจะ sync เฉพาะตอน active tab เป็น `inventory` เพื่อลด race condition เขียน query ข้ามแท็บ
+  - แท็บ `ดูสต็อก` ใช้ `GET /api/stock/products?page&pageSize&categoryId` แบบแบ่งหน้า (เริ่มจากชุดแรก + ปุ่ม `โหลดเพิ่ม`) และมี `รีเฟรชแท็บนี้` เพื่อดึงสถานะล่าสุดของรายการสินค้า
+  - แท็บ `ดูสต็อก` เพิ่ม filter หมวดหมู่สินค้า (`inventoryCategoryId`) และ sync state ลง URL แล้ว (`inventoryQ`, `inventoryFilter`, `inventorySort`, `inventoryCategoryId`) โดย sync เฉพาะตอน active tab เป็น `inventory` เพื่อลด race condition เขียน query ข้ามแท็บ
   - สแกนบาร์โค้ดในแท็บ `ดูสต็อก` จะ resolve ด้วย `GET /api/products/search?q&includeStock=true` (exact barcode ก่อน fallback) และ scanner modal จะเริ่มกล้องเฉพาะตอนเปิดจริง เพื่อลดความเสี่ยงเปิดกล้องค้างตอนปิดแผ่นสแกน
   - scanner ในแท็บ `ดูสต็อก` และ `บันทึกสต็อก` ใช้ UI/logic ชุดเดียวกับหน้า `/products` ผ่านคอมโพเนนต์กลาง `components/app/barcode-scanner-panel.tsx` (มี camera dropdown, pause/resume, torch/zoom, manual barcode fallback, และ cleanup ตอนปิด)
   - คอมโพเนนต์ legacy `components/app/stock-ledger.tsx` (ยังไม่ถูก mount ใน `/stock` ปัจจุบัน) ปรับ scanner ให้ใช้คอมโพเนนต์กลางเดียวกันแล้ว เพื่อคงพฤติกรรมเปิด/ปิดกล้องและ permission flow มาตรฐานเดียวกับ `/products`

@@ -36,9 +36,10 @@ export async function listStockProductsByStorePage(
   storeId: string,
   limit: number,
   offset: number,
+  categoryId?: string | null,
 ): Promise<StockProductOption[]> {
   return timeDb("stock.repo.listProductsPage", async () =>
-    getStockProductsForStorePage(storeId, limit, offset),
+    getStockProductsForStorePage(storeId, limit, offset, categoryId),
   );
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowUpDown, Package, ScanBarcode, Search, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUpDown, ListFilter, Package, ScanBarcode, Search, X } from "lucide-react";
 import toast from "react-hot-toast";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
@@ -16,10 +16,11 @@ import {
 } from "@/components/app/stock-tab-feedback";
 import { authFetch } from "@/lib/auth/client-token";
 import type { StockProductOption } from "@/lib/inventory/queries";
-import type { ProductListItem } from "@/lib/products/service";
+import type { CategoryItem, ProductListItem } from "@/lib/products/service";
 
 type StockInventoryViewProps = {
   products: StockProductOption[];
+  categories: CategoryItem[];
   storeOutStockThreshold: number;
   storeLowStockThreshold: number;
   pageSize: number;
@@ -33,6 +34,7 @@ const SCANNER_PERMISSION_STORAGE_KEY = "scanner-permission-seen";
 const INVENTORY_Q_QUERY_KEY = "inventoryQ";
 const INVENTORY_FILTER_QUERY_KEY = "inventoryFilter";
 const INVENTORY_SORT_QUERY_KEY = "inventorySort";
+const INVENTORY_CATEGORY_QUERY_KEY = "inventoryCategoryId";
 
 function parseInventoryFilter(value: string | null): FilterOption | null {
   if (value === "all" || value === "low" || value === "out") {
@@ -70,6 +72,7 @@ function mergeUniqueProducts(
 
 export function StockInventoryView({
   products,
+  categories,
   storeOutStockThreshold,
   storeLowStockThreshold,
   pageSize,
@@ -85,6 +88,8 @@ export function StockInventoryView({
     parseInventoryFilter(searchParams.get(INVENTORY_FILTER_QUERY_KEY)) ?? "all";
   const sortByFromUrl =
     parseInventorySort(searchParams.get(INVENTORY_SORT_QUERY_KEY)) ?? "name";
+  const categoryIdFromUrl =
+    searchParams.get(INVENTORY_CATEGORY_QUERY_KEY)?.trim() ?? "";
 
   const [productItems, setProductItems] = useState(products);
   const [productPage, setProductPage] = useState(1);
@@ -101,9 +106,11 @@ export function StockInventoryView({
   const [searchQueryForUrlSync, setSearchQueryForUrlSync] = useState(searchQueryFromUrl);
   const [filter, setFilter] = useState<FilterOption>(filterFromUrl);
   const [sortBy, setSortBy] = useState<SortOption>(sortByFromUrl);
+  const [selectedCategoryId, setSelectedCategoryId] = useState(categoryIdFromUrl);
   const [showScanner, setShowScanner] = useState(false);
   const [showScannerPermission, setShowScannerPermission] = useState(false);
   const [hasSeenScannerPermission, setHasSeenScannerPermission] = useState(false);
+  const lastFetchedCategoryIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     setProductItems(products);
@@ -139,12 +146,27 @@ export function StockInventoryView({
     );
     setFilter((prev) => (prev === filterFromUrl ? prev : filterFromUrl));
     setSortBy((prev) => (prev === sortByFromUrl ? prev : sortByFromUrl));
+    setSelectedCategoryId((prev) =>
+      prev === categoryIdFromUrl ? prev : categoryIdFromUrl,
+    );
   }, [
     isInventoryTabActive,
     searchQueryFromUrl,
     filterFromUrl,
     sortByFromUrl,
+    categoryIdFromUrl,
   ]);
+
+  useEffect(() => {
+    if (!selectedCategoryId) {
+      return;
+    }
+
+    const exists = categories.some((category) => category.id === selectedCategoryId);
+    if (!exists) {
+      setSelectedCategoryId("");
+    }
+  }, [categories, selectedCategoryId]);
 
   useEffect(() => {
     if (!isInventoryTabActive) {
@@ -184,6 +206,16 @@ export function StockInventoryView({
       changed = true;
     }
 
+    if (selectedCategoryId) {
+      if (params.get(INVENTORY_CATEGORY_QUERY_KEY) !== selectedCategoryId) {
+        params.set(INVENTORY_CATEGORY_QUERY_KEY, selectedCategoryId);
+        changed = true;
+      }
+    } else if (params.has(INVENTORY_CATEGORY_QUERY_KEY)) {
+      params.delete(INVENTORY_CATEGORY_QUERY_KEY);
+      changed = true;
+    }
+
     if (!changed) {
       return;
     }
@@ -199,6 +231,7 @@ export function StockInventoryView({
     router,
     searchParams,
     searchQueryForUrlSync,
+    selectedCategoryId,
     sortBy,
   ]);
 
@@ -290,9 +323,15 @@ export function StockInventoryView({
 
   const fetchStockProductsPage = useCallback(
     async (page: number) => {
-      const res = await authFetch(
-        `/api/stock/products?page=${page}&pageSize=${pageSize}`,
-      );
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+      });
+      if (selectedCategoryId) {
+        params.set("categoryId", selectedCategoryId);
+      }
+
+      const res = await authFetch(`/api/stock/products?${params.toString()}`);
       const data = (await res.json().catch(() => null)) as
         | {
             products?: StockProductOption[];
@@ -316,7 +355,7 @@ export function StockInventoryView({
         page: Number(data.page ?? page),
       };
     },
-    [pageSize],
+    [pageSize, selectedCategoryId],
   );
 
   const refreshInventoryData = useCallback(async () => {
@@ -336,6 +375,27 @@ export function StockInventoryView({
       setIsRefreshingData(false);
     }
   }, [fetchStockProductsPage]);
+
+  useEffect(() => {
+    if (!isInventoryTabActive) {
+      return;
+    }
+
+    if (lastFetchedCategoryIdRef.current === null) {
+      lastFetchedCategoryIdRef.current = selectedCategoryId;
+      if (!selectedCategoryId) {
+        return;
+      }
+    } else if (lastFetchedCategoryIdRef.current === selectedCategoryId) {
+      return;
+    }
+    lastFetchedCategoryIdRef.current = selectedCategoryId;
+
+    setProductItems([]);
+    setProductPage(1);
+    setHasMoreProducts(false);
+    void refreshInventoryData();
+  }, [isInventoryTabActive, refreshInventoryData, selectedCategoryId]);
 
   const loadMoreProducts = useCallback(
     async (options?: { silent?: boolean }) => {
@@ -408,6 +468,17 @@ export function StockInventoryView({
         setFilter("all");
         setSearchQuery(matchedProduct.sku);
 
+        if (
+          selectedCategoryId &&
+          matchedProduct.categoryId &&
+          matchedProduct.categoryId !== selectedCategoryId
+        ) {
+          toast(
+            `พบสินค้า: ${matchedProduct.name} แต่ไม่อยู่ในหมวดที่เลือก (ล้างตัวกรองหมวดเพื่อดูรายการ)`,
+          );
+          return;
+        }
+
         const inCurrentList = productItems.some(
           (item) => item.productId === matchedProduct.id,
         );
@@ -462,6 +533,7 @@ export function StockInventoryView({
       productItems,
       productPage,
       resolveProductFromBarcode,
+      selectedCategoryId,
     ],
   );
 
@@ -560,18 +632,36 @@ export function StockInventoryView({
             </Button>
           </div>
 
-          <div className="flex items-center gap-2">
-            <ArrowUpDown className="h-4 w-4 text-slate-500" />
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as SortOption)}
-              className="h-10 rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
-            >
-              <option value="name">ชื่อ ก-ฮ</option>
-              <option value="sku">SKU</option>
-              <option value="stock-low">สต็อกน้อย-มาก</option>
-              <option value="stock-high">สต็อกมาก-น้อย</option>
-            </select>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
+              <ListFilter className="h-4 w-4 shrink-0 text-slate-500" />
+              <select
+                value={selectedCategoryId}
+                onChange={(e) => setSelectedCategoryId(e.target.value)}
+                className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2 sm:w-auto"
+              >
+                <option value="">ทุกหมวดหมู่</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex min-w-0 flex-1 items-center gap-2 sm:flex-none">
+              <ArrowUpDown className="h-4 w-4 shrink-0 text-slate-500" />
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortOption)}
+                className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2 sm:w-auto"
+              >
+                <option value="name">ชื่อ ก-ฮ</option>
+                <option value="sku">SKU</option>
+                <option value="stock-low">สต็อกน้อย-มาก</option>
+                <option value="stock-high">สต็อกมาก-น้อย</option>
+              </select>
+            </div>
           </div>
         </div>
 
