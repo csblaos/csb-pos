@@ -6,6 +6,7 @@ import { redisDelete, redisGetJson, redisSetJson } from "@/lib/cache/redis";
 import { db } from "@/lib/db/client";
 import { stores } from "@/lib/db/schema";
 import {
+  getCodOverviewSummary,
   getGrossProfitSummary,
   getOutstandingPurchaseRows,
   getPurchaseApAgingSummary,
@@ -14,6 +15,7 @@ import {
   getSalesSummary,
   getTopProducts,
   type GrossProfitSummary,
+  type CodOverviewSummary,
   type PurchaseApAgingSummary,
   type PurchaseFxDeltaSummary,
   type PurchaseOutstandingRow,
@@ -35,6 +37,7 @@ export type ReportsViewData = {
   topProducts: TopProductRow[];
   salesByChannel: SalesByChannelRow[];
   grossProfit: GrossProfitSummary;
+  codOverview: CodOverviewSummary;
   purchaseFx: PurchaseFxDeltaSummary;
   purchaseApAging: PurchaseApAgingSummary;
 };
@@ -62,18 +65,20 @@ export async function getReportsViewData(params: {
     }
   }
 
-  const [salesSummary, topProducts, salesByChannel, grossProfit, storeRow] = await Promise.all([
-    getSalesSummary(params.storeId),
-    getTopProducts(params.storeId, topProductsLimit),
-    getSalesByChannel(params.storeId),
-    getGrossProfitSummary(params.storeId),
-    db
-      .select({ currency: stores.currency })
-      .from(stores)
-      .where(eq(stores.id, params.storeId))
-      .limit(1)
-      .then((rows) => rows[0] ?? null),
-  ]);
+  const [salesSummary, topProducts, salesByChannel, grossProfit, codOverview, storeRow] =
+    await Promise.all([
+      getSalesSummary(params.storeId),
+      getTopProducts(params.storeId, topProductsLimit),
+      getSalesByChannel(params.storeId),
+      getGrossProfitSummary(params.storeId),
+      getCodOverviewSummary(params.storeId),
+      db
+        .select({ currency: stores.currency })
+        .from(stores)
+        .where(eq(stores.id, params.storeId))
+        .limit(1)
+        .then((rows) => rows[0] ?? null),
+    ]);
   const storeCurrency = (storeRow?.currency ?? "LAK") as "LAK" | "THB" | "USD";
   const [purchaseFx, purchaseApAging] = await Promise.all([
     getPurchaseFxDeltaSummary(params.storeId, storeCurrency),
@@ -86,6 +91,7 @@ export async function getReportsViewData(params: {
     topProducts,
     salesByChannel,
     grossProfit,
+    codOverview,
     purchaseFx,
     purchaseApAging,
   };

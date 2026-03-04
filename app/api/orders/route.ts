@@ -342,12 +342,12 @@ export async function POST(request: Request) {
       parseStoreCurrency(catalog.storeCurrency),
     );
     const selectedPaymentMethod = payload.paymentMethod ?? "CASH";
-    if (isPickupLater && selectedPaymentMethod === "COD") {
+    if (selectedPaymentMethod === "COD" && payload.checkoutFlow !== "ONLINE_DELIVERY") {
       if (idempotencyRecordId) {
         await safeMarkIdempotencyFailed({
           recordId: idempotencyRecordId,
           statusCode: 400,
-          body: { message: "ออเดอร์รับที่ร้านไม่รองรับการชำระแบบ COD" },
+          body: { message: "COD ใช้ได้เฉพาะออเดอร์สั่งออนไลน์/จัดส่ง" },
         });
       }
       await safeLogAuditEvent({
@@ -359,14 +359,14 @@ export async function POST(request: Request) {
         action,
         entityType: "order",
         result: "FAIL",
-        reasonCode: "INVALID_PICKUP_PAYMENT_METHOD",
+        reasonCode: "INVALID_COD_PAYMENT_METHOD",
         metadata: {
           checkoutFlow: payload.checkoutFlow,
           paymentMethod: selectedPaymentMethod,
         },
         request,
       });
-      return NextResponse.json({ message: "ออเดอร์รับที่ร้านไม่รองรับการชำระแบบ COD" }, { status: 400 });
+      return NextResponse.json({ message: "COD ใช้ได้เฉพาะออเดอร์สั่งออนไลน์/จัดส่ง" }, { status: 400 });
     }
     if (!catalog.supportedCurrencies.includes(selectedPaymentCurrency)) {
       if (idempotencyRecordId) {
@@ -556,6 +556,8 @@ export async function POST(request: Request) {
     const customerName =
       payload.customerName?.trim() || selectedContact?.displayName || customerNameFallback;
     const customerPhone = payload.customerPhone?.trim() || selectedContact?.phone || null;
+    const shippingProvider = payload.shippingProvider?.trim() || null;
+    const shippingCarrier = payload.shippingCarrier?.trim() || null;
 
     let orderNo = await generateOrderNo(storeId);
 
@@ -594,7 +596,8 @@ export async function POST(request: Request) {
           paymentAccountId: selectedPaymentAccountId,
           paymentSlipUrl: null,
           paymentProofSubmittedAt: null,
-          shippingCarrier: null,
+          shippingProvider: payload.checkoutFlow === "ONLINE_DELIVERY" ? shippingProvider : null,
+          shippingCarrier: payload.checkoutFlow === "ONLINE_DELIVERY" ? shippingCarrier : null,
           trackingNo: null,
           shippingCost: payload.shippingCost,
           createdBy: session.userId,

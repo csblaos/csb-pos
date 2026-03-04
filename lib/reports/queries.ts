@@ -53,6 +53,32 @@ export type GrossProfitSummary = {
   grossProfitDeltaVsCurrentCost: number;
 };
 
+export type CodByProviderRow = {
+  provider: string;
+  pendingCount: number;
+  pendingAmount: number;
+  settledCount: number;
+  settledAmount: number;
+  returnedCount: number;
+  returnedShippingLoss: number;
+  netAmount: number;
+};
+
+export type CodOverviewSummary = {
+  pendingCount: number;
+  pendingAmount: number;
+  settledTodayCount: number;
+  settledTodayAmount: number;
+  returnedTodayCount: number;
+  returnedTodayShippingLoss: number;
+  settledAllCount: number;
+  settledAllAmount: number;
+  returnedCount: number;
+  returnedShippingLoss: number;
+  netAmount: number;
+  byProvider: CodByProviderRow[];
+};
+
 export type PurchaseFxDeltaSummary = {
   pendingRateCount: number;
   pendingRateUnpaidCount: number;
@@ -328,6 +354,154 @@ export async function getGrossProfitSummary(
     grossProfit,
     currentCostGrossProfit,
     grossProfitDeltaVsCurrentCost: grossProfit - currentCostGrossProfit,
+  };
+}
+
+export async function getCodOverviewSummary(
+  storeId: string,
+): Promise<CodOverviewSummary> {
+  const providerExpr = sql<string>`coalesce(
+    nullif(trim(${orders.shippingProvider}), ''),
+    nullif(trim(${orders.shippingCarrier}), ''),
+    'ไม่ระบุ'
+  )`;
+
+  const codAmountExpr = sql<number>`case
+    when ${orders.codAmount} > 0 then ${orders.codAmount}
+    else ${orders.total}
+  end`;
+
+  const [overviewRows, byProviderRows] = await Promise.all([
+    timeDbQuery("reports.cod.overview", async () =>
+      db
+        .select({
+          pendingCount: sql<number>`coalesce(sum(case
+            when ${orders.status} = 'SHIPPED'
+              and ${orders.paymentStatus} = 'COD_PENDING_SETTLEMENT'
+            then 1 else 0 end), 0)`,
+          pendingAmount: sql<number>`coalesce(sum(case
+            when ${orders.status} = 'SHIPPED'
+              and ${orders.paymentStatus} = 'COD_PENDING_SETTLEMENT'
+            then ${codAmountExpr}
+            else 0 end), 0)`,
+          settledTodayCount: sql<number>`coalesce(sum(case
+            when ${orders.paymentStatus} = 'COD_SETTLED'
+              and ${orders.codSettledAt} >= datetime('now', 'localtime', 'start of day', 'utc')
+              and ${orders.codSettledAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')
+            then 1 else 0 end), 0)`,
+          settledTodayAmount: sql<number>`coalesce(sum(case
+            when ${orders.paymentStatus} = 'COD_SETTLED'
+              and ${orders.codSettledAt} >= datetime('now', 'localtime', 'start of day', 'utc')
+              and ${orders.codSettledAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')
+            then ${codAmountExpr}
+            else 0 end), 0)`,
+          returnedTodayCount: sql<number>`coalesce(sum(case
+            when ${orders.status} = 'COD_RETURNED'
+              and ${orders.codReturnedAt} >= datetime('now', 'localtime', 'start of day', 'utc')
+              and ${orders.codReturnedAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')
+            then 1 else 0 end), 0)`,
+          returnedTodayShippingLoss: sql<number>`coalesce(sum(case
+            when ${orders.status} = 'COD_RETURNED'
+              and ${orders.codReturnedAt} >= datetime('now', 'localtime', 'start of day', 'utc')
+              and ${orders.codReturnedAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')
+            then ${orders.shippingCost}
+            else 0 end), 0)`,
+          settledAllCount: sql<number>`coalesce(sum(case
+            when ${orders.paymentStatus} = 'COD_SETTLED'
+            then 1 else 0 end), 0)`,
+          settledAllAmount: sql<number>`coalesce(sum(case
+            when ${orders.paymentStatus} = 'COD_SETTLED'
+            then ${codAmountExpr}
+            else 0 end), 0)`,
+          returnedCount: sql<number>`coalesce(sum(case
+            when ${orders.status} = 'COD_RETURNED'
+            then 1 else 0 end), 0)`,
+          returnedShippingLoss: sql<number>`coalesce(sum(case
+            when ${orders.status} = 'COD_RETURNED'
+            then ${orders.shippingCost}
+            else 0 end), 0)`,
+        })
+        .from(orders)
+        .where(and(eq(orders.storeId, storeId), eq(orders.paymentMethod, "COD"))),
+    ),
+    timeDbQuery("reports.cod.byProvider", async () =>
+      db
+        .select({
+          provider: providerExpr,
+          pendingCount: sql<number>`coalesce(sum(case
+            when ${orders.status} = 'SHIPPED'
+              and ${orders.paymentStatus} = 'COD_PENDING_SETTLEMENT'
+            then 1 else 0 end), 0)`,
+          pendingAmount: sql<number>`coalesce(sum(case
+            when ${orders.status} = 'SHIPPED'
+              and ${orders.paymentStatus} = 'COD_PENDING_SETTLEMENT'
+            then ${codAmountExpr}
+            else 0 end), 0)`,
+          settledCount: sql<number>`coalesce(sum(case
+            when ${orders.paymentStatus} = 'COD_SETTLED'
+            then 1 else 0 end), 0)`,
+          settledAmount: sql<number>`coalesce(sum(case
+            when ${orders.paymentStatus} = 'COD_SETTLED'
+            then ${codAmountExpr}
+            else 0 end), 0)`,
+          returnedCount: sql<number>`coalesce(sum(case
+            when ${orders.status} = 'COD_RETURNED'
+            then 1 else 0 end), 0)`,
+          returnedShippingLoss: sql<number>`coalesce(sum(case
+            when ${orders.status} = 'COD_RETURNED'
+            then ${orders.shippingCost}
+            else 0 end), 0)`,
+        })
+        .from(orders)
+        .where(and(eq(orders.storeId, storeId), eq(orders.paymentMethod, "COD")))
+        .groupBy(providerExpr)
+        .orderBy(desc(sql`coalesce(sum(case
+          when ${orders.paymentStatus} = 'COD_SETTLED'
+          then ${codAmountExpr}
+          else 0 end), 0)`)),
+    ),
+  ]);
+
+  const overview = overviewRows[0];
+  const pendingCount = Number(overview?.pendingCount ?? 0);
+  const pendingAmount = Number(overview?.pendingAmount ?? 0);
+  const settledTodayCount = Number(overview?.settledTodayCount ?? 0);
+  const settledTodayAmount = Number(overview?.settledTodayAmount ?? 0);
+  const returnedTodayCount = Number(overview?.returnedTodayCount ?? 0);
+  const returnedTodayShippingLoss = Number(overview?.returnedTodayShippingLoss ?? 0);
+  const settledAllCount = Number(overview?.settledAllCount ?? 0);
+  const settledAllAmount = Number(overview?.settledAllAmount ?? 0);
+  const returnedCount = Number(overview?.returnedCount ?? 0);
+  const returnedShippingLoss = Number(overview?.returnedShippingLoss ?? 0);
+
+  const byProvider: CodByProviderRow[] = byProviderRows.map((row) => {
+    const settledAmount = Number(row.settledAmount ?? 0);
+    const returnedShippingLoss = Number(row.returnedShippingLoss ?? 0);
+    return {
+      provider: row.provider,
+      pendingCount: Number(row.pendingCount ?? 0),
+      pendingAmount: Number(row.pendingAmount ?? 0),
+      settledCount: Number(row.settledCount ?? 0),
+      settledAmount,
+      returnedCount: Number(row.returnedCount ?? 0),
+      returnedShippingLoss,
+      netAmount: settledAmount - returnedShippingLoss,
+    };
+  });
+
+  return {
+    pendingCount,
+    pendingAmount,
+    settledTodayCount,
+    settledTodayAmount,
+    returnedTodayCount,
+    returnedTodayShippingLoss,
+    settledAllCount,
+    settledAllAmount,
+    returnedCount,
+    returnedShippingLoss,
+    netAmount: settledAllAmount - returnedShippingLoss,
+    byProvider,
   };
 }
 

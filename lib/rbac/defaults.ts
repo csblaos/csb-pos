@@ -45,6 +45,7 @@ const extraPermissions: PermissionSeed[] = [
   { resource: "orders", action: "mark_paid" },
   { resource: "orders", action: "pack" },
   { resource: "orders", action: "ship" },
+  { resource: "orders", action: "cod_return" },
 ];
 
 const dedupe = <T>(items: T[], key: (item: T) => string) => {
@@ -102,6 +103,7 @@ export const defaultRolePermissions: Record<DefaultRoleName, "ALL" | string[]> =
     "orders.mark_paid",
     "orders.pack",
     "orders.ship",
+    "orders.cod_return",
   ],
   Staff: [
     ...keys("dashboard", ["view"]),

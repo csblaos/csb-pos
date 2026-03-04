@@ -77,6 +77,7 @@ export default async function OrderDetailPage({
         canMarkPaid={isPermissionGranted(permissionKeys, "orders.mark_paid")}
         canPack={isPermissionGranted(permissionKeys, "orders.pack")}
         canShip={isPermissionGranted(permissionKeys, "orders.ship")}
+        canCodReturn={isPermissionGranted(permissionKeys, "orders.cod_return")}
         canCancel={
           isPermissionGranted(permissionKeys, "orders.cancel") ||
           isPermissionGranted(permissionKeys, "orders.delete")

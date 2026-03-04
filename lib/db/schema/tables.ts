@@ -37,6 +37,7 @@ export const orderChannelEnum = ["WALK_IN", "FACEBOOK", "WHATSAPP"] as const;
 export const orderPaymentMethodEnum = [
   "CASH",
   "LAO_QR",
+  "ON_CREDIT",
   "COD",
   "BANK_TRANSFER",
 ] as const;
@@ -61,6 +62,7 @@ export const orderStatusEnum = [
   "PAID",
   "PACKED",
   "SHIPPED",
+  "COD_RETURNED",
   "CANCELLED",
 ] as const;
 export const contactChannelEnum = ["FACEBOOK", "WHATSAPP"] as const;
@@ -686,6 +688,7 @@ export const orders = sqliteTable(
     codAmount: integer("cod_amount").notNull().default(0),
     codFee: integer("cod_fee").notNull().default(0),
     codSettledAt: text("cod_settled_at"),
+    codReturnedAt: text("cod_returned_at"),
     paidAt: text("paid_at"),
     shippedAt: text("shipped_at"),
     createdBy: text("created_by")

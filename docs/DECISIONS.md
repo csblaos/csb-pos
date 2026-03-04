@@ -392,6 +392,36 @@
   - backlog overlay legacy ฝั่ง settings ปิดครบแล้ว และทีมต้องยืนยัน parity ของ UX หลัง refactor ในรอบ regression test
   - การ debug keyboard-aware/scroll-lock/escape-close จะรวมศูนย์มากขึ้นที่คอมโพเนนต์เดียว
 
+## ADR-025: แยกสิทธิ์ COD Return จาก Ship แบบ Strict + Backfill Role อัตโนมัติ
+
+- Date: March 4, 2026
+- Status: Accepted
+- Decision:
+  - เพิ่ม permission ใหม่ `orders.cod_return` สำหรับ action `mark_cod_returned`
+  - บังคับตรวจสิทธิ์ `orders.cod_return` แบบ strict ทั้ง API และหน้า detail (เลิก fallback `orders.ship`)
+  - migration ทำ backfill อัตโนมัติ: role ใดที่มี `orders.ship` จะได้ `orders.cod_return` เพิ่มทันที
+- Reason:
+  - ต้องการแยกสิทธิ์ "จัดส่ง" ออกจาก "รับงานตีกลับ" ให้ควบคุมบทบาทได้ละเอียดขึ้น
+  - ต้องคง continuity ของ role เดิม จึงเลือก backfill ผ่าน migration แทน fallback ใน runtime
+- Consequence:
+  - policy สิทธิ์ชัดเจนขึ้น (ship ไม่เท่ากับ return)
+  - store เดิมใช้งานต่อได้จาก backfill ในชั้นข้อมูล โดยไม่เพิ่มเงื่อนไขพิเศษในโค้ด API
+
+## ADR-026: COD Returned Timestamp เป็นแหล่งจริงของรายงานตีกลับรายวัน
+
+- Date: March 4, 2026
+- Status: Accepted
+- Decision:
+  - เพิ่มคอลัมน์ `orders.cod_returned_at`
+  - ตั้งค่า `cod_returned_at` ตอน action `mark_cod_returned` สำเร็จ
+  - หน้า `/reports` คำนวณ metric รายวันของ COD return จาก `cod_returned_at` โดยตรง
+- Reason:
+  - การนับจาก status อย่างเดียวแยก "วันนี้" ไม่แม่น (ไม่รู้ timestamp ที่เกิด return จริง)
+  - ต้องการตัวเลขรายวันสำหรับควบคุมคุณภาพงาน COD/ขนส่ง
+- Consequence:
+  - รายงาน `ตีกลับวันนี้` และ `ค่าส่งเสียวันนี้` แม่นตามเหตุการณ์จริง
+  - ต้องดูแล migration/backfill ค่าเดิมเพื่อให้ข้อมูลเก่าอ่านได้ต่อเนื่อง
+
 ## Template สำหรับ ADR ใหม่
 
 - Date: YYYY-MM-DD

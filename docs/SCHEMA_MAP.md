@@ -4,8 +4,8 @@
 
 ## Migration Status
 
-- journal entries: `32`
-- latest migration tag: `0032_light_spacker_dave`
+- journal entries: `36`
+- latest migration tag: `0035_zippy_bullseye`
 - latest focus:
   - โครงสร้างสินค้าแบบ Variant (Phase 1):
     - `product_models`
@@ -32,6 +32,7 @@
   - เพิ่ม notification workflow:
     - ตาราง `notification_inbox` (in-app inbox + dedupe key)
     - ตาราง `notification_rules` (mute/snooze policy ต่อ entity)
+  - เพิ่ม `orders.cod_returned_at` สำหรับ timestamp ตอน COD ตีกลับ
 
 ## Table Inventory (High-level)
 
@@ -114,6 +115,9 @@
 - `order_items.order_id -> orders.id`
 - `order_items.product_id -> products.id`
 - `order_items.unit_id -> units.id`
+- ใน `orders` มี field เวลา COD สำคัญ:
+  - `cod_settled_at` (ตอนปิดยอด COD)
+  - `cod_returned_at` (ตอนตีกลับ COD)
 
 ### Shipping
 
@@ -156,7 +160,7 @@
 ### Orders
 
 - channel: `WALK_IN | FACEBOOK | WHATSAPP`
-- payment method: `CASH | LAO_QR | COD | BANK_TRANSFER`
+- payment method: `CASH | LAO_QR | ON_CREDIT | COD | BANK_TRANSFER`
 - payment status:
   - `UNPAID`
   - `PENDING_PROOF`
@@ -169,7 +173,7 @@
   - `REQUESTED`
   - `READY`
   - `FAILED`
-- order status: `DRAFT | PENDING_PAYMENT | READY_FOR_PICKUP | PAID | PACKED | SHIPPED | CANCELLED`
+- order status: `DRAFT | PENDING_PAYMENT | READY_FOR_PICKUP | PAID | PACKED | SHIPPED | COD_RETURNED | CANCELLED`
 
 ### Reliability
 

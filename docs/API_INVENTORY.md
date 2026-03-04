@@ -38,9 +38,9 @@
 | Endpoint | Methods | Access Control | Notes |
 |---|---|---|---|
 | `/api/orders` | `GET` | `Permission:orders.view` | list orders |
-| `/api/orders` | `POST` | `Permission:orders.create` | create order + idempotency (คำนวณ `lineTotal` ตามราคาของหน่วยที่เลือก; รองรับราคาหน่วยแปลงแบบกำหนดเองจากสินค้า; ถ้าไม่ส่ง `customerName` จะ fallback อัตโนมัติเป็น `ลูกค้าหน้าร้าน` หรือ `ลูกค้าออนไลน์` ตาม channel; รองรับ `checkoutFlow` (optional) และถ้าเป็น `PICKUP_LATER` จะตั้งสถานะ `READY_FOR_PICKUP` พร้อมจองสต็อกทันที) |
+| `/api/orders` | `POST` | `Permission:orders.create` | create order + idempotency (คำนวณ `lineTotal` ตามราคาของหน่วยที่เลือก; รองรับราคาหน่วยแปลงแบบกำหนดเองจากสินค้า; ถ้าไม่ส่ง `customerName` จะ fallback อัตโนมัติเป็น `ลูกค้าหน้าร้าน` หรือ `ลูกค้าออนไลน์` ตาม channel; รองรับ `checkoutFlow` (optional) และถ้าเป็น `PICKUP_LATER` จะตั้งสถานะ `READY_FOR_PICKUP` พร้อมจองสต็อกทันที; payment method รองรับ `CASH`,`LAO_QR`,`ON_CREDIT`,`COD`,`BANK_TRANSFER` โดย `COD` ใช้ได้เฉพาะ `ONLINE_DELIVERY`; รองรับฟิลด์ขนส่ง optional ตอนสร้างออเดอร์ออนไลน์ `shippingProvider` และ `shippingCarrier` เพื่อเก็บผู้ให้บริการ/สาขารับฝาก) |
 | `/api/orders/[orderId]` | `GET` | `Permission:orders.view` | order detail |
-| `/api/orders/[orderId]` | `PATCH` | `Permission:orders.view` + internal action checks | submit payment/paid/pack/ship/cancel/update shipping (สถานะ `READY_FOR_PICKUP` รองรับ `submit_payment_slip`/`confirm_paid` และ `cancel` จะปล่อยจองสต็อก) |
+| `/api/orders/[orderId]` | `PATCH` | `Permission:orders.view` + internal action checks | submit payment/paid/pack/ship/cancel/update shipping + `mark_cod_returned` (สถานะ `READY_FOR_PICKUP` รองรับ `submit_payment_slip`/`confirm_paid` และ `cancel` จะปล่อยจองสต็อก; flow COD: `mark_packed` จาก `PENDING_PAYMENT` ได้และตัดสต็อกตอนแพ็ก, `confirm_paid` ใช้ปิดยอด COD หลัง `SHIPPED` แล้วอัปเดต `paymentStatus=COD_SETTLED`, และ `mark_cod_returned` บังคับสิทธิ์ `orders.cod_return` เท่านั้น พร้อมบันทึกเวลา `cod_returned_at` เพื่อรายงานรายวัน) |
 | `/api/orders/[orderId]/send-qr` | `POST` | `Permission:orders.update` | ส่ง QR message (stub/manual mode) |
 | `/api/orders/[orderId]/shipments/label` | `POST` | `Permission:orders.ship` | สร้าง shipping label + idempotency |
 | `/api/orders/[orderId]/shipments/upload-label` | `POST` | `Permission:orders.update` | อัปโหลดรูปบิล/ป้ายจากเครื่องหรือกล้องขึ้น R2 |

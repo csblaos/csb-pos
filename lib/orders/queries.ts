@@ -35,12 +35,13 @@ export type OrderListItem = {
     | "PAID"
     | "PACKED"
     | "SHIPPED"
+    | "COD_RETURNED"
     | "CANCELLED";
   customerName: string | null;
   contactDisplayName: string | null;
   total: number;
   paymentCurrency: "LAK" | "THB" | "USD";
-  paymentMethod: "CASH" | "LAO_QR" | "COD" | "BANK_TRANSFER";
+  paymentMethod: "CASH" | "LAO_QR" | "ON_CREDIT" | "COD" | "BANK_TRANSFER";
   createdAt: string;
   paidAt: string | null;
   shippedAt: string | null;
@@ -72,6 +73,7 @@ export type OrderDetail = {
     | "PAID"
     | "PACKED"
     | "SHIPPED"
+    | "COD_RETURNED"
     | "CANCELLED";
   paymentStatus:
     | "UNPAID"
@@ -93,7 +95,7 @@ export type OrderDetail = {
   shippingFeeCharged: number;
   total: number;
   paymentCurrency: "LAK" | "THB" | "USD";
-  paymentMethod: "CASH" | "LAO_QR" | "COD" | "BANK_TRANSFER";
+  paymentMethod: "CASH" | "LAO_QR" | "ON_CREDIT" | "COD" | "BANK_TRANSFER";
   paymentAccountId: string | null;
   paymentAccountDisplayName: string | null;
   paymentAccountBankName: string | null;
@@ -112,6 +114,7 @@ export type OrderDetail = {
   codAmount: number;
   codFee: number;
   codSettledAt: string | null;
+  codReturnedAt: string | null;
   paidAt: string | null;
   shippedAt: string | null;
   createdBy: string;
@@ -199,7 +202,7 @@ const listFilter = (tab: OrderListTab) => {
   }
 
   if (tab === "SHIPPED") {
-    return eq(orders.status, "SHIPPED");
+    return inArray(orders.status, ["SHIPPED", "COD_RETURNED"]);
   }
 
   return undefined;
@@ -386,6 +389,7 @@ export async function getOrderDetail(storeId: string, orderId: string): Promise<
         codAmount: orders.codAmount,
         codFee: orders.codFee,
         codSettledAt: orders.codSettledAt,
+        codReturnedAt: orders.codReturnedAt,
         paidAt: orders.paidAt,
         shippedAt: orders.shippedAt,
         createdBy: orders.createdBy,
@@ -442,6 +446,7 @@ export async function getOrderDetail(storeId: string, orderId: string): Promise<
         codAmount: sql<number>`0`,
         codFee: sql<number>`0`,
         codSettledAt: sql<string | null>`null`,
+        codReturnedAt: sql<string | null>`null`,
         paidAt: orders.paidAt,
         shippedAt: orders.shippedAt,
         createdBy: orders.createdBy,

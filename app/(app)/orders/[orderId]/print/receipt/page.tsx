@@ -1,12 +1,16 @@
 import { notFound, redirect } from "next/navigation";
 
+import { ReceiptPrintActions } from "@/components/app/receipt-print-actions";
 import { getSession } from "@/lib/auth/session";
 import { currencyLabel, vatModeLabel } from "@/lib/finance/store-financial";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 import { getOrderDetail } from "@/lib/orders/queries";
 
-const paymentMethodLabel = (method: "CASH" | "LAO_QR" | "COD" | "BANK_TRANSFER") => {
+const paymentMethodLabel = (
+  method: "CASH" | "LAO_QR" | "ON_CREDIT" | "COD" | "BANK_TRANSFER",
+) => {
   if (method === "LAO_QR") return "QR โอนเงิน";
+  if (method === "ON_CREDIT") return "ค้างจ่าย";
   if (method === "COD") return "COD";
   if (method === "BANK_TRANSFER") return "โอนเงิน";
   return "เงินสด";
@@ -14,8 +18,10 @@ const paymentMethodLabel = (method: "CASH" | "LAO_QR" | "COD" | "BANK_TRANSFER")
 
 export default async function PrintReceiptPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ orderId: string }>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await getSession();
   if (!session) {
@@ -32,6 +38,14 @@ export default async function PrintReceiptPage({
   }
 
   const { orderId } = await params;
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  const autoPrintParam = resolvedSearchParams?.autoprint;
+  const returnToParam = resolvedSearchParams?.returnTo;
+  const autoPrint =
+    (typeof autoPrintParam === "string" ? autoPrintParam : autoPrintParam?.[0]) === "1";
+  const rawReturnTo =
+    typeof returnToParam === "string" ? returnToParam : (returnToParam?.[0] ?? "");
+  const returnTo = rawReturnTo.startsWith("/") ? rawReturnTo : null;
   const order = await getOrderDetail(session.activeStoreId, orderId);
 
   if (!order) {
@@ -39,76 +53,90 @@ export default async function PrintReceiptPage({
   }
 
   return (
-    <main className="mx-auto w-[80mm] bg-white p-2 text-[12px] leading-tight text-black">
-      <h1 className="text-center text-sm font-semibold">ใบเสร็จรับเงิน</h1>
-      <p className="text-center text-[11px]">เลขที่ {order.orderNo}</p>
-      <p className="mt-2">ลูกค้า: {order.customerName || order.contactDisplayName || "ลูกค้าทั่วไป"}</p>
-      <p>วันที่: {new Date(order.createdAt).toLocaleString("th-TH")}</p>
-      <hr className="my-2 border-dashed" />
+    <>
+      <style>{`
+        @media print {
+          header,
+          nav[aria-label="เมนูหลัก"] {
+            display: none !important;
+          }
+          main {
+            padding: 0 !important;
+          }
+        }
+      `}</style>
+      <main className="mx-auto w-[80mm] bg-white p-2 text-[12px] leading-tight text-black">
+        <h1 className="text-center text-sm font-semibold">ใบเสร็จรับเงิน</h1>
+        <p className="text-center text-[11px]">เลขที่ {order.orderNo}</p>
+        <p className="mt-2">ลูกค้า: {order.customerName || order.contactDisplayName || "ลูกค้าทั่วไป"}</p>
+        <p>วันที่: {new Date(order.createdAt).toLocaleString("th-TH")}</p>
+        <hr className="my-2 border-dashed" />
 
-      <table className="w-full text-[11px]">
-        <thead>
-          <tr>
-            <th className="text-left">รายการ</th>
-            <th className="text-right">จำนวน</th>
-            <th className="text-right">รวม</th>
-          </tr>
-        </thead>
-        <tbody>
-          {order.items.map((item) => (
-            <tr key={item.id}>
-              <td className="py-1">
-                {item.productName}
-                <div className="text-[10px] text-slate-600">{item.productSku}</div>
-              </td>
-              <td className="py-1 text-right">
-                {item.qty} {item.unitCode}
-              </td>
-              <td className="py-1 text-right">
-                {item.lineTotal.toLocaleString("th-TH")}
-              </td>
+        <table className="w-full text-[11px]">
+          <thead>
+            <tr>
+              <th className="text-left">รายการ</th>
+              <th className="text-right">จำนวน</th>
+              <th className="text-right">รวม</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {order.items.map((item) => (
+              <tr key={item.id}>
+                <td className="py-1">
+                  {item.productName}
+                  <div className="text-[10px] text-slate-600">{item.productSku}</div>
+                </td>
+                <td className="py-1 text-right">
+                  {item.qty} {item.unitCode}
+                </td>
+                <td className="py-1 text-right">
+                  {item.lineTotal.toLocaleString("th-TH")}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
 
-      <hr className="my-2 border-dashed" />
+        <hr className="my-2 border-dashed" />
 
-      <div className="space-y-1 text-[11px]">
-        <p className="flex justify-between">
-          <span>ยอดสินค้า</span>
-          <span>{order.subtotal.toLocaleString("th-TH")}</span>
-        </p>
-        <p className="flex justify-between">
-          <span>ส่วนลด</span>
-          <span>{order.discount.toLocaleString("th-TH")}</span>
-        </p>
-        <p className="flex justify-between">
-          <span>VAT</span>
-          <span>
-            {order.vatAmount.toLocaleString("th-TH")} ({vatModeLabel(order.storeVatMode)})
-          </span>
-        </p>
-        <p className="flex justify-between">
-          <span>ค่าส่ง</span>
-          <span>{order.shippingFeeCharged.toLocaleString("th-TH")}</span>
-        </p>
-        <p className="flex justify-between font-semibold">
-          <span>ยอดสุทธิ</span>
-          <span>{order.total.toLocaleString("th-TH")} {order.storeCurrency}</span>
-        </p>
-        <p className="flex justify-between">
-          <span>สกุลชำระ</span>
-          <span>{currencyLabel(order.paymentCurrency)}</span>
-        </p>
-        <p className="flex justify-between">
-          <span>วิธีชำระ</span>
-          <span>{paymentMethodLabel(order.paymentMethod)}</span>
-        </p>
-      </div>
+        <div className="space-y-1 text-[11px]">
+          <p className="flex justify-between">
+            <span>ยอดสินค้า</span>
+            <span>{order.subtotal.toLocaleString("th-TH")}</span>
+          </p>
+          <p className="flex justify-between">
+            <span>ส่วนลด</span>
+            <span>{order.discount.toLocaleString("th-TH")}</span>
+          </p>
+          <p className="flex justify-between">
+            <span>VAT</span>
+            <span>
+              {order.vatAmount.toLocaleString("th-TH")} ({vatModeLabel(order.storeVatMode)})
+            </span>
+          </p>
+          <p className="flex justify-between">
+            <span>ค่าส่ง</span>
+            <span>{order.shippingFeeCharged.toLocaleString("th-TH")}</span>
+          </p>
+          <p className="flex justify-between font-semibold">
+            <span>ยอดสุทธิ</span>
+            <span>{order.total.toLocaleString("th-TH")} {order.storeCurrency}</span>
+          </p>
+          <p className="flex justify-between">
+            <span>สกุลชำระ</span>
+            <span>{currencyLabel(order.paymentCurrency)}</span>
+          </p>
+          <p className="flex justify-between">
+            <span>วิธีชำระ</span>
+            <span>{paymentMethodLabel(order.paymentMethod)}</span>
+          </p>
+        </div>
 
-      <hr className="my-2 border-dashed" />
-      <p className="text-center text-[11px]">ขอบคุณที่ใช้บริการ</p>
-    </main>
+        <hr className="my-2 border-dashed" />
+        <p className="text-center text-[11px]">ขอบคุณที่ใช้บริการ</p>
+        <ReceiptPrintActions autoPrint={autoPrint} returnTo={returnTo} />
+      </main>
+    </>
   );
 }

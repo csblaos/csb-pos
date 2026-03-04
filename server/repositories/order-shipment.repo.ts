@@ -19,6 +19,7 @@ export type OrderForShipmentLabel = {
     | "PAID"
     | "PACKED"
     | "SHIPPED"
+    | "COD_RETURNED"
     | "CANCELLED";
   customerName: string | null;
   customerAddress: string | null;

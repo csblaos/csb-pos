@@ -6,6 +6,47 @@
 
 ## Changed (ล่าสุด)
 
+- ปรับ post-create flow ของหน้า POS (`/orders/new`) ให้แยกตามประเภทออเดอร์:
+  - `Walk-in ทันที` และ `มารับที่ร้านภายหลัง` หลังสร้างสำเร็จจะแสดง success action sheet แทนการเด้งเข้า detail ทันที
+  - action หลักใน sheet คือพิมพ์เอกสาร (`พิมพ์ใบเสร็จ` / `พิมพ์ใบรับสินค้า`) และมีทางเลือก `ดูรายละเอียดออเดอร์` หรือ `ออเดอร์ใหม่ต่อ`
+  - เพิ่ม preview บิลใน success action sheet สำหรับ `Walk-in/Pickup` โดยโหลดข้อมูลออเดอร์จริงจาก `GET /api/orders/[orderId]`
+  - ปุ่มพิมพ์ใน sheet ปรับเป็น hybrid:
+    - Desktop: พิมพ์ผ่าน hidden iframe แบบไม่เปิดแท็บใหม่
+    - Mobile/Tablet: เปิดหน้า `/orders/[orderId]/print/receipt?autoprint=1` ในแท็บเดิมเพื่อ auto print และมีปุ่ม `กลับ POS`
+  - หน้า `/orders/[orderId]/print/receipt` เพิ่ม print CSS ซ่อน `header/bottom nav` ระหว่างพิมพ์ เพื่อกันการติด layout แอปในบิล
+  - `สั่งออนไลน์/จัดส่ง` ยังคงพาไปหน้า order detail ทันทีเหมือนเดิมเพื่อทำงานต่อด้านจัดส่ง
+
+- ปรับ feedback ตอนเพิ่มสินค้าหมดสต็อกในหน้า POS:
+  - การ์ดสินค้า `หมดสต็อก/ติดจอง` ยังกดได้ แต่ระบบจะไม่เพิ่มลงตะกร้า
+  - เมื่อกดจะขึ้น toast error ทันทีว่าเพิ่มไม่ได้ และมี throttle กัน toast ซ้ำรัว
+
+- ปรับ layout ปุ่ม `สร้างออเดอร์` ใน modal checkout หน้า `/orders/new`:
+  - ย้ายปุ่ม submit ไปอยู่ `SlideUpSheet.footer` แทน sticky ในเนื้อหา form
+  - ลดปัญหาพื้นหลังโปร่ง/เห็น card ใต้ปุ่มตอนเลื่อนใน modal และทำให้ safe-area ด้านล่างสม่ำเสมอ
+
+- ปรับ flow ออนไลน์ใน modal checkout ให้รองรับช่วงยังไม่เชื่อม CRM/API ลูกค้า:
+  - ช่องทางออนไลน์เปลี่ยนจาก dropdown เป็นปุ่มแบบ grid (`Facebook`, `WhatsApp`, `อื่นๆ`)
+  - ถ้าเลือก `อื่นๆ` จะมี input `แพลตฟอร์มอื่น (ไม่บังคับ)` สำหรับช่วยกรอกหน้างาน (ยังไม่ผูก schema ช่องทางจริง)
+  - ช่อง `เลือกลูกค้า` เปลี่ยนเป็นไม่บังคับ (`contactId` optional)
+  - ถ้าไม่เลือกจากรายชื่อ ผู้ใช้ยังสร้างออเดอร์ได้โดยกรอกชื่อ/เบอร์เอง
+  - ปรับ UI เป็น section พับ/เปิด (`+ เลือกจากรายชื่อลูกค้า`) เพื่อลดความรกของฟอร์มและเปิดเฉพาะตอนต้องการ
+  - เพิ่มช่อง `เติมข้อมูลลูกค้าแบบเร็ว` สำหรับ paste ข้อความดิบแล้วแยก `ชื่อ/เบอร์/ที่อยู่` อัตโนมัติเบื้องต้น
+  - เพิ่ม section `ข้อมูลขนส่ง` ใน online flow:
+    - เลือก `ผู้ให้บริการขนส่ง` แบบ grid (`Houngaloun`, `Anousith`, `Mixay`, `อื่นๆ`)
+    - ค่าเริ่มต้นเป็นว่าง (ไม่ auto select) และผู้ใช้ต้องเลือกเองก่อนกดสร้างออเดอร์
+    - ถ้าเลือก `อื่นๆ` กรอกชื่อผู้ให้บริการได้แบบอิสระ
+    - เอาช่อง `สาขาที่รับฝาก` ออกจากฟอร์ม checkout online แล้ว (เก็บเฉพาะ provider)
+
+- ปรับ CTA หน้า `/orders` ให้เหลือทางเดียวในการเริ่มขาย:
+  - เอาปุ่ม `สร้างด่วน` ออกจากหน้า manage orders
+  - เปลี่ยนปุ่ม `สร้างออเดอร์` เป็น `เข้าโหมด POS` และพาไป `/orders/new` โดยตรง
+  - ถอด quick-create modal ออกจากหน้า `/orders` เพื่อให้ UX ตัดสินใจเร็วขึ้น (single primary action)
+
+- ปรับ UX `สกุลที่รับชำระในออเดอร์นี้` ใน modal checkout ของ create order:
+  - ถ้าร้านรองรับสกุลเดียว ระบบจะ auto-select ให้และแสดงเป็น read-only (ไม่แสดง dropdown/chip ให้เลือกซ้ำ)
+  - ถ้ารองรับหลายสกุล เปลี่ยนจาก dropdown เป็นปุ่มเลือกแบบ chips เพื่อกดเลือกได้เร็ว
+  - เพิ่ม normalization ในฟอร์มให้ `paymentCurrency` อยู่ในรายการที่รองรับเสมอ (fallback อัตโนมัติเมื่อค่าปัจจุบันไม่ถูกต้อง/หายไป)
+
 - ปรับ UX ตะกร้าใน create order (`/orders` และ `/orders/new`):
   - ปุ่ม `ลบ` ในการ์ดตะกร้าทุกมุมมอง (mobile preview, panel ขวา, cart sheet, และ row editor desktop) ลบได้จนเหลือ `0` รายการแล้ว
   - การ์ดสินค้าในตะกร้า (panel ขวา + cart sheet) แสดงบรรทัด `คงเหลือ ...` ต่อรายการ เพื่อช่วยตัดสินใจตอนปรับจำนวน
@@ -22,7 +63,8 @@
 - ปรับ cart panel ฝั่ง tablet/desktop ใน `/orders/new`:
   - บังคับให้ footer (`ยอดรวม` + ปุ่ม `ถัดไป: ชำระเงิน`) ติดอยู่ด้านล่าง panel ตลอด
   - รายการสินค้าในตะกร้าจะเป็นส่วนที่ scroll ได้เอง เพื่อลดเคสต้องเลื่อนหน้าลงเพื่อกดชำระเงิน
-  - เสริมความเสถียร sticky rail: ตั้ง `md:items-start` ให้ layout grid และคำนวณ `top`/`height` ของ cart rail แบบไดนามิกจากความสูงจริงของ search sticky (`ResizeObserver`) โดยจูนค่าปัจจุบันเป็น `CREATE_ONLY_CART_STICKY_GAP_FALLBACK_PX=11` และ `CREATE_ONLY_CART_STICKY_EXTRA_TOP_PX=11`
+  - แก้ issue summary ตะกร้าไม่อัปเดตตามข้อมูลจริงบางจังหวะ: เปลี่ยนจาก `form.watch` หลักไปใช้ `useWatch` และคำนวณ subtotal/cartQty จาก state ปัจจุบันโดยตรง เพื่อให้ยอดรวม/จำนวนชิ้นอัปเดตทันทีเมื่อแก้ qty/หน่วย/ลบรายการ
+  - เสริมความเสถียร sticky rail: ตั้ง `md:items-start` ให้ layout grid และคำนวณ `top`/`height` ของ cart rail แบบไดนามิกจากความสูงจริงของ search sticky (`ResizeObserver`) โดยจูนค่าปัจจุบันเป็น `CREATE_ONLY_CART_STICKY_GAP_FALLBACK_PX=13` และ `CREATE_ONLY_CART_STICKY_EXTRA_TOP_PX=13`
   - breakpoint sticky ปัจจุบันตั้ง `TABLET_MIN_WIDTH_PX=1200` เท่ากับ `DESKTOP_MIN_WIDTH_PX=1200` แบบ intentional เพื่อให้ tablet/desktop ใช้สูตร sticky เดียวกัน
   - ปุ่มลัด `ดูตะกร้า` และ sticky checkout bar บนมือถือของ `/orders/new` ปรับ `bottom` เป็น `calc(env(safe-area-inset-bottom) + 0.75rem)` เพื่อให้ติดก้นจอจริงและลดช่องว่างลอยด้านล่าง
 
@@ -58,7 +100,7 @@
 
 - ปรับค่าเริ่มต้นฟอร์มสร้างออเดอร์ให้ตะกร้าว่าง:
   - `defaultValues.items` ใน `orders-management.tsx` เปลี่ยนเป็น `[]` (ไม่ preload สินค้าตัวแรกอัตโนมัติ)
-  - มีผลทั้ง `สร้างด่วน` ในหน้า `/orders` และหน้า `/orders/new`
+  - มีผลกับ flow สร้างออเดอร์หน้า `/orders/new`
 
 - เพิ่ม draft persistence ให้หน้า `/orders/new`:
   - บันทึก draft create order (ตะกร้า + checkout fields + checkout flow) ลง `sessionStorage` ระหว่างผู้ใช้กรอกฟอร์ม
@@ -66,7 +108,7 @@
   - ถ้ากดยืนยันออกจากหน้า create order ผ่านปุ่ม back (`กลับรายการออเดอร์`) หรือ logout ระบบจะล้าง draft ทิ้งทันที
 
 - เพิ่มหน้าใหม่ `/orders/new` สำหรับสร้างออเดอร์แบบหน้าเต็ม (full create flow):
-  - หน้า `/orders` ปรับบทบาทเป็น “จัดการออเดอร์” และแยก action เป็น 2 แบบ: `สร้างด่วน` (modal เดิม) กับ `สร้างออเดอร์` (ไป `/orders/new`)
+  - หน้า `/orders` ปรับบทบาทเป็น “จัดการออเดอร์” และใช้ action หลักเดียว `เข้าโหมด POS` (ไป `/orders/new`)
   - `/orders/new` ใช้คอมโพเนนต์/validation/API ชุดเดียวกับ flow เดิม (`POST /api/orders`) เพื่อลด drift
   - `/orders/new` ปรับเป็น POS-style UI: ตัด heading/description ของหน้า create ออก, แถบ `ค้นหา + สแกน`, product card grid, และ sticky cart/checkout action bar บนมือถือ
   - เพิ่มความกว้าง app shell บน desktop จาก `70rem` เป็น `76rem` เพื่อให้หน้า POS/หน้าจัดการข้อมูลมีพื้นที่ใช้งานมากขึ้น
@@ -77,13 +119,26 @@
   - ปรับการ์ดรายการในตะกร้าให้ minimal ทั้ง panel ด้านขวาและ cart sheet: ตัดข้อมูลรอง (SKU/คงเหลือ) และลดขนาดแถวให้โฟกัสที่ `หน่วย + จำนวน +/- + ยอด`
   - แก้ความกว้างช่อง `select หน่วย` ในตะกร้าให้เท่ากันทุกแถว โดย lock ความกว้างคอลัมน์ยอดบรรทัด (ลดอาการ select แกว่งตามจำนวนหลักของราคา)
   - เพิ่ม stock guard ฝั่ง UI ใน create order:
-    - ถ้า `available <= 0` ปุ่มเพิ่มสินค้าจาก product card จะ disabled และแสดงสถานะ `หมดสต็อก/ติดจอง`
+    - ถ้า `available <= 0` product card ยังแสดงสถานะ `หมดสต็อก/ติดจอง` และกดได้ แต่ระบบจะไม่เพิ่มลงตะกร้า พร้อมแจ้ง toast ว่าเพิ่มไม่ได้
     - ปุ่ม `+` ในตะกร้าเพิ่มจำนวนได้ไม่เกิน `available` เท่านั้น (รวมเคสเหลือ 1 ชิ้นเพิ่มได้สูงสุด 1)
   - checkout เพิ่มตัวเลือก `ประเภทออเดอร์` 3 แบบ: `Walk-in ทันที` / `มารับที่ร้านภายหลัง` / `สั่งออนไลน์/จัดส่ง`
   - ฟอร์ม checkout แสดง field แบบ dynamic ตามประเภทออเดอร์ (เช่น ช่องทาง+ลูกค้า+ที่อยู่จะแสดงเฉพาะ flow ออนไลน์)
-  - validation ฝั่ง client ตาม flow: `มารับที่ร้านภายหลัง` ต้องมีเบอร์โทร, `สั่งออนไลน์/จัดส่ง` ต้องมีที่อยู่จัดส่ง และเปิด `COD` เฉพาะ flow ออนไลน์
+  - โหมด `Walk-in ทันที` ซ่อนฟิลด์ `ชื่อลูกค้า`/`เบอร์โทร` เพื่อให้ flow หน้าร้านเร็วขึ้น และจะ clear ค่าลูกค้าเดิมอัตโนมัติเมื่อผู้ใช้สลับกลับมา Walk-in
+  - โหมด `มารับที่ร้านภายหลัง` พับฟิลด์ `ชื่อลูกค้า`/`เบอร์โทร` เป็นค่าเริ่มต้น แล้วค่อยเปิดกรอกด้วยปุ่ม `+ เพิ่มข้อมูลผู้รับ (ไม่บังคับ)`; ถ้ายังพับอยู่จะแสดงสถานะสรุปข้อมูลผู้รับแทน
+  - ดีไซน์ `ส่วนลด` ใน checkout เปลี่ยนเป็น panel เดียว: เปิด/ปิดส่วนลด, preset 5%/10%/20%, สลับกรอก `%` หรือ `จำนวนเงิน`, และแสดงส่วนลดที่คิดจริงแบบ real-time โดยไม่เปลี่ยน contract ค่า `discount` เดิม; แถว `จำนวนเงิน/%/preset` รวมเป็นบรรทัดเดียวและรองรับ scroll แนวนอนบนจอแคบ พร้อมเส้นคั่นระหว่างกลุ่มโหมดกับ preset เพื่อแยกความหมายชัดขึ้น
+  - ดีไซน์ `ค่าขนส่ง` ใน checkout ออนไลน์ปรับเป็น panel พับ/เปิดแบบเดียวกับส่วนลดและ default ปิด; เมื่อกดปิดจะรีเซ็ต `ค่าส่งที่เรียกเก็บ` และ `ต้นทุนค่าส่ง` กลับเป็น `0`
+  - ปรับ layout desktop ของ checkout ออนไลน์ให้ `ส่วนลด` และ `ค่าขนส่ง` อยู่บรรทัดเดียวแบบ 2 คอลัมน์เท่ากัน (1:1)
+  - ดีไซน์ `วิธีรับชำระ` ใน checkout เปลี่ยนจาก dropdown เป็นปุ่มเลือกแบบ chips: หน้าร้าน/รับที่ร้าน = `เงินสด`, `QR`, `ค้างจ่าย`; ออนไลน์ = `เงินสด`, `QR`, `ค้างจ่าย`, `COD` และเพิ่ม enum ใหม่ `ON_CREDIT` สำหรับค้างจ่าย
+  - validation ฝั่ง client ตาม flow: `Walk-in ทันที` และ `มารับที่ร้านภายหลัง` ไม่บังคับชื่อ/เบอร์ (แนะนำให้กรอกอย่างน้อย 1 อย่างถ้าทราบ), ส่วน `สั่งออนไลน์/จัดส่ง` ยังบังคับเบอร์โทร+ที่อยู่จัดส่ง และเปิด `COD` เฉพาะ flow ออนไลน์
   - ฝั่ง API `POST /api/orders` รองรับ `checkoutFlow` (optional) และถ้าเป็น `PICKUP_LATER` จะสร้างออเดอร์เป็นสถานะ `READY_FOR_PICKUP` พร้อมบันทึก movement `RESERVE` ทันที
   - ฝั่ง API `PATCH /api/orders/[orderId]` เปิดให้ `confirm_paid`/`submit_payment_slip` ใช้ได้กับสถานะ `READY_FOR_PICKUP` และการ `cancel` จากสถานะนี้จะปล่อยจองสต็อก (`RELEASE`) กลับ
+  - อัปเดต flow COD ในหน้า detail/route:
+    - `mark_packed` รองรับ COD จาก `PENDING_PAYMENT` และจะลง movement `RELEASE+OUT` ตอนแพ็ก (ไม่ต้องรอ paid)
+    - `confirm_paid` สำหรับ COD ใช้ปิดยอดหลัง `SHIPPED` เท่านั้น โดยอัปเดต `paymentStatus=COD_SETTLED` + `codSettledAt`
+    - เพิ่ม action `mark_cod_returned` สำหรับ COD ตีกลับจาก `SHIPPED + COD_PENDING_SETTLEMENT` เพื่อคืนสต็อก (`RETURN`) และเปลี่ยนสถานะเป็น `COD_RETURNED` (`paymentStatus=FAILED`)
+    - เพิ่ม permission ใหม่ `orders.cod_return` สำหรับ action `mark_cod_returned` และบังคับใช้งานแบบ strict (เลิก fallback `orders.ship`)
+    - เพิ่มคอลัมน์ `orders.cod_returned_at` และเซ็ตตอนตีกลับสำเร็จ
+  - หน้า `/reports` เพิ่ม section `สรุป COD`: ค้างเก็บเงิน, ปิดยอดวันนี้, ตีกลับวันนี้, ตีกลับสะสม, COD สุทธิสะสม และแยกผลตามผู้ให้บริการขนส่ง (daily return ใช้ `cod_returned_at`)
   - ผู้ใช้เลือกสินค้าในหน้า POS ก่อน แล้วกด `ชำระเงิน / กรอกรายละเอียด` เพื่อเปิด Checkout sheet (ลูกค้า/ชำระเงิน/ที่อยู่)
   - sticky action bar บนมือถือปรับเป็น summary + ปุ่มลัด `แก้ตะกร้า` และปุ่มหลักเดียว `ถัดไป: ชำระเงิน` เพื่อให้ flow checkout ง่ายขึ้น
   - รีดีไซน์ `/orders/new` รอบล่าสุดเป็น `Scan-First POS`:

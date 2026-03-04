@@ -5,6 +5,7 @@ export const orderPaymentCurrencySchema = z.enum(["LAK", "THB", "USD"]);
 export const orderPaymentMethodSchema = z.enum([
   "CASH",
   "LAO_QR",
+  "ON_CREDIT",
   "COD",
   "BANK_TRANSFER",
 ]);
@@ -30,6 +31,8 @@ export const createOrderSchema = z
     customerName: z.string().trim().max(120).optional().or(z.literal("")),
     customerPhone: z.string().trim().max(30).optional().or(z.literal("")),
     customerAddress: z.string().trim().max(500).optional().or(z.literal("")),
+    shippingProvider: z.string().trim().max(120).optional().or(z.literal("")),
+    shippingCarrier: z.string().trim().max(160).optional().or(z.literal("")),
     discount: z.coerce
       .number({ message: "กรอกส่วนลดให้ถูกต้อง" })
       .int("ส่วนลดต้องเป็นจำนวนเต็ม")
@@ -49,14 +52,6 @@ export const createOrderSchema = z
     items: z.array(createOrderItemSchema).min(1, "กรุณาเพิ่มสินค้าอย่างน้อย 1 รายการ").max(100),
   })
   .superRefine((payload, ctx) => {
-    if (payload.channel !== "WALK_IN" && !payload.contactId) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["contactId"],
-        message: "กรุณาเลือกลูกค้าจากช่องทางที่เลือก",
-      });
-    }
-
     if (
       (payload.paymentMethod === "LAO_QR" || payload.paymentMethod === "BANK_TRANSFER") &&
       !payload.paymentAccountId
@@ -76,6 +71,14 @@ export const createOrderSchema = z
         code: z.ZodIssueCode.custom,
         path: ["channel"],
         message: "ออเดอร์จัดส่งต้องเลือกช่องทางออนไลน์",
+      });
+    }
+
+    if (payload.paymentMethod === "COD" && payload.checkoutFlow !== "ONLINE_DELIVERY") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["paymentMethod"],
+        message: "COD ใช้ได้เฉพาะออเดอร์สั่งออนไลน์/จัดส่ง",
       });
     }
 
@@ -100,6 +103,7 @@ export const updateOrderSchema = z.discriminatedUnion("action", [
   }),
   z.object({ action: z.literal("mark_packed") }),
   z.object({ action: z.literal("mark_shipped") }),
+  z.object({ action: z.literal("mark_cod_returned") }),
   z.object({ action: z.literal("cancel") }),
   z.object({
     action: z.literal("update_shipping"),

@@ -45,6 +45,7 @@ const ensureActionPermission = async (
     | "confirm_paid"
     | "mark_packed"
     | "mark_shipped"
+    | "mark_cod_returned"
     | "cancel"
     | "update_shipping",
 ) => {
@@ -83,6 +84,15 @@ const ensureActionPermission = async (
     const allowed = await hasPermission({ userId }, storeId, "orders.ship");
     if (!allowed) {
       throw new RBACError(403, "ไม่มีสิทธิ์ยืนยันการจัดส่ง");
+    }
+
+    return;
+  }
+
+  if (action === "mark_cod_returned") {
+    const allowed = await hasPermission({ userId }, storeId, "orders.cod_return");
+    if (!allowed) {
+      throw new RBACError(403, "ไม่มีสิทธิ์บันทึก COD ตีกลับ");
     }
 
     return;
@@ -558,14 +568,22 @@ export async function PATCH(
     }
 
     if (action === "confirm_paid") {
-      if (order.status !== "PENDING_PAYMENT" && order.status !== "READY_FOR_PICKUP") {
+      const isStandardPaymentConfirm =
+        order.paymentMethod !== "COD" &&
+        (order.status === "PENDING_PAYMENT" || order.status === "READY_FOR_PICKUP");
+      const isCodSettlementAfterShipped =
+        order.paymentMethod === "COD" &&
+        order.status === "SHIPPED" &&
+        order.paymentStatus === "COD_PENDING_SETTLEMENT";
+
+      if (!isStandardPaymentConfirm && !isCodSettlementAfterShipped) {
         return failAction("INVALID_STATUS", "ออเดอร์นี้ยังไม่พร้อมยืนยันชำระ", 400, {
           status: order.status,
           orderNo: order.orderNo,
         });
       }
 
-      if (order.paymentMethod === "LAO_QR") {
+      if (!isCodSettlementAfterShipped && order.paymentMethod === "LAO_QR") {
         const paymentPolicy = await getGlobalPaymentPolicy();
         if (paymentPolicy.requireSlipForLaoQr && !order.paymentSlipUrl) {
           return failAction(
@@ -581,41 +599,54 @@ export async function PATCH(
       }
 
       await db.transaction(async (tx) => {
-        if (orderItems.length > 0) {
-          await tx.insert(inventoryMovements).values(
-            orderItems.flatMap((item) => [
-              {
-                storeId,
-                productId: item.productId,
-                type: "RELEASE" as const,
-                qtyBase: item.qtyBase,
-                refType: "ORDER" as const,
-                refId: order.id,
-                note: `ปล่อยจองสต็อกเมื่อชำระเงิน ${order.orderNo}`,
-                createdBy: session.userId,
-              },
-              {
-                storeId,
-                productId: item.productId,
-                type: "OUT" as const,
-                qtyBase: item.qtyBase,
-                refType: "ORDER" as const,
-                refId: order.id,
-                note: `ตัดสต็อกเมื่อชำระเงิน ${order.orderNo}`,
-                createdBy: session.userId,
-              },
-            ]),
-          );
-        }
+        if (isCodSettlementAfterShipped) {
+          const now = nowIso();
+          await tx
+            .update(orders)
+            .set({
+              paymentStatus: "COD_SETTLED",
+              codSettledAt: now,
+              paidAt: order.paidAt ?? now,
+              codAmount: order.codAmount > 0 ? order.codAmount : order.total,
+            })
+            .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
+        } else {
+          if (orderItems.length > 0) {
+            await tx.insert(inventoryMovements).values(
+              orderItems.flatMap((item) => [
+                {
+                  storeId,
+                  productId: item.productId,
+                  type: "RELEASE" as const,
+                  qtyBase: item.qtyBase,
+                  refType: "ORDER" as const,
+                  refId: order.id,
+                  note: `ปล่อยจองสต็อกเมื่อชำระเงิน ${order.orderNo}`,
+                  createdBy: session.userId,
+                },
+                {
+                  storeId,
+                  productId: item.productId,
+                  type: "OUT" as const,
+                  qtyBase: item.qtyBase,
+                  refType: "ORDER" as const,
+                  refId: order.id,
+                  note: `ตัดสต็อกเมื่อชำระเงิน ${order.orderNo}`,
+                  createdBy: session.userId,
+                },
+              ]),
+            );
+          }
 
-        await tx
-          .update(orders)
-          .set({
-            status: "PAID",
-            paymentStatus: "PAID",
-            paidAt: nowIso(),
-          })
-          .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
+          await tx
+            .update(orders)
+            .set({
+              status: "PAID",
+              paymentStatus: "PAID",
+              paidAt: nowIso(),
+            })
+            .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
+        }
 
         await tx.insert(auditEvents).values(
           buildAuditEventValues({
@@ -630,8 +661,10 @@ export async function PATCH(
             metadata: {
               orderNo: order.orderNo,
               fromStatus: order.status,
-              toStatus: "PAID",
-              stockOutItems: orderItems.length,
+              toStatus: isCodSettlementAfterShipped ? order.status : "PAID",
+              fromPaymentStatus: order.paymentStatus,
+              toPaymentStatus: isCodSettlementAfterShipped ? "COD_SETTLED" : "PAID",
+              stockOutItems: isCodSettlementAfterShipped ? 0 : orderItems.length,
             },
             request,
           }),
@@ -651,7 +684,13 @@ export async function PATCH(
     }
 
     if (action === "mark_packed") {
-      if (order.status !== "PAID") {
+      const canPackFromPaid = order.status === "PAID";
+      const canPackCodFromPending =
+        order.paymentMethod === "COD" &&
+        order.status === "PENDING_PAYMENT" &&
+        order.paymentStatus === "COD_PENDING_SETTLEMENT";
+
+      if (!canPackFromPaid && !canPackCodFromPending) {
         return failAction("INVALID_STATUS", "ออเดอร์นี้ยังไม่สามารถจัดของได้", 400, {
           status: order.status,
           orderNo: order.orderNo,
@@ -659,6 +698,33 @@ export async function PATCH(
       }
 
       await db.transaction(async (tx) => {
+        if (canPackCodFromPending && orderItems.length > 0) {
+          await tx.insert(inventoryMovements).values(
+            orderItems.flatMap((item) => [
+              {
+                storeId,
+                productId: item.productId,
+                type: "RELEASE" as const,
+                qtyBase: item.qtyBase,
+                refType: "ORDER" as const,
+                refId: order.id,
+                note: `ปล่อยจองสต็อกเมื่อแพ็ก COD ${order.orderNo}`,
+                createdBy: session.userId,
+              },
+              {
+                storeId,
+                productId: item.productId,
+                type: "OUT" as const,
+                qtyBase: item.qtyBase,
+                refType: "ORDER" as const,
+                refId: order.id,
+                note: `ตัดสต็อกเมื่อแพ็ก COD ${order.orderNo}`,
+                createdBy: session.userId,
+              },
+            ]),
+          );
+        }
+
         await tx
           .update(orders)
           .set({ status: "PACKED" })
@@ -676,8 +742,9 @@ export async function PATCH(
             entityId: order.id,
             metadata: {
               orderNo: order.orderNo,
-              fromStatus: "PAID",
+              fromStatus: order.status,
               toStatus: "PACKED",
+              stockOutItems: canPackCodFromPending ? orderItems.length : 0,
             },
             request,
           }),
@@ -727,6 +794,84 @@ export async function PATCH(
               orderNo: order.orderNo,
               fromStatus: "PACKED",
               toStatus: "SHIPPED",
+            },
+            request,
+          }),
+        );
+
+        if (idempotencyRecordId) {
+          await markIdempotencySucceeded({
+            recordId: idempotencyRecordId,
+            statusCode: 200,
+            body: { ok: true },
+            tx,
+          });
+        }
+      });
+      await invalidateOrderCaches(storeId);
+      return NextResponse.json({ ok: true });
+    }
+
+    if (action === "mark_cod_returned") {
+      if (order.paymentMethod !== "COD") {
+        return failAction("INVALID_PAYMENT_METHOD", "ออเดอร์นี้ไม่ใช่ COD", 400, {
+          paymentMethod: order.paymentMethod,
+          orderNo: order.orderNo,
+        });
+      }
+
+      if (order.status !== "SHIPPED" || order.paymentStatus !== "COD_PENDING_SETTLEMENT") {
+        return failAction("INVALID_STATUS", "ออเดอร์นี้ยังไม่อยู่ในสถานะ COD ที่ตีกลับได้", 400, {
+          status: order.status,
+          paymentStatus: order.paymentStatus,
+          orderNo: order.orderNo,
+        });
+      }
+
+      await db.transaction(async (tx) => {
+        if (orderItems.length > 0) {
+          await tx.insert(inventoryMovements).values(
+            orderItems.map((item) => ({
+              storeId,
+              productId: item.productId,
+              type: "RETURN" as const,
+              qtyBase: item.qtyBase,
+              refType: "RETURN" as const,
+              refId: order.id,
+              note: `รับสินค้าตีกลับ COD ${order.orderNo}`,
+              createdBy: session.userId,
+            })),
+          );
+        }
+
+        await tx
+          .update(orders)
+          .set({
+            status: "COD_RETURNED",
+            paymentStatus: "FAILED",
+            codAmount: 0,
+            codSettledAt: null,
+            codReturnedAt: nowIso(),
+          })
+          .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
+
+        await tx.insert(auditEvents).values(
+          buildAuditEventValues({
+            scope: "STORE",
+            storeId,
+            actorUserId: session.userId,
+            actorName: session.displayName,
+            actorRole: session.activeRoleName,
+            action: "order.mark_cod_returned",
+            entityType: "order",
+            entityId: order.id,
+            metadata: {
+              orderNo: order.orderNo,
+              fromStatus: "SHIPPED",
+              toStatus: "COD_RETURNED",
+              fromPaymentStatus: order.paymentStatus,
+              toPaymentStatus: "FAILED",
+              stockReturnItems: orderItems.length,
             },
             request,
           }),

@@ -12,11 +12,13 @@ export type NewOrderDraftPayload = {
     customerName: string;
     customerPhone: string;
     customerAddress: string;
+    shippingProvider: string;
+    shippingCarrier: string;
     discount: number;
     shippingFeeCharged: number;
     shippingCost: number;
     paymentCurrency: "LAK" | "THB" | "USD";
-    paymentMethod: "CASH" | "LAO_QR" | "COD" | "BANK_TRANSFER";
+    paymentMethod: "CASH" | "LAO_QR" | "ON_CREDIT" | "COD" | "BANK_TRANSFER";
     paymentAccountId: string;
     items: Array<{
       productId: string;
@@ -34,7 +36,7 @@ type StoredNewOrderDraft = {
 
 const allowedChannels = new Set(["WALK_IN", "FACEBOOK", "WHATSAPP"]);
 const allowedPaymentCurrencies = new Set(["LAK", "THB", "USD"]);
-const allowedPaymentMethods = new Set(["CASH", "LAO_QR", "COD", "BANK_TRANSFER"]);
+const allowedPaymentMethods = new Set(["CASH", "LAO_QR", "ON_CREDIT", "COD", "BANK_TRANSFER"]);
 const allowedCheckoutFlows = new Set(["WALK_IN_NOW", "PICKUP_LATER", "ONLINE_DELIVERY"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -100,11 +102,18 @@ function parseDraftPayload(value: unknown): NewOrderDraftPayload | null {
       customerName: normalizeString(formRaw.customerName),
       customerPhone: normalizeString(formRaw.customerPhone),
       customerAddress: normalizeString(formRaw.customerAddress),
+      shippingProvider: normalizeString(formRaw.shippingProvider),
+      shippingCarrier: normalizeString(formRaw.shippingCarrier),
       discount: normalizeInteger(formRaw.discount),
       shippingFeeCharged: normalizeInteger(formRaw.shippingFeeCharged),
       shippingCost: normalizeInteger(formRaw.shippingCost),
       paymentCurrency: paymentCurrencyRaw as "LAK" | "THB" | "USD",
-      paymentMethod: paymentMethodRaw as "CASH" | "LAO_QR" | "COD" | "BANK_TRANSFER",
+      paymentMethod: paymentMethodRaw as
+        | "CASH"
+        | "LAO_QR"
+        | "ON_CREDIT"
+        | "COD"
+        | "BANK_TRANSFER",
       paymentAccountId: normalizeString(formRaw.paymentAccountId),
       items: normalizedItems,
     },

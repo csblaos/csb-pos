@@ -184,6 +184,11 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     console.info("[db:repair] added column orders.cod_settled_at");
   }
 
+  if (!(await columnExists("orders", "cod_returned_at"))) {
+    await client.execute("alter table `orders` add `cod_returned_at` text");
+    console.info("[db:repair] added column orders.cod_returned_at");
+  }
+
   await client.execute(`
     update \`orders\`
     set \`payment_status\` = case
@@ -217,6 +222,22 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     "create index if not exists `orders_store_shipping_label_status_updated_idx` on `orders` (`store_id`,`shipping_label_status`,`created_at`)",
   );
   console.info("[db:repair] ensured orders indexes from migration 0002 and payment flow");
+
+  if ((await tableExists("permissions")) && (await tableExists("role_permissions"))) {
+    await client.execute(`
+      INSERT OR IGNORE INTO \`permissions\` (\`id\`, \`key\`, \`resource\`, \`action\`)
+      VALUES ('perm_orders_cod_return', 'orders.cod_return', 'orders', 'cod_return')
+    `);
+
+    await client.execute(`
+      INSERT OR IGNORE INTO \`role_permissions\` (\`role_id\`, \`permission_id\`)
+      SELECT rp.\`role_id\`, 'perm_orders_cod_return'
+      FROM \`role_permissions\` rp
+      WHERE rp.\`permission_id\` = 'perm_orders_ship'
+    `);
+
+    console.info("[db:repair] ensured orders.cod_return permission and backfilled from orders.ship");
+  }
 
   if (!(await columnExists("users", "session_limit"))) {
     await client.execute("alter table `users` add `session_limit` integer");

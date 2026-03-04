@@ -24,6 +24,7 @@ type OrderDetailViewProps = {
   canMarkPaid: boolean;
   canPack: boolean;
   canShip: boolean;
+  canCodReturn: boolean;
   canCancel: boolean;
 };
 
@@ -34,6 +35,7 @@ const statusLabel: Record<OrderDetail["status"], string> = {
   PAID: "ชำระแล้ว",
   PACKED: "แพ็กแล้ว",
   SHIPPED: "จัดส่งแล้ว",
+  COD_RETURNED: "COD ตีกลับ",
   CANCELLED: "ยกเลิก",
 };
 
@@ -46,6 +48,7 @@ const channelLabel: Record<OrderDetail["channel"], string> = {
 const paymentMethodLabel: Record<OrderDetail["paymentMethod"], string> = {
   CASH: "เงินสด",
   LAO_QR: "QR โอนเงิน",
+  ON_CREDIT: "ค้างจ่าย",
   COD: "COD",
   BANK_TRANSFER: "โอนเงิน",
 };
@@ -73,6 +76,7 @@ export function OrderDetailView({
   canMarkPaid,
   canPack,
   canShip,
+  canCodReturn,
   canCancel,
 }: OrderDetailViewProps) {
   const router = useRouter();
@@ -92,13 +96,25 @@ export function OrderDetailView({
 
   const canConfirmPaid =
     canMarkPaid &&
-    (order.status === "PENDING_PAYMENT" || order.status === "READY_FOR_PICKUP");
+    (order.paymentMethod === "COD"
+      ? order.status === "SHIPPED" && order.paymentStatus === "COD_PENDING_SETTLEMENT"
+      : order.status === "PENDING_PAYMENT" || order.status === "READY_FOR_PICKUP");
   const canSubmitSlip =
     canUpdate &&
     (order.status === "PENDING_PAYMENT" || order.status === "READY_FOR_PICKUP") &&
     order.paymentMethod === "LAO_QR";
-  const canMarkPacked = canPack && order.status === "PAID";
+  const canMarkPacked =
+    canPack &&
+    (order.status === "PAID" ||
+      (order.paymentMethod === "COD" &&
+        order.status === "PENDING_PAYMENT" &&
+        order.paymentStatus === "COD_PENDING_SETTLEMENT"));
   const canMarkShipped = canShip && order.status === "PACKED";
+  const canMarkCodReturned =
+    canCodReturn &&
+    order.paymentMethod === "COD" &&
+    order.status === "SHIPPED" &&
+    order.paymentStatus === "COD_PENDING_SETTLEMENT";
   const canOrderCancel =
     canCancel &&
     (order.status === "DRAFT" ||
@@ -113,6 +129,23 @@ export function OrderDetailView({
     canShip &&
     (order.status === "PACKED" || order.status === "SHIPPED") &&
     (Boolean(trackingNo.trim()) || Boolean(shippingLabelUrl.trim()));
+  const isCodPendingAfterShipped =
+    order.paymentMethod === "COD" &&
+    order.status === "SHIPPED" &&
+    order.paymentStatus === "COD_PENDING_SETTLEMENT";
+  const codCollectedAmount =
+    order.paymentMethod === "COD" && order.paymentStatus === "COD_SETTLED"
+      ? (order.codAmount > 0 ? order.codAmount : order.total)
+      : 0;
+  const codShippingMargin = order.shippingFeeCharged - order.shippingCost;
+  const codNetOutcome =
+    order.paymentMethod === "COD"
+      ? order.paymentStatus === "COD_SETTLED"
+        ? codCollectedAmount - order.shippingCost
+        : order.status === "COD_RETURNED" || isCodPendingAfterShipped
+          ? -order.shippingCost
+          : 0
+      : 0;
 
   const shippingCostNumber = useMemo(() => Number(shippingCost || "0"), [shippingCost]);
   const shippingMessageTemplate = useMemo(() => {
@@ -455,6 +488,15 @@ export function OrderDetailView({
               สถานะสลิป: {order.paymentSlipUrl ? "แนบแล้ว (รอตรวจสอบ)" : "ยังไม่แนบ"}
             </p>
           ) : null}
+          {order.paymentMethod === "COD" ? (
+            <div className="mt-2 rounded-md border border-slate-200 bg-white p-2 text-xs text-slate-600">
+              <p>ยอด COD ที่เก็บได้: {codCollectedAmount.toLocaleString("th-TH")} {order.storeCurrency}</p>
+              <p>ส่วนต่างค่าส่ง: {codShippingMargin.toLocaleString("th-TH")} {order.storeCurrency}</p>
+              <p className={codNetOutcome >= 0 ? "text-emerald-700" : "text-rose-700"}>
+                ผลลัพธ์ COD สุทธิ: {codNetOutcome.toLocaleString("th-TH")} {order.storeCurrency}
+              </p>
+            </div>
+          ) : null}
         </div>
       </article>
 
@@ -747,10 +789,20 @@ export function OrderDetailView({
       <article className="grid grid-cols-2 gap-2 rounded-xl border bg-white p-4 shadow-sm">
         <Button
           className="h-10"
-          onClick={() => runPatchAction({ action: "confirm_paid" }, "confirm-paid", "ยืนยันชำระแล้ว")}
+          onClick={() =>
+            runPatchAction(
+              { action: "confirm_paid" },
+              "confirm-paid",
+              isCodPendingAfterShipped ? "ปิดยอด COD แล้ว" : "ยืนยันชำระแล้ว",
+            )
+          }
           disabled={!canConfirmPaid || loadingKey !== null}
         >
-          {loadingKey === "confirm-paid" ? "กำลังบันทึก..." : "ยืนยันรับชำระ"}
+          {loadingKey === "confirm-paid"
+            ? "กำลังบันทึก..."
+            : isCodPendingAfterShipped
+              ? "ยืนยันรับเงินปลายทาง (COD)"
+              : "ยืนยันรับชำระ"}
         </Button>
 
         <Button
@@ -770,9 +822,23 @@ export function OrderDetailView({
         </Button>
 
         <Button
+          className="h-10 bg-orange-600 text-white hover:bg-orange-700"
+          onClick={() =>
+            runPatchAction(
+              { action: "mark_cod_returned" },
+              "mark-cod-returned",
+              "บันทึกตีกลับเข้าร้านแล้ว",
+            )
+          }
+          disabled={!canMarkCodReturned || loadingKey !== null}
+        >
+          {loadingKey === "mark-cod-returned" ? "กำลังบันทึก..." : "ตีกลับเข้าร้าน (COD)"}
+        </Button>
+
+        <Button
           className="h-10 bg-rose-600 text-white hover:bg-rose-700"
           onClick={() => runPatchAction({ action: "cancel" }, "cancel", "ยกเลิกออเดอร์แล้ว")}
-          disabled={!canOrderCancel || loadingKey !== null}
+          disabled={!canOrderCancel || canMarkCodReturned || loadingKey !== null}
         >
           {loadingKey === "cancel" ? "กำลังบันทึก..." : "Cancel"}
         </Button>

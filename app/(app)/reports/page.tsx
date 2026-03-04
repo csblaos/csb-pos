@@ -46,6 +46,7 @@ export default async function ReportsPage() {
     topProducts,
     salesByChannel,
     grossProfit,
+    codOverview,
     purchaseFx,
     purchaseApAging,
   } =
@@ -98,6 +99,58 @@ export default async function ReportsPage() {
             ส่วนต่างเทียบแบบรับรู้จริง: {fmtSigned(grossProfit.grossProfitDeltaVsCurrentCost)} {storeCurrency}
           </p>
         </div>
+      </article>
+
+      <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
+        <h2 className="text-sm font-semibold">สรุป COD</h2>
+        <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
+          <p>ค้างเก็บเงิน: {codOverview.pendingCount.toLocaleString("th-TH")} ออเดอร์</p>
+          <p>ยอดค้างเก็บ: {codOverview.pendingAmount.toLocaleString("th-TH")} {storeCurrency}</p>
+          <p>ปิดยอดวันนี้: {codOverview.settledTodayCount.toLocaleString("th-TH")} ออเดอร์</p>
+          <p>รับเงินวันนี้: {codOverview.settledTodayAmount.toLocaleString("th-TH")} {storeCurrency}</p>
+          <p>ตีกลับวันนี้: {codOverview.returnedTodayCount.toLocaleString("th-TH")} ออเดอร์</p>
+          <p>ค่าส่งเสียวันนี้: {codOverview.returnedTodayShippingLoss.toLocaleString("th-TH")} {storeCurrency}</p>
+        </div>
+        <p className="text-sm">
+          ยอด COD ปิดแล้วสะสม: {codOverview.settledAllAmount.toLocaleString("th-TH")} {storeCurrency}
+          {" · "}
+          {codOverview.settledAllCount.toLocaleString("th-TH")} ออเดอร์
+        </p>
+        <p className="text-sm">
+          ตีกลับสะสม: {codOverview.returnedCount.toLocaleString("th-TH")} ออเดอร์
+          {" · "}
+          ขาดทุนค่าส่งสะสม: {codOverview.returnedShippingLoss.toLocaleString("th-TH")} {storeCurrency}
+        </p>
+        <p className="text-sm font-semibold">
+          COD สุทธิสะสม (รับเงิน - ค่าส่งตีกลับ): {codOverview.netAmount.toLocaleString("th-TH")} {storeCurrency}
+        </p>
+        {codOverview.byProvider.length > 0 ? (
+          <div className="space-y-2 pt-1">
+            <p className="text-xs text-muted-foreground">แยกตามขนส่ง (สะสมตามข้อมูลในระบบ)</p>
+            {codOverview.byProvider.slice(0, 8).map((row) => (
+              <div key={row.provider} className="rounded-lg border p-2 text-xs text-slate-700">
+                <p className="font-medium text-slate-900">{row.provider}</p>
+                <p>
+                  ค้าง {row.pendingCount.toLocaleString("th-TH")} ออเดอร์ ·{" "}
+                  {row.pendingAmount.toLocaleString("th-TH")} {storeCurrency}
+                </p>
+                <p>
+                  ปิดยอดแล้ว {row.settledCount.toLocaleString("th-TH")} ออเดอร์ ·{" "}
+                  {row.settledAmount.toLocaleString("th-TH")} {storeCurrency}
+                </p>
+                <p>
+                  ตีกลับ {row.returnedCount.toLocaleString("th-TH")} ออเดอร์ · ขาดทุนค่าส่ง{" "}
+                  {row.returnedShippingLoss.toLocaleString("th-TH")} {storeCurrency}
+                </p>
+                <p className="font-medium">
+                  COD สุทธิ: {row.netAmount.toLocaleString("th-TH")} {storeCurrency}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">ยังไม่มีข้อมูล COD</p>
+        )}
       </article>
 
       <article className="space-y-2 rounded-xl border bg-white p-4 shadow-sm">
