@@ -16,6 +16,7 @@ import {
   fbConnections,
   rolePermissions,
   roles,
+  shippingProviders,
   storeMembers,
   storeBranches,
   stores,
@@ -31,6 +32,7 @@ import {
 } from "@/lib/rbac/defaults";
 import { ensurePermissionCatalog } from "@/lib/rbac/catalog";
 import { isR2Configured, uploadStoreLogoToR2 } from "@/lib/storage/r2";
+import { DEFAULT_SHIPPING_PROVIDER_SEEDS } from "@/lib/shipping/provider-master";
 import { getGlobalStoreLogoPolicy } from "@/lib/system-config/policy";
 import {
   defaultStoreVatMode,
@@ -360,6 +362,19 @@ export async function POST(request: Request) {
       phoneNumber: null,
       connectedAt: null,
     });
+
+    await tx.insert(shippingProviders).values(
+      DEFAULT_SHIPPING_PROVIDER_SEEDS.map((provider) => ({
+        id: randomUUID(),
+        storeId,
+        code: provider.code,
+        displayName: provider.displayName,
+        branchName: null,
+        aliases: "[]",
+        active: true,
+        sortOrder: provider.sortOrder,
+      })),
+    );
   });
 
   const [user] = await db

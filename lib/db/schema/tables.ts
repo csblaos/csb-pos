@@ -59,6 +59,7 @@ export const orderStatusEnum = [
   "DRAFT",
   "PENDING_PAYMENT",
   "READY_FOR_PICKUP",
+  "PICKED_UP_PENDING_PAYMENT",
   "PAID",
   "PACKED",
   "SHIPPED",
@@ -599,6 +600,36 @@ export const contacts = sqliteTable(
   }),
 );
 
+export const shippingProviders = sqliteTable(
+  "shipping_providers",
+  {
+    id: id(),
+    storeId: text("store_id")
+      .notNull()
+      .references(() => stores.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    displayName: text("display_name").notNull(),
+    branchName: text("branch_name"),
+    aliases: text("aliases").notNull().default("[]"),
+    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: text("created_at").notNull().default(createdAtDefault),
+  },
+  (table) => ({
+    shippingProvidersStoreIdIdx: index("shipping_providers_store_id_idx").on(table.storeId),
+    shippingProvidersStoreActiveSortIdx: index("shipping_providers_store_active_sort_idx").on(
+      table.storeId,
+      table.active,
+      table.sortOrder,
+      table.displayName,
+    ),
+    shippingProvidersStoreCodeUnique: uniqueIndex("shipping_providers_store_code_unique").on(
+      table.storeId,
+      table.code,
+    ),
+  }),
+);
+
 export const inventoryMovements = sqliteTable(
   "inventory_movements",
   {
@@ -687,6 +718,7 @@ export const orders = sqliteTable(
     shippingCost: integer("shipping_cost").notNull().default(0),
     codAmount: integer("cod_amount").notNull().default(0),
     codFee: integer("cod_fee").notNull().default(0),
+    codReturnNote: text("cod_return_note"),
     codSettledAt: text("cod_settled_at"),
     codReturnedAt: text("cod_returned_at"),
     paidAt: text("paid_at"),

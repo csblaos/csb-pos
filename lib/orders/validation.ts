@@ -96,15 +96,73 @@ export const createOrderSchema = z
 
 export const updateOrderSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("submit_for_payment") }),
-  z.object({ action: z.literal("confirm_paid") }),
+  z.object({
+    action: z.literal("confirm_paid"),
+    codAmount: z.coerce
+      .number({ message: "ยอด COD ต้องเป็นตัวเลข" })
+      .int("ยอด COD ต้องเป็นจำนวนเต็ม")
+      .min(0, "ยอด COD ต้องไม่ติดลบ")
+      .optional(),
+  }),
+  z.object({ action: z.literal("mark_picked_up_unpaid") }),
   z.object({
     action: z.literal("submit_payment_slip"),
     paymentSlipUrl: z.string().trim().url("ลิงก์สลิปไม่ถูกต้อง"),
   }),
   z.object({ action: z.literal("mark_packed") }),
   z.object({ action: z.literal("mark_shipped") }),
-  z.object({ action: z.literal("mark_cod_returned") }),
-  z.object({ action: z.literal("cancel") }),
+  z.object({
+    action: z.literal("mark_cod_returned"),
+    codFee: z.coerce
+      .number({ message: "ค่าตีกลับต้องเป็นตัวเลข" })
+      .int("ค่าตีกลับต้องเป็นจำนวนเต็ม")
+      .min(0, "ค่าตีกลับต้องไม่ติดลบ")
+      .optional(),
+    codReturnNote: z.string().trim().max(500, "หมายเหตุยาวเกินไป").optional().or(z.literal("")),
+  }),
+  z.object({
+    action: z.literal("cancel"),
+    approvalMode: z.enum(["MANAGER_PASSWORD", "SELF_SLIDE"]).default("MANAGER_PASSWORD"),
+    approvalEmail: z.string().trim().email("อีเมลผู้อนุมัติไม่ถูกต้อง").optional(),
+    approvalPassword: z
+      .string()
+      .trim()
+      .min(8, "รหัสผ่านผู้อนุมัติต้องมีอย่างน้อย 8 ตัวอักษร")
+      .max(128, "รหัสผ่านผู้อนุมัติยาวเกินไป")
+      .optional(),
+    confirmBySlide: z.literal(true).optional(),
+    cancelReason: z
+      .string()
+      .trim()
+      .min(1, "กรุณาระบุเหตุผลการยกเลิก")
+      .max(300, "เหตุผลการยกเลิกยาวเกินไป"),
+  }).superRefine((value, ctx) => {
+    if (value.approvalMode === "MANAGER_PASSWORD") {
+      if (!value.approvalEmail) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["approvalEmail"],
+          message: "กรุณากรอกอีเมลผู้อนุมัติ",
+        });
+      }
+      if (!value.approvalPassword || value.approvalPassword.length < 8) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["approvalPassword"],
+          message: "รหัสผ่านผู้อนุมัติต้องมีอย่างน้อย 8 ตัวอักษร",
+        });
+      }
+      return;
+    }
+
+    if (value.confirmBySlide !== true) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["confirmBySlide"],
+        message: "กรุณายืนยันการยกเลิกด้วยสไลด์",
+      });
+    }
+  }),
   z.object({
     action: z.literal("update_shipping"),
     shippingCarrier: z.string().trim().max(120).optional().or(z.literal("")),

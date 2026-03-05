@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { OrderDetailView } from "@/components/app/order-detail-view";
@@ -31,15 +30,14 @@ export default async function OrderDetailPage({
 
   const permissionKeys = await getUserPermissionsForCurrentSession();
   const canView = isPermissionGranted(permissionKeys, "orders.view");
+  const canSelfApproveCancel =
+    session.activeRoleName === "Owner" || session.activeRoleName === "Manager";
 
   if (!canView) {
     return (
       <section className="space-y-4">
         <h1 className="text-xl font-semibold">รายละเอียดออเดอร์</h1>
         <p className="text-sm text-red-600">คุณไม่มีสิทธิ์ดูหน้านี้</p>
-        <Link href="/orders" className="text-sm font-medium text-blue-700 hover:underline">
-          กลับไปหน้ารายการขาย
-        </Link>
       </section>
     );
   }
@@ -82,11 +80,8 @@ export default async function OrderDetailPage({
           isPermissionGranted(permissionKeys, "orders.cancel") ||
           isPermissionGranted(permissionKeys, "orders.delete")
         }
+        canSelfApproveCancel={canSelfApproveCancel}
       />
-
-      <Link href="/orders" className="text-sm font-medium text-blue-700 hover:underline">
-        กลับไปหน้ารายการขาย
-      </Link>
     </section>
   );
 }

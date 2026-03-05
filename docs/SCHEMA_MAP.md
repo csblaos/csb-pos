@@ -4,8 +4,8 @@
 
 ## Migration Status
 
-- journal entries: `36`
-- latest migration tag: `0035_zippy_bullseye`
+- journal entries: `38`
+- latest migration tag: `0037_bouncy_leper_queen`
 - latest focus:
   - โครงสร้างสินค้าแบบ Variant (Phase 1):
     - `product_models`
@@ -33,6 +33,8 @@
     - ตาราง `notification_inbox` (in-app inbox + dedupe key)
     - ตาราง `notification_rules` (mute/snooze policy ต่อ entity)
   - เพิ่ม `orders.cod_returned_at` สำหรับ timestamp ตอน COD ตีกลับ
+  - เพิ่ม `orders.cod_return_note` สำหรับหมายเหตุสาเหตุ COD ตีกลับ
+  - เพิ่มตาราง master `shipping_providers` ต่อร้าน
 
 ## Table Inventory (High-level)
 
@@ -66,6 +68,7 @@
 - `orders`
 - `order_items`
 - `order_shipments`
+- `shipping_providers`
 - `purchase_orders`
 - `purchase_order_items`
 - `purchase_order_payments`
@@ -118,9 +121,11 @@
 - ใน `orders` มี field เวลา COD สำคัญ:
   - `cod_settled_at` (ตอนปิดยอด COD)
   - `cod_returned_at` (ตอนตีกลับ COD)
+  - `cod_return_note` (บันทึกสาเหตุ/หมายเหตุการตีกลับ)
 
 ### Shipping
 
+- `shipping_providers.store_id -> stores.id`
 - `order_shipments.order_id -> orders.id`
 - `order_shipments.store_id -> stores.id`
 - `order_shipments.created_by -> users.id`
@@ -130,6 +135,7 @@
   - `shipping_label_url`
   - `shipping_request_id`
   - `tracking_no`
+  - `shipping_provider` ใน `orders` เป็น snapshot ตอนสร้างออเดอร์ (แยกจาก master `shipping_providers`)
 
 ### Purchase
 
@@ -173,7 +179,7 @@
   - `REQUESTED`
   - `READY`
   - `FAILED`
-- order status: `DRAFT | PENDING_PAYMENT | READY_FOR_PICKUP | PAID | PACKED | SHIPPED | COD_RETURNED | CANCELLED`
+- order status: `DRAFT | PENDING_PAYMENT | READY_FOR_PICKUP | PICKED_UP_PENDING_PAYMENT | PAID | PACKED | SHIPPED | COD_RETURNED | CANCELLED`
 
 ### Reliability
 
@@ -203,6 +209,10 @@
   - `order_shipments_order_id_idx`
   - `order_shipments_store_status_created_at_idx`
   - `order_shipments_provider_request_id_idx`
+- shipping providers:
+  - `shipping_providers_store_id_idx`
+  - `shipping_providers_store_active_sort_idx`
+  - unique `shipping_providers_store_code_unique`
 - idempotency:
   - unique `idempotency_requests_store_action_key_unique`
 - audit:

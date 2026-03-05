@@ -14,7 +14,11 @@ import { getLowStockProducts, getStoreStockThresholds } from "@/lib/inventory/qu
 import { timeAsync, timeDbQuery } from "@/lib/perf/server";
 
 const paidStatuses = ["PAID", "PACKED", "SHIPPED"] as const;
-const pendingStatuses = ["PENDING_PAYMENT", "READY_FOR_PICKUP"] as const;
+const pendingStatuses = [
+  "PENDING_PAYMENT",
+  "READY_FOR_PICKUP",
+  "PICKED_UP_PENDING_PAYMENT",
+] as const;
 
 export type DashboardMetrics = {
   todaySales: number;
@@ -61,6 +65,7 @@ export type CodByProviderRow = {
   settledAmount: number;
   returnedCount: number;
   returnedShippingLoss: number;
+  returnedCodFee: number;
   netAmount: number;
 };
 
@@ -71,10 +76,12 @@ export type CodOverviewSummary = {
   settledTodayAmount: number;
   returnedTodayCount: number;
   returnedTodayShippingLoss: number;
+  returnedTodayCodFee: number;
   settledAllCount: number;
   settledAllAmount: number;
   returnedCount: number;
   returnedShippingLoss: number;
+  returnedCodFee: number;
   netAmount: number;
   byProvider: CodByProviderRow[];
 };
@@ -406,6 +413,12 @@ export async function getCodOverviewSummary(
               and ${orders.codReturnedAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')
             then ${orders.shippingCost}
             else 0 end), 0)`,
+          returnedTodayCodFee: sql<number>`coalesce(sum(case
+            when ${orders.status} = 'COD_RETURNED'
+              and ${orders.codReturnedAt} >= datetime('now', 'localtime', 'start of day', 'utc')
+              and ${orders.codReturnedAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')
+            then ${orders.codFee}
+            else 0 end), 0)`,
           settledAllCount: sql<number>`coalesce(sum(case
             when ${orders.paymentStatus} = 'COD_SETTLED'
             then 1 else 0 end), 0)`,
@@ -419,6 +432,10 @@ export async function getCodOverviewSummary(
           returnedShippingLoss: sql<number>`coalesce(sum(case
             when ${orders.status} = 'COD_RETURNED'
             then ${orders.shippingCost}
+            else 0 end), 0)`,
+          returnedCodFee: sql<number>`coalesce(sum(case
+            when ${orders.status} = 'COD_RETURNED'
+            then ${orders.codFee}
             else 0 end), 0)`,
         })
         .from(orders)
@@ -451,6 +468,10 @@ export async function getCodOverviewSummary(
             when ${orders.status} = 'COD_RETURNED'
             then ${orders.shippingCost}
             else 0 end), 0)`,
+          returnedCodFee: sql<number>`coalesce(sum(case
+            when ${orders.status} = 'COD_RETURNED'
+            then ${orders.codFee}
+            else 0 end), 0)`,
         })
         .from(orders)
         .where(and(eq(orders.storeId, storeId), eq(orders.paymentMethod, "COD")))
@@ -469,14 +490,17 @@ export async function getCodOverviewSummary(
   const settledTodayAmount = Number(overview?.settledTodayAmount ?? 0);
   const returnedTodayCount = Number(overview?.returnedTodayCount ?? 0);
   const returnedTodayShippingLoss = Number(overview?.returnedTodayShippingLoss ?? 0);
+  const returnedTodayCodFee = Number(overview?.returnedTodayCodFee ?? 0);
   const settledAllCount = Number(overview?.settledAllCount ?? 0);
   const settledAllAmount = Number(overview?.settledAllAmount ?? 0);
   const returnedCount = Number(overview?.returnedCount ?? 0);
   const returnedShippingLoss = Number(overview?.returnedShippingLoss ?? 0);
+  const returnedCodFee = Number(overview?.returnedCodFee ?? 0);
 
   const byProvider: CodByProviderRow[] = byProviderRows.map((row) => {
     const settledAmount = Number(row.settledAmount ?? 0);
     const returnedShippingLoss = Number(row.returnedShippingLoss ?? 0);
+    const returnedCodFee = Number(row.returnedCodFee ?? 0);
     return {
       provider: row.provider,
       pendingCount: Number(row.pendingCount ?? 0),
@@ -485,6 +509,7 @@ export async function getCodOverviewSummary(
       settledAmount,
       returnedCount: Number(row.returnedCount ?? 0),
       returnedShippingLoss,
+      returnedCodFee,
       netAmount: settledAmount - returnedShippingLoss,
     };
   });
@@ -496,10 +521,12 @@ export async function getCodOverviewSummary(
     settledTodayAmount,
     returnedTodayCount,
     returnedTodayShippingLoss,
+    returnedTodayCodFee,
     settledAllCount,
     settledAllAmount,
     returnedCount,
     returnedShippingLoss,
+    returnedCodFee,
     netAmount: settledAllAmount - returnedShippingLoss,
     byProvider,
   };

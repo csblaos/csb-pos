@@ -91,6 +91,7 @@
   - `app/(app)/settings/roles/page.tsx`
   - `app/(app)/settings/store/page.tsx`
   - `app/(app)/settings/store/payments/page.tsx`
+  - `app/(app)/settings/store/shipping-providers/page.tsx`
   - `app/(app)/settings/pdf/page.tsx`
   - `app/(app)/settings/audit-log/page.tsx`
 - API:
@@ -101,12 +102,14 @@
   - `app/api/settings/roles/[roleId]/route.ts`
   - `app/api/settings/store/route.ts`
   - `app/api/settings/store/payment-accounts/route.ts`
+  - `app/api/settings/store/shipping-providers/route.ts`
   - `app/api/settings/store/pdf/route.ts`
 - Components:
   - `components/app/users-management.tsx`
   - `components/app/role-permissions-editor.tsx`
   - `components/app/store-pdf-settings.tsx`
   - `components/app/store-payment-accounts-settings.tsx`
+  - `components/app/store-shipping-providers-settings.tsx`
 
 ### System Admin
 

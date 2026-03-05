@@ -189,6 +189,11 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     console.info("[db:repair] added column orders.cod_returned_at");
   }
 
+  if (!(await columnExists("orders", "cod_return_note"))) {
+    await client.execute("alter table `orders` add `cod_return_note` text");
+    console.info("[db:repair] added column orders.cod_return_note");
+  }
+
   await client.execute(`
     update \`orders\`
     set \`payment_status\` = case
@@ -222,6 +227,104 @@ async function ensureSchemaCompatForLatestAuthChanges() {
     "create index if not exists `orders_store_shipping_label_status_updated_idx` on `orders` (`store_id`,`shipping_label_status`,`created_at`)",
   );
   console.info("[db:repair] ensured orders indexes from migration 0002 and payment flow");
+
+  await client.execute(`
+    create table if not exists \`shipping_providers\` (
+      \`id\` text primary key not null,
+      \`store_id\` text not null,
+      \`code\` text not null,
+      \`display_name\` text not null,
+      \`branch_name\` text,
+      \`aliases\` text not null default '[]',
+      \`active\` integer not null default 1,
+      \`sort_order\` integer not null default 0,
+      \`created_at\` text not null default (CURRENT_TIMESTAMP),
+      foreign key (\`store_id\`) references \`stores\`(\`id\`) on delete cascade
+    )
+  `);
+  await client.execute(
+    "create index if not exists `shipping_providers_store_id_idx` on `shipping_providers` (`store_id`)",
+  );
+  await client.execute(
+    "create index if not exists `shipping_providers_store_active_sort_idx` on `shipping_providers` (`store_id`,`active`,`sort_order`,`display_name`)",
+  );
+  await client.execute(
+    "create unique index if not exists `shipping_providers_store_code_unique` on `shipping_providers` (`store_id`,`code`)",
+  );
+
+  await client.execute(`
+    insert or ignore into \`shipping_providers\` (
+      \`id\`,
+      \`store_id\`,
+      \`code\`,
+      \`display_name\`,
+      \`branch_name\`,
+      \`aliases\`,
+      \`active\`,
+      \`sort_order\`,
+      \`created_at\`
+    )
+    select
+      lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(6))),
+      \`stores\`.\`id\`,
+      'HOUNGALOUN',
+      'Houngaloun',
+      null,
+      '[]',
+      1,
+      10,
+      CURRENT_TIMESTAMP
+    from \`stores\`
+  `);
+  await client.execute(`
+    insert or ignore into \`shipping_providers\` (
+      \`id\`,
+      \`store_id\`,
+      \`code\`,
+      \`display_name\`,
+      \`branch_name\`,
+      \`aliases\`,
+      \`active\`,
+      \`sort_order\`,
+      \`created_at\`
+    )
+    select
+      lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(6))),
+      \`stores\`.\`id\`,
+      'ANOUSITH',
+      'Anousith',
+      null,
+      '[]',
+      1,
+      20,
+      CURRENT_TIMESTAMP
+    from \`stores\`
+  `);
+  await client.execute(`
+    insert or ignore into \`shipping_providers\` (
+      \`id\`,
+      \`store_id\`,
+      \`code\`,
+      \`display_name\`,
+      \`branch_name\`,
+      \`aliases\`,
+      \`active\`,
+      \`sort_order\`,
+      \`created_at\`
+    )
+    select
+      lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(6))),
+      \`stores\`.\`id\`,
+      'MIXAY',
+      'Mixay',
+      null,
+      '[]',
+      1,
+      30,
+      CURRENT_TIMESTAMP
+    from \`stores\`
+  `);
+  console.info("[db:repair] ensured shipping_providers table and default rows");
 
   if ((await tableExists("permissions")) && (await tableExists("role_permissions"))) {
     await client.execute(`

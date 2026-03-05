@@ -53,6 +53,13 @@ export default async function OrdersPage({
 
     const canView = isPermissionGranted(permissionKeys, "orders.view");
     const canCreate = isPermissionGranted(permissionKeys, "orders.create");
+    const canMarkPaid = isPermissionGranted(permissionKeys, "orders.mark_paid");
+    const canRequestCancel =
+      isPermissionGranted(permissionKeys, "orders.update") ||
+      isPermissionGranted(permissionKeys, "orders.cancel") ||
+      isPermissionGranted(permissionKeys, "orders.delete");
+    const canSelfApproveCancel =
+      session.activeRoleName === "Owner" || session.activeRoleName === "Manager";
 
     if (!canView) {
       return (
@@ -70,11 +77,21 @@ export default async function OrdersPage({
 
     return (
       <section className="space-y-4">
-        <header className="space-y-1">
-          <h1 className="text-xl font-semibold">รายการขาย</h1>
-          <p className="text-sm text-muted-foreground">
-            สร้างออเดอร์ จัดการสถานะ และติดตามยอดขาย
-          </p>
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1">
+            <h1 className="text-xl font-semibold">รายการขาย</h1>
+            <p className="text-sm text-muted-foreground">
+              สร้างออเดอร์ จัดการสถานะ และติดตามยอดขาย
+            </p>
+          </div>
+          {canMarkPaid ? (
+            <Link
+              href="/orders/cod-reconcile"
+              className="inline-flex h-9 items-center rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-medium text-blue-700"
+            >
+              ปิดยอด COD รายวัน
+            </Link>
+          ) : null}
         </header>
 
         <OrdersManagement
@@ -82,6 +99,8 @@ export default async function OrdersPage({
           activeTab={tab}
           catalog={catalog}
           canCreate={canCreate}
+          canRequestCancel={canRequestCancel}
+          canSelfApproveCancel={canSelfApproveCancel}
         />
 
         <Link href="/dashboard" className="text-sm font-medium text-blue-700 hover:underline">

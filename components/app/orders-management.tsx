@@ -12,10 +12,15 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ScanLine } from "lucide-react";
+import { Clock3, ScanLine } from "lucide-react";
 import { toast } from "react-hot-toast";
 
 import { BarcodeScannerPanel } from "@/components/app/barcode-scanner-panel";
+import {
+  ManagerCancelApprovalModal,
+  type ManagerCancelApprovalPayload,
+  type ManagerCancelApprovalResult,
+} from "@/components/app/manager-cancel-approval-modal";
 import { Button } from "@/components/ui/button";
 import { SlideUpSheet } from "@/components/ui/slide-up-sheet";
 import { authFetch } from "@/lib/auth/client-token";
@@ -50,11 +55,15 @@ type OrdersManagementProps =
       activeTab: OrderListTab;
       catalog: OrderCatalog;
       canCreate: boolean;
+      canRequestCancel?: boolean;
+      canSelfApproveCancel?: boolean;
     }
   | {
       mode: "create-only";
       catalog: OrderCatalog;
       canCreate: boolean;
+      canRequestCancel?: boolean;
+      canSelfApproveCancel?: boolean;
     };
 
 type TabKey = OrderListTab;
@@ -82,8 +91,9 @@ const paymentMethodLabel: Record<OrderListItem["paymentMethod"], string> = {
 
 const statusLabel: Record<OrderListItem["status"], string> = {
   DRAFT: "ร่าง",
-  PENDING_PAYMENT: "รอชำระ",
+  PENDING_PAYMENT: "ค้างจ่าย",
   READY_FOR_PICKUP: "รอรับที่ร้าน",
+  PICKED_UP_PENDING_PAYMENT: "รับสินค้าแล้ว (ค้างจ่าย)",
   PAID: "ชำระแล้ว",
   PACKED: "แพ็กแล้ว",
   SHIPPED: "จัดส่งแล้ว",
@@ -95,11 +105,39 @@ const statusClass: Record<OrderListItem["status"], string> = {
   DRAFT: "bg-slate-100 text-slate-700",
   PENDING_PAYMENT: "bg-amber-100 text-amber-700",
   READY_FOR_PICKUP: "bg-cyan-100 text-cyan-700",
+  PICKED_UP_PENDING_PAYMENT: "bg-orange-100 text-orange-700",
   PAID: "bg-emerald-100 text-emerald-700",
   PACKED: "bg-blue-100 text-blue-700",
   SHIPPED: "bg-indigo-100 text-indigo-700",
   COD_RETURNED: "bg-orange-100 text-orange-700",
   CANCELLED: "bg-rose-100 text-rose-700",
+};
+
+const pickupPaymentBadge = (
+  order: Pick<OrderListItem, "status" | "paymentStatus">,
+): { label: string; className: string } | null => {
+  if (order.status !== "READY_FOR_PICKUP") {
+    return null;
+  }
+
+  if (order.paymentStatus === "PAID" || order.paymentStatus === "COD_SETTLED") {
+    return {
+      label: "ชำระแล้ว",
+      className: "bg-emerald-100 text-emerald-700",
+    };
+  }
+
+  if (order.paymentStatus === "PENDING_PROOF") {
+    return {
+      label: "รอตรวจสลิป",
+      className: "bg-violet-100 text-violet-700",
+    };
+  }
+
+  return {
+    label: "ค้างจ่าย",
+    className: "bg-amber-100 text-amber-700",
+  };
 };
 
 type CreateOrderStep = "products" | "details";
@@ -130,11 +168,18 @@ type ReceiptPreviewOrder = {
   orderNo: string;
   createdAt: string;
   customerName: string | null;
+  customerPhone: string | null;
+  customerAddress: string | null;
   contactDisplayName: string | null;
+  contactPhone: string | null;
   subtotal: number;
   discount: number;
   vatAmount: number;
   shippingFeeCharged: number;
+  shippingCost: number;
+  shippingProvider: string | null;
+  shippingCarrier: string | null;
+  trackingNo: string | null;
   total: number;
   paymentCurrency: "LAK" | "THB" | "USD";
   paymentMethod: "CASH" | "LAO_QR" | "ON_CREDIT" | "COD" | "BANK_TRANSFER";
@@ -146,6 +191,20 @@ type OrderDetailApiResponse = {
   ok: boolean;
   order?: ReceiptPreviewOrder;
   message?: string;
+};
+type RecentOrderItem = {
+  id: string;
+  orderNo: string;
+  checkoutFlow: CheckoutFlow;
+  status: OrderListItem["status"];
+  createdAt: string;
+  total: number;
+  paymentCurrency: "LAK" | "THB" | "USD";
+  paymentMethod: OrderListItem["paymentMethod"];
+};
+type RecentOrdersApiResponse = {
+  message?: string;
+  orders?: OrderListItem[];
 };
 
 const escapeHtml = (value: string) =>
@@ -168,9 +227,28 @@ const CREATE_ONLY_CART_STICKY_EXTRA_TOP_PX = 13;
 // Intentional: keep tablet threshold aligned with desktop so both use the same sticky behavior.
 const TABLET_MIN_WIDTH_PX = 1200;
 const DESKTOP_MIN_WIDTH_PX = 1200;
+const CREATE_ONLY_RECENT_ORDERS_LIMIT = 8;
 const EMPTY_ORDER_ITEMS: CreateOrderFormInput["items"] = [];
 const CREATE_ORDER_CHECKOUT_SHEET_FORM_ID = "create-order-checkout-sheet-form";
-const SHIPPING_PROVIDER_CHIPS = ["Houngaloun", "Anousith", "Mixay"] as const;
+const CANCELLABLE_ORDER_STATUSES = new Set<OrderListItem["status"]>([
+  "DRAFT",
+  "PENDING_PAYMENT",
+  "READY_FOR_PICKUP",
+  "PICKED_UP_PENDING_PAYMENT",
+  "PAID",
+  "PACKED",
+  "SHIPPED",
+]);
+
+const inferCheckoutFlowFromOrderListItem = (order: Pick<OrderListItem, "channel" | "status">): CheckoutFlow => {
+  if (order.channel !== "WALK_IN") {
+    return "ONLINE_DELIVERY";
+  }
+  if (order.status === "READY_FOR_PICKUP" || order.status === "PICKED_UP_PENDING_PAYMENT") {
+    return "PICKUP_LATER";
+  }
+  return "WALK_IN_NOW";
+};
 
 const parseOnlineQuickCustomerInput = (rawInput: string) => {
   const normalizedRaw = rawInput.replaceAll("\r\n", "\n").trim();
@@ -211,6 +289,7 @@ const parseOnlineQuickCustomerInput = (rawInput: string) => {
 
 const defaultValues = (catalog: OrderCatalog): CreateOrderFormInput => ({
   channel: "WALK_IN",
+  checkoutFlow: "WALK_IN_NOW",
   contactId: "",
   customerName: "",
   customerPhone: "",
@@ -228,6 +307,8 @@ const defaultValues = (catalog: OrderCatalog): CreateOrderFormInput => ({
 
 export function OrdersManagement(props: OrdersManagementProps) {
   const { catalog, canCreate } = props;
+  const canRequestCancel = props.canRequestCancel ?? false;
+  const canSelfApproveCancel = props.canSelfApproveCancel ?? false;
   const isCreateOnlyMode = props.mode === "create-only";
   const activeTab: OrderListTab = isCreateOnlyMode ? "ALL" : props.activeTab;
   const ordersPage = isCreateOnlyMode ? null : props.ordersPage;
@@ -247,6 +328,7 @@ export function OrdersManagement(props: OrdersManagementProps) {
   const [quickAddOnlyAvailable, setQuickAddOnlyAvailable] = useState(false);
   const [showCartSheet, setShowCartSheet] = useState(false);
   const [showCheckoutSheet, setShowCheckoutSheet] = useState(false);
+  const [showRecentOrdersSheet, setShowRecentOrdersSheet] = useState(false);
   const [showCheckoutCloseConfirm, setShowCheckoutCloseConfirm] = useState(false);
   const [pickupLaterCustomerOpen, setPickupLaterCustomerOpen] = useState(false);
   const [onlineChannelMode, setOnlineChannelMode] = useState<OnlineChannelMode>("FACEBOOK");
@@ -265,6 +347,14 @@ export function OrdersManagement(props: OrdersManagementProps) {
   const [receiptPreviewLoading, setReceiptPreviewLoading] = useState(false);
   const [receiptPreviewError, setReceiptPreviewError] = useState<string | null>(null);
   const [receiptPrintLoading, setReceiptPrintLoading] = useState(false);
+  const [shippingLabelPrintLoading, setShippingLabelPrintLoading] = useState(false);
+  const [recentOrders, setRecentOrders] = useState<RecentOrderItem[]>([]);
+  const [recentOrdersLoading, setRecentOrdersLoading] = useState(false);
+  const [recentOrdersError, setRecentOrdersError] = useState<string | null>(null);
+  const [cancelApprovalTargetOrder, setCancelApprovalTargetOrder] = useState<RecentOrderItem | null>(
+    null,
+  );
+  const [cancelApprovalSubmitting, setCancelApprovalSubmitting] = useState(false);
   const [hasInitializedDraftRestore, setHasInitializedDraftRestore] = useState(!isCreateOnlyMode);
   const [desktopCartStickyTop, setDesktopCartStickyTop] = useState("13.5rem");
   const createOnlySearchStickyRef = useRef<HTMLDivElement | null>(null);
@@ -414,7 +504,21 @@ export function OrdersManagement(props: OrdersManagementProps) {
   const selectedOnlineContactLabel = watchedContactId
     ? (contactsById.get(watchedContactId)?.displayName ?? null)
     : null;
-  const isKnownShippingProvider = SHIPPING_PROVIDER_CHIPS.some(
+  const shippingProviderChipOptions = useMemo(() => {
+    const deduped = new Set<string>();
+    return catalog.shippingProviders
+      .map((provider) => provider.displayName.trim())
+      .filter((name) => name.length > 0)
+      .filter((name) => {
+        const normalized = name.toLowerCase();
+        if (deduped.has(normalized)) {
+          return false;
+        }
+        deduped.add(normalized);
+        return true;
+      });
+  }, [catalog.shippingProviders]);
+  const isKnownShippingProvider = shippingProviderChipOptions.some(
     (provider) => provider === watchedShippingProvider.trim(),
   );
   const manualSearchResults = useMemo(() => {
@@ -561,6 +665,7 @@ export function OrdersManagement(props: OrdersManagementProps) {
 
       return {
         channel,
+        checkoutFlow: draft.checkoutFlow,
         contactId: draft.form.contactId,
         customerName: draft.form.customerName,
         customerPhone: draft.form.customerPhone,
@@ -709,7 +814,7 @@ export function OrdersManagement(props: OrdersManagementProps) {
     toast.success(`เติมข้อมูลแล้ว: ${changed.join(" / ")}`);
   }, [form, onlineQuickFillInput]);
   const onSelectShippingProviderChip = useCallback(
-    (provider: (typeof SHIPPING_PROVIDER_CHIPS)[number]) => {
+    (provider: string) => {
       setOnlineCustomProviderOpen(false);
       form.setValue("shippingProvider", provider, { shouldDirty: true, shouldValidate: true });
       form.clearErrors("shippingProvider");
@@ -726,6 +831,7 @@ export function OrdersManagement(props: OrdersManagementProps) {
   const applyCheckoutFlow = useCallback(
     (nextFlow: CheckoutFlow) => {
       setCheckoutFlow(nextFlow);
+      form.setValue("checkoutFlow", nextFlow, { shouldDirty: true, shouldValidate: true });
       form.clearErrors(["contactId", "customerPhone", "customerAddress", "shippingProvider"]);
       if (nextFlow !== "PICKUP_LATER") {
         setPickupLaterCustomerOpen(false);
@@ -922,11 +1028,21 @@ export function OrdersManagement(props: OrdersManagementProps) {
       {
         accessorKey: "status",
         header: "สถานะ",
-        cell: ({ row }) => (
-          <span className={`rounded-full px-2 py-1 text-xs ${statusClass[row.original.status]}`}>
-            {statusLabel[row.original.status]}
-          </span>
-        ),
+        cell: ({ row }) => {
+          const pickupBadge = pickupPaymentBadge(row.original);
+          return (
+            <div className="flex flex-wrap items-center gap-1">
+              <span className={`rounded-full px-2 py-1 text-xs ${statusClass[row.original.status]}`}>
+                {statusLabel[row.original.status]}
+              </span>
+              {pickupBadge ? (
+                <span className={`rounded-full px-2 py-1 text-xs ${pickupBadge.className}`}>
+                  {pickupBadge.label}
+                </span>
+              ) : null}
+            </div>
+          );
+        },
       },
       {
         accessorKey: "total",
@@ -1055,11 +1171,6 @@ export function OrdersManagement(props: OrdersManagementProps) {
     setLoading(false);
 
     if (data?.orderId) {
-      if (submittedCheckoutFlow === "ONLINE_DELIVERY") {
-        router.push(`/orders/${data.orderId}`);
-        return;
-      }
-
       setCreatedOrderSuccess({
         orderId: data.orderId,
         orderNo: data.orderNo?.trim() || data.orderId,
@@ -1078,8 +1189,120 @@ export function OrdersManagement(props: OrdersManagementProps) {
     setReceiptPreviewError(null);
     setReceiptPreviewLoading(false);
     setReceiptPrintLoading(false);
+    setShippingLabelPrintLoading(false);
     setSuccessMessage(null);
   }, []);
+
+  const fetchRecentOrders = useCallback(async () => {
+    if (!isCreateOnlyMode) {
+      return;
+    }
+
+    setRecentOrdersLoading(true);
+    setRecentOrdersError(null);
+    try {
+      const response = await authFetch(
+        `/api/orders?page=1&pageSize=${CREATE_ONLY_RECENT_ORDERS_LIMIT}`,
+      );
+      const data = (await response.json().catch(() => null)) as RecentOrdersApiResponse | null;
+      if (!response.ok) {
+        throw new Error(data?.message ?? "ไม่สามารถโหลดออเดอร์ล่าสุดได้");
+      }
+      if (!Array.isArray(data?.orders)) {
+        throw new Error("ข้อมูลออเดอร์ล่าสุดไม่ถูกต้อง");
+      }
+      const mappedOrders = data.orders.slice(0, CREATE_ONLY_RECENT_ORDERS_LIMIT).map((order) => ({
+        id: order.id,
+        orderNo: order.orderNo,
+        checkoutFlow: inferCheckoutFlowFromOrderListItem(order),
+        status: order.status,
+        createdAt: order.createdAt,
+        total: order.total,
+        paymentCurrency: order.paymentCurrency,
+        paymentMethod: order.paymentMethod,
+      }));
+      setRecentOrders(mappedOrders);
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message ? error.message : "ไม่สามารถโหลดออเดอร์ล่าสุดได้";
+      setRecentOrdersError(message);
+      setRecentOrders([]);
+    } finally {
+      setRecentOrdersLoading(false);
+    }
+  }, [isCreateOnlyMode]);
+
+  const openRecentOrderSummary = useCallback((order: RecentOrderItem) => {
+    setShowRecentOrdersSheet(false);
+    setSuccessMessage(null);
+    setErrorMessage(null);
+    setCreatedOrderSuccess({
+      orderId: order.id,
+      orderNo: order.orderNo,
+      checkoutFlow: order.checkoutFlow,
+    });
+  }, []);
+
+  const openRecentOrderCancelModal = useCallback(
+    (order: RecentOrderItem) => {
+      if (!canRequestCancel || !CANCELLABLE_ORDER_STATUSES.has(order.status)) {
+        return;
+      }
+      setErrorMessage(null);
+      setSuccessMessage(null);
+      setCancelApprovalTargetOrder(order);
+    },
+    [canRequestCancel],
+  );
+
+  const cancelRecentOrderWithApproval = useCallback(
+    async (payload: ManagerCancelApprovalPayload): Promise<ManagerCancelApprovalResult> => {
+      if (!cancelApprovalTargetOrder) {
+        return { ok: false, message: "ไม่พบออเดอร์ที่ต้องการยกเลิก" };
+      }
+
+      setCancelApprovalSubmitting(true);
+      setErrorMessage(null);
+      setSuccessMessage(null);
+      try {
+        const response = await authFetch(`/api/orders/${cancelApprovalTargetOrder.id}`, {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "cancel",
+            ...(payload.approvalEmail ? { approvalEmail: payload.approvalEmail } : {}),
+            ...(payload.approvalPassword
+              ? { approvalPassword: payload.approvalPassword }
+              : {}),
+            cancelReason: payload.cancelReason,
+            approvalMode: payload.approvalMode,
+            ...(payload.confirmBySlide ? { confirmBySlide: true } : {}),
+          }),
+        });
+        const data = (await response.json().catch(() => null)) as { message?: string } | null;
+        if (!response.ok) {
+          const message = data?.message ?? "ยกเลิกออเดอร์ไม่สำเร็จ";
+          setErrorMessage(message);
+          return { ok: false, message };
+        }
+
+        setSuccessMessage(`ยกเลิกออเดอร์ ${cancelApprovalTargetOrder.orderNo} แล้ว`);
+        setCancelApprovalTargetOrder(null);
+        await fetchRecentOrders();
+        router.refresh();
+        return { ok: true };
+      } catch {
+        const message = "ยกเลิกออเดอร์ไม่สำเร็จ";
+        setErrorMessage(message);
+        return { ok: false, message };
+      } finally {
+        setCancelApprovalSubmitting(false);
+      }
+    },
+    [cancelApprovalTargetOrder, fetchRecentOrders, router],
+  );
 
   const fetchOrderReceiptPreview = useCallback(async (orderId: string) => {
     const response = await authFetch(`/api/orders/${orderId}`);
@@ -1187,6 +1410,95 @@ export function OrdersManagement(props: OrdersManagementProps) {
 </html>`;
   }, []);
 
+  const buildShippingLabelPrintHtml = useCallback((order: ReceiptPreviewOrder) => {
+    const labelDateText = new Date(order.createdAt).toLocaleString("th-TH");
+    const receiverName = order.customerName || order.contactDisplayName || "ลูกค้าทั่วไป";
+    const receiverPhone = order.customerPhone || order.contactPhone || "-";
+    const shippingProviderLabel = order.shippingProvider || order.shippingCarrier || "-";
+    const trackingNo = order.trackingNo || "-";
+
+    return `<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Shipping Label ${escapeHtml(order.orderNo)}</title>
+    <style>
+      @page { size: A6 portrait; margin: 6mm; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: #ffffff;
+        color: #0f172a;
+        font-family: ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+      }
+      .label {
+        min-height: calc(148mm - 12mm);
+        border: 1px solid #0f172a;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .order-no { font-size: 18px; font-weight: 700; }
+      .section-title { font-size: 12px; color: #475569; margin-bottom: 6px; }
+      .receiver { font-size: 21px; font-weight: 700; line-height: 1.2; }
+      .phone { font-size: 16px; margin-top: 4px; }
+      .address {
+        margin-top: 8px;
+        font-size: 16px;
+        line-height: 1.35;
+        white-space: pre-wrap;
+      }
+      .meta {
+        border-top: 1px dashed #475569;
+        margin-top: 12px;
+        padding-top: 8px;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+      .meta-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .meta-label { color: #475569; }
+      .meta-value { text-align: right; font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <main class="label">
+      <section>
+        <div class="order-no">ออเดอร์ ${escapeHtml(order.orderNo)}</div>
+        <div class="section-title">ป้ายจัดส่ง</div>
+        <div class="receiver">${escapeHtml(receiverName)}</div>
+        <div class="phone">โทร: ${escapeHtml(receiverPhone)}</div>
+        <div class="address">ที่อยู่: ${escapeHtml(order.customerAddress || "-")}</div>
+      </section>
+
+      <section class="meta">
+        <div class="meta-row">
+          <span class="meta-label">ขนส่ง</span>
+          <span class="meta-value">${escapeHtml(shippingProviderLabel)}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">Tracking</span>
+          <span class="meta-value">${escapeHtml(trackingNo)}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">ต้นทุนค่าส่ง</span>
+          <span class="meta-value">${order.shippingCost.toLocaleString("th-TH")} ${escapeHtml(order.storeCurrency)}</span>
+        </div>
+        <div class="meta-row">
+          <span class="meta-label">วันที่สร้าง</span>
+          <span class="meta-value">${escapeHtml(labelDateText)}</span>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>`;
+  }, []);
+
   const printReceiptViaIframe = useCallback((html: string) => {
     const iframe = document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
@@ -1240,16 +1552,6 @@ export function OrdersManagement(props: OrdersManagementProps) {
       setErrorMessage(null);
 
       try {
-        const isMobileLikeViewport =
-          window.matchMedia("(max-width: 767px)").matches ||
-          window.matchMedia("(pointer: coarse)").matches;
-        if (isMobileLikeViewport) {
-          router.push(
-            `/orders/${orderId}/print/receipt?autoprint=1&returnTo=${encodeURIComponent("/orders/new")}`,
-          );
-          return;
-        }
-
         const order =
           receiptPreviewOrder && receiptPreviewOrder.id === orderId
             ? receiptPreviewOrder
@@ -1263,7 +1565,12 @@ export function OrdersManagement(props: OrdersManagementProps) {
         setReceiptPrintLoading(false);
       }
     },
-    [buildReceiptPrintHtml, fetchOrderReceiptPreview, printReceiptViaIframe, receiptPreviewOrder, router],
+    [
+      buildReceiptPrintHtml,
+      fetchOrderReceiptPreview,
+      printReceiptViaIframe,
+      receiptPreviewOrder,
+    ],
   );
 
   const openCreatedOrderDetail = useCallback(
@@ -1273,10 +1580,42 @@ export function OrdersManagement(props: OrdersManagementProps) {
       setReceiptPreviewError(null);
       setReceiptPreviewLoading(false);
       setReceiptPrintLoading(false);
+      setShippingLabelPrintLoading(false);
       setSuccessMessage(null);
       router.push(`/orders/${orderId}`);
     },
     [router],
+  );
+
+  const openOrderShippingLabelPrint = useCallback(
+    async (orderId: string) => {
+      if (typeof window === "undefined") {
+        return;
+      }
+      setShippingLabelPrintLoading(true);
+      setErrorMessage(null);
+      try {
+        const order =
+          receiptPreviewOrder && receiptPreviewOrder.id === orderId
+            ? receiptPreviewOrder
+            : await fetchOrderReceiptPreview(orderId);
+        printReceiptViaIframe(buildShippingLabelPrintHtml(order));
+      } catch (error) {
+        const message =
+          error instanceof Error && error.message
+            ? error.message
+            : "ไม่สามารถเปิดหน้าพิมพ์สติ๊กเกอร์ได้";
+        setErrorMessage(message);
+      } finally {
+        setShippingLabelPrintLoading(false);
+      }
+    },
+    [
+      buildShippingLabelPrintHtml,
+      fetchOrderReceiptPreview,
+      printReceiptViaIframe,
+      receiptPreviewOrder,
+    ],
   );
 
   const openCheckoutSheet = () => {
@@ -1346,6 +1685,13 @@ export function OrdersManagement(props: OrdersManagementProps) {
       cancelled = true;
     };
   }, [createdOrderSuccess, fetchOrderReceiptPreview]);
+
+  useEffect(() => {
+    if (!showRecentOrdersSheet) {
+      return;
+    }
+    void fetchRecentOrders();
+  }, [fetchRecentOrders, showRecentOrdersSheet]);
 
   useEffect(() => {
     if (!isCreateOnlyMode) {
@@ -1588,12 +1934,12 @@ export function OrdersManagement(props: OrdersManagementProps) {
       setOnlineCustomProviderOpen(false);
       return;
     }
-    if (!SHIPPING_PROVIDER_CHIPS.some((item) => item === provider)) {
+    if (!shippingProviderChipOptions.some((item) => item === provider)) {
       setOnlineCustomProviderOpen(true);
       return;
     }
     setOnlineCustomProviderOpen(false);
-  }, [isOnlineCheckout, watchedShippingProvider]);
+  }, [isOnlineCheckout, watchedShippingProvider, shippingProviderChipOptions]);
 
   useEffect(() => {
     const seen = window.localStorage.getItem(SCANNER_PERMISSION_STORAGE_KEY) === "1";
@@ -1967,7 +2313,7 @@ export function OrdersManagement(props: OrdersManagementProps) {
                     ข้อมูลขนส่ง (สำหรับเชื่อมออกใบส่งอัตโนมัติในอนาคต)
                   </p>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    {SHIPPING_PROVIDER_CHIPS.map((provider) => {
+                    {shippingProviderChipOptions.map((provider) => {
                       const isActive = watchedShippingProvider.trim() === provider;
                       return (
                         <button
@@ -2858,6 +3204,19 @@ export function OrdersManagement(props: OrdersManagementProps) {
             </button>
           </div>
 
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-8 gap-1.5 px-3 text-xs"
+              onClick={() => setShowRecentOrdersSheet(true)}
+              disabled={loading}
+            >
+              <Clock3 className="h-3.5 w-3.5" />
+              ล่าสุด
+            </Button>
+          </div>
+
           <div className="-mx-1 overflow-x-auto px-1">
             <div className="flex min-w-max items-center gap-2">
               <button
@@ -3167,11 +3526,11 @@ export function OrdersManagement(props: OrdersManagementProps) {
               </p>
               <button
                 type="button"
-                className="font-medium text-blue-700 disabled:text-slate-400"
+                className="inline-flex h-9 items-center rounded-md px-3 text-sm font-semibold text-blue-700 active:bg-blue-50 disabled:text-slate-400"
                 onClick={() => setShowCartSheet(true)}
                 disabled={watchedItems.length === 0}
               >
-                แก้ตะกร้า
+                ตะกร้า
               </button>
             </div>
             <button
@@ -3237,32 +3596,42 @@ export function OrdersManagement(props: OrdersManagementProps) {
             ) : (
               <>
                 <div className="space-y-2 md:hidden">
-                  {visibleOrders.map((order) => (
-                    <Link
-                      key={order.id}
-                      href={`/orders/${order.id}`}
-                      className="block rounded-xl border bg-white p-4 shadow-sm"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="text-xs text-muted-foreground">{order.orderNo}</p>
-                          <h3 className="text-sm font-semibold">
-                            {order.customerName || order.contactDisplayName || "ลูกค้าทั่วไป"}
-                          </h3>
-                          <p className="text-xs text-muted-foreground">
-                            ช่องทาง {channelLabel[order.channel]} • จ่าย {order.paymentCurrency} •{" "}
-                            {paymentMethodLabel[order.paymentMethod]}
-                          </p>
+                  {visibleOrders.map((order) => {
+                    const pickupBadge = pickupPaymentBadge(order);
+                    return (
+                      <Link
+                        key={order.id}
+                        href={`/orders/${order.id}`}
+                        className="block rounded-xl border bg-white p-4 shadow-sm"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-xs text-muted-foreground">{order.orderNo}</p>
+                            <h3 className="text-sm font-semibold">
+                              {order.customerName || order.contactDisplayName || "ลูกค้าทั่วไป"}
+                            </h3>
+                            <p className="text-xs text-muted-foreground">
+                              ช่องทาง {channelLabel[order.channel]} • จ่าย {order.paymentCurrency} •{" "}
+                              {paymentMethodLabel[order.paymentMethod]}
+                            </p>
+                          </div>
+                          <div className="flex flex-col items-end gap-1">
+                            <span className={`rounded-full px-2 py-1 text-xs ${statusClass[order.status]}`}>
+                              {statusLabel[order.status]}
+                            </span>
+                            {pickupBadge ? (
+                              <span className={`rounded-full px-2 py-1 text-xs ${pickupBadge.className}`}>
+                                {pickupBadge.label}
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
-                        <span className={`rounded-full px-2 py-1 text-xs ${statusClass[order.status]}`}>
-                          {statusLabel[order.status]}
-                        </span>
-                      </div>
-                      <p className="mt-2 text-sm font-medium">
-                        {order.total.toLocaleString("th-TH")} {catalog.storeCurrency}
-                      </p>
-                    </Link>
-                  ))}
+                        <p className="mt-2 text-sm font-medium">
+                          {order.total.toLocaleString("th-TH")} {catalog.storeCurrency}
+                        </p>
+                      </Link>
+                    );
+                  })}
                 </div>
 
                 <div className="hidden overflow-hidden rounded-xl border bg-white shadow-sm md:block">
@@ -3285,16 +3654,26 @@ export function OrdersManagement(props: OrdersManagementProps) {
                     </thead>
                     <tbody>
                       {ordersTable.getRowModel().rows.map((row) => (
-                        <tr key={row.id} className="border-t">
+                        <tr
+                          key={row.id}
+                          className="cursor-pointer border-t transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                          role="link"
+                          tabIndex={0}
+                          aria-label={`เปิดรายละเอียดออเดอร์ ${row.original.orderNo}`}
+                          onClick={() => router.push(`/orders/${row.original.id}`)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" || event.key === " ") {
+                              event.preventDefault();
+                              router.push(`/orders/${row.original.id}`);
+                            }
+                          }}
+                        >
                           {row.getVisibleCells().map((cell, index) => (
                             <td key={cell.id} className="px-3 py-3">
                               {index === 0 ? (
-                                <Link
-                                  className="font-medium text-blue-700 hover:underline"
-                                  href={`/orders/${row.original.id}`}
-                                >
+                                <span className="font-medium text-blue-700">
                                   {row.original.orderNo}
-                                </Link>
+                                </span>
                               ) : (
                                 flexRender(cell.column.columnDef.cell, cell.getContext())
                               )}
@@ -3396,6 +3775,124 @@ export function OrdersManagement(props: OrdersManagementProps) {
           ) : null}
         </div>
       </SlideUpSheet>
+      {isCreateOnlyMode ? (
+        <SlideUpSheet
+          isOpen={showRecentOrdersSheet}
+          onClose={() => setShowRecentOrdersSheet(false)}
+          title="ออเดอร์ล่าสุด"
+          description={`ล่าสุด ${CREATE_ONLY_RECENT_ORDERS_LIMIT} รายการ`}
+          disabled={recentOrdersLoading}
+        >
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-slate-600">
+                เลือกรายการแล้วกด <span className="font-semibold text-slate-800">เปิดสรุป</span> เพื่อกลับไป modal สำเร็จ
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-8 px-2 text-xs"
+                onClick={() => {
+                  void fetchRecentOrders();
+                }}
+                disabled={recentOrdersLoading}
+              >
+                {recentOrdersLoading ? "กำลังโหลด..." : "รีเฟรช"}
+              </Button>
+            </div>
+            {recentOrdersLoading ? (
+              <p className="rounded-lg border border-dashed p-3 text-xs text-slate-500">
+                กำลังโหลดออเดอร์ล่าสุด...
+              </p>
+            ) : recentOrdersError ? (
+              <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-600">
+                {recentOrdersError}
+              </p>
+            ) : recentOrders.length === 0 ? (
+              <p className="rounded-lg border border-dashed p-3 text-xs text-slate-500">
+                ยังไม่มีออเดอร์ล่าสุดให้แสดง
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {recentOrders.map((order) => (
+                  <div key={order.id} className="rounded-lg border border-slate-200 bg-white p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">{order.orderNo}</p>
+                        <p className="text-xs text-slate-500">
+                          {new Date(order.createdAt).toLocaleString("th-TH")}
+                        </p>
+                      </div>
+                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">
+                        {checkoutFlowLabel[order.checkoutFlow]}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-600">
+                      ยอด {order.total.toLocaleString("th-TH")} {order.paymentCurrency} •{" "}
+                      {paymentMethodLabel[order.paymentMethod]}
+                    </p>
+                    <div
+                      className={`mt-2 grid gap-2 ${
+                        canRequestCancel && CANCELLABLE_ORDER_STATUSES.has(order.status)
+                          ? "grid-cols-3"
+                          : "grid-cols-2"
+                      }`}
+                    >
+                      <Button
+                        type="button"
+                        className="h-8 text-xs"
+                        onClick={() => openRecentOrderSummary(order)}
+                      >
+                        เปิดสรุป
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 text-xs"
+                        onClick={() => {
+                          setShowRecentOrdersSheet(false);
+                          router.push(`/orders/${order.id}`);
+                        }}
+                      >
+                        ดูรายละเอียด
+                      </Button>
+                      {canRequestCancel && CANCELLABLE_ORDER_STATUSES.has(order.status) ? (
+                        <Button
+                          type="button"
+                          className="h-8 bg-rose-600 text-xs text-white hover:bg-rose-700"
+                          onClick={() => openRecentOrderCancelModal(order)}
+                        >
+                          ยกเลิก
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </SlideUpSheet>
+      ) : null}
+      <ManagerCancelApprovalModal
+        isOpen={cancelApprovalTargetOrder !== null}
+        orderNo={cancelApprovalTargetOrder?.orderNo ?? null}
+        mode={canSelfApproveCancel ? "SELF_SLIDE" : "MANAGER_PASSWORD"}
+        isHighRisk={
+          cancelApprovalTargetOrder
+            ? cancelApprovalTargetOrder.status === "PAID" ||
+              cancelApprovalTargetOrder.status === "PACKED" ||
+              cancelApprovalTargetOrder.status === "SHIPPED"
+            : false
+        }
+        busy={cancelApprovalSubmitting}
+        onClose={() => {
+          if (cancelApprovalSubmitting) {
+            return;
+          }
+          setCancelApprovalTargetOrder(null);
+        }}
+        onConfirm={cancelRecentOrderWithApproval}
+      />
       <SlideUpSheet
         isOpen={showCartSheet}
         onClose={() => setShowCartSheet(false)}
@@ -3588,7 +4085,9 @@ export function OrdersManagement(props: OrdersManagementProps) {
           title={
             createdOrderSuccess.checkoutFlow === "PICKUP_LATER"
               ? "สร้างออเดอร์รับที่ร้านแล้ว"
-              : "สร้างออเดอร์หน้าร้านแล้ว"
+              : createdOrderSuccess.checkoutFlow === "ONLINE_DELIVERY"
+                ? "สร้างออเดอร์จัดส่งแล้ว"
+                : "สร้างออเดอร์หน้าร้านแล้ว"
           }
           description={`เลขที่ออเดอร์ ${createdOrderSuccess.orderNo}`}
         >
@@ -3596,7 +4095,9 @@ export function OrdersManagement(props: OrdersManagementProps) {
             <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
               {createdOrderSuccess.checkoutFlow === "PICKUP_LATER"
                 ? "แนะนำพิมพ์ใบรับสินค้าให้ลูกค้า หรือเปิดรายละเอียดเพื่อติดตามการรับสินค้า"
-                : "แนะนำพิมพ์ใบเสร็จให้ลูกค้า แล้วเริ่มออเดอร์ถัดไปได้ทันที"}
+                : createdOrderSuccess.checkoutFlow === "ONLINE_DELIVERY"
+                  ? "ตรวจข้อมูลจัดส่งและพิมพ์บิล/สติ๊กเกอร์ก่อนส่งงานต่อ"
+                  : "แนะนำพิมพ์ใบเสร็จให้ลูกค้า แล้วเริ่มออเดอร์ถัดไปได้ทันที"}
             </p>
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
               <div className="mb-2 flex items-center justify-between gap-2">
@@ -3647,6 +4148,53 @@ export function OrdersManagement(props: OrdersManagementProps) {
                 <p className="text-xs text-slate-500">ไม่มีข้อมูลตัวอย่างใบเสร็จ</p>
               )}
             </div>
+            {createdOrderSuccess.checkoutFlow === "ONLINE_DELIVERY" ? (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-xs font-medium text-slate-700">ตัวอย่างสติ๊กเกอร์จัดส่ง</p>
+                  <p className="text-[11px] text-slate-500">พิมพ์แบบ label A6</p>
+                </div>
+                {receiptPreviewLoading ? (
+                  <p className="text-xs text-slate-500">กำลังโหลดข้อมูลจัดส่ง...</p>
+                ) : receiptPreviewError ? (
+                  <p className="text-xs text-red-600">{receiptPreviewError}</p>
+                ) : receiptPreviewOrder ? (
+                  <div className="mx-auto max-w-[320px] rounded-md border border-slate-200 bg-white p-2 text-[10px] text-slate-900">
+                    <p className="text-center text-[11px] font-semibold">ป้ายจัดส่ง A6</p>
+                    <p className="text-center text-[10px]">ออเดอร์ {receiptPreviewOrder.orderNo}</p>
+                    <div className="my-1 border-t border-dashed border-slate-400" />
+                    <div className="space-y-1">
+                      <p className="font-semibold">
+                        {receiptPreviewOrder.customerName ||
+                          receiptPreviewOrder.contactDisplayName ||
+                          "ลูกค้าทั่วไป"}
+                      </p>
+                      <p>โทร: {receiptPreviewOrder.customerPhone || receiptPreviewOrder.contactPhone || "-"}</p>
+                      <p className="whitespace-pre-wrap">
+                        ที่อยู่: {receiptPreviewOrder.customerAddress || "-"}
+                      </p>
+                    </div>
+                    <div className="my-1 border-t border-dashed border-slate-400" />
+                    <div className="space-y-0.5 text-[9px] text-slate-700">
+                      <p>
+                        ขนส่ง:{" "}
+                        {receiptPreviewOrder.shippingProvider ||
+                          receiptPreviewOrder.shippingCarrier ||
+                          "-"}
+                      </p>
+                      <p>Tracking: {receiptPreviewOrder.trackingNo || "ยังไม่มี"}</p>
+                      <p>
+                        ต้นทุนค่าส่ง:{" "}
+                        {receiptPreviewOrder.shippingCost.toLocaleString("th-TH")}{" "}
+                        {receiptPreviewOrder.storeCurrency}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500">ไม่มีข้อมูลจัดส่ง</p>
+                )}
+              </div>
+            ) : null}
             <Button
               type="button"
               className="h-10 w-full"
@@ -3659,7 +4207,19 @@ export function OrdersManagement(props: OrdersManagementProps) {
                   ? "พิมพ์ใบรับสินค้า"
                   : "พิมพ์ใบเสร็จ"}
             </Button>
-            {createdOrderSuccess.checkoutFlow === "PICKUP_LATER" ? (
+            {createdOrderSuccess.checkoutFlow === "ONLINE_DELIVERY" ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 w-full"
+                disabled={shippingLabelPrintLoading}
+                onClick={() => openOrderShippingLabelPrint(createdOrderSuccess.orderId)}
+              >
+                {shippingLabelPrintLoading ? "กำลังเปิดหน้าพิมพ์..." : "พิมพ์สติ๊กเกอร์จัดส่ง"}
+              </Button>
+            ) : null}
+            {createdOrderSuccess.checkoutFlow === "PICKUP_LATER" ||
+            createdOrderSuccess.checkoutFlow === "ONLINE_DELIVERY" ? (
               <Button
                 type="button"
                 variant="outline"
@@ -3678,18 +4238,23 @@ export function OrdersManagement(props: OrdersManagementProps) {
                 ออเดอร์ใหม่ต่อ
               </Button>
             )}
+            {createdOrderSuccess.checkoutFlow === "PICKUP_LATER" ||
+            createdOrderSuccess.checkoutFlow === "ONLINE_DELIVERY" ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 w-full"
+                onClick={closeCreatedOrderSuccess}
+              >
+                ออเดอร์ใหม่ต่อ
+              </Button>
+            ) : null}
             <button
               type="button"
               className="w-full text-center text-xs font-medium text-blue-700 hover:text-blue-800"
-              onClick={() =>
-                createdOrderSuccess.checkoutFlow === "PICKUP_LATER"
-                  ? closeCreatedOrderSuccess()
-                  : openCreatedOrderDetail(createdOrderSuccess.orderId)
-              }
+              onClick={closeCreatedOrderSuccess}
             >
-              {createdOrderSuccess.checkoutFlow === "PICKUP_LATER"
-                ? "ออเดอร์ใหม่ต่อ"
-                : "ดูรายละเอียดออเดอร์"}
+              ปิดหน้าต่างนี้
             </button>
           </div>
         </SlideUpSheet>

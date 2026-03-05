@@ -2,19 +2,140 @@
 
 ## Snapshot Date
 
-- March 3, 2026
+- March 5, 2026
 
 ## Changed (ล่าสุด)
 
+- ปรับคำใน badge สถานะออเดอร์:
+  - เปลี่ยนจาก `รอชำระ` เป็น `ค้างจ่าย` ในหน้า `/orders` และ `/orders/[orderId]`
+  - สถานะผสมปรับตาม เช่น `รับสินค้าแล้ว (รอชำระ)` -> `รับสินค้าแล้ว (ค้างจ่าย)`
+
+- ปรับ UX สถานะในหน้า `/orders` ให้แยกเคสรับที่ร้านที่จ่ายแล้ว/ค้างจ่าย:
+  - ขยาย `OrderListItem` และ query `listOrdersByTab` ให้คืน `paymentStatus` ใน `GET /api/orders`
+  - สถานะหลักยังคงเป็น `รอรับที่ร้าน` แต่เพิ่ม badge รองจาก `paymentStatus`:
+    - `PAID/COD_SETTLED` => `ชำระแล้ว`
+    - `PENDING_PROOF` => `รอตรวจสลิป`
+    - อื่น ๆ => `ค้างจ่าย`
+  - แสดงผลทั้ง mobile card list และ desktop/tablet table ของหน้า `/orders`
+
+- ปรับดีไซน์ `สถานะงาน` ในหน้า `/orders/[orderId]`:
+  - Mobile ใช้ `ขั้นปัจจุบัน + progress bar` และ stepper compact 1 แถว (`flex-1` ต่อขั้น) พร้อม label 2 บรรทัดเพื่อเห็นครบและไม่ล้นจอ
+  - Desktop/Tablet ใช้ stepper แนวนอนบรรทัดเดียว พร้อมเส้นเชื่อมระหว่างขั้น
+  - คงลำดับขั้นตาม flow เดิม (`walk-in`, `pickup`, `online`) แต่ visual ชัดขึ้นและสแกนสถานะเร็วขึ้น
+  - แก้ bug overflow บน mobile: เอา `-mx` ออกจาก container stepper, เพิ่ม `min-w-0` ที่ rail หลัก, และปรับ stepper ให้ไม่ใช้ `w-max/nowrap`
+  - เสริม guard ที่ root ของหน้า detail ด้วย `overflow-x-hidden` กันกรณีข้อความยาวผิดปกติดันหน้าเกินจอ
+
+- เพิ่ม flow pickup แบบ 2 ลำดับในหน้า `/orders/[orderId]` และ API:
+  - รองรับทั้ง `ยืนยันรับชำระ -> ยืนยันรับสินค้า` และ `ยืนยันรับสินค้า (ค้างจ่าย) -> ยืนยันรับชำระ`
+  - เพิ่ม action ใหม่ `mark_picked_up_unpaid` ใน `PATCH /api/orders/[orderId]` เพื่อรับสินค้าไปก่อน (ปล่อยจอง+ตัดสต็อก) แล้วเปลี่ยนสถานะเป็น `PICKED_UP_PENDING_PAYMENT`
+  - ปรับ `confirm_paid` ให้รองรับสถานะ `PICKED_UP_PENDING_PAYMENT` (ปิดยอดโดยไม่ตัดสต็อกซ้ำ) และปรับเคส `READY_FOR_PICKUP + ยังไม่จ่าย` ให้เป็นยืนยันรับชำระอย่างเดียวก่อน
+  - ปรับ `submit_payment_slip` ให้รองรับ `PICKED_UP_PENDING_PAYMENT`
+  - ปรับ `cancel` ให้แยกการคืนสต็อกตาม movement จริง: เคสยังจองใช้ `RELEASE`, เคสรับสินค้าแล้วใช้ `RETURN`
+  - หน้า detail เพิ่มปุ่ม `ยืนยันรับสินค้า (ค้างจ่าย)` พร้อม custom confirm modal และซ่อน `การทำงานเพิ่มเติม` สำหรับสถานะ `PICKED_UP_PENDING_PAYMENT`
+  - ปรับ badge/label/filter/report ให้รองรับสถานะใหม่ (`PICKED_UP_PENDING_PAYMENT`) ครบทั้ง list/reports/query layer
+
+- ปรับ UX หน้า `/orders/[orderId]` ให้เป็น flat/no-card:
+  - เอาโครง card ซ้อนหลายชั้นออก แล้วใช้เส้นคั่น section (`border-b`) + spacing เพื่อใช้พื้นที่คุ้มขึ้น โดยเฉพาะหน้าจอเล็ก
+  - เพิ่ม badge บอก `ประเภท flow` (`Walk-in ทันที` / `มารับที่ร้านภายหลัง` / `สั่งออนไลน์/จัดส่ง`) ที่ header ของ detail
+  - ซ่อนบล็อก `การจัดส่ง` อัตโนมัติเมื่อเป็นออเดอร์หน้าร้าน/รับที่ร้านที่ไม่มีข้อมูลจัดส่ง เพื่อลด noise
+  - ปุ่ม action ใน detail ปรับถ้อยคำไทยให้ชัด (`ยืนยันแพ็กแล้ว`, `ยืนยันจัดส่งแล้ว`, `ยกเลิกออเดอร์`)
+  - เคส `Walk-in + ชำระแล้ว` ปรับเป็นหน้าสรุปจบงาน: action rail ซ่อน `แพ็ก/จัดส่ง` และซ่อนข้อความ `ไม่มีป้าย` แต่ยังมี `พิมพ์ใบเสร็จ` และ `ยกเลิกออเดอร์` (เมื่อผู้ใช้มีสิทธิ์) เพื่อรองรับการแก้รายการหน้างาน
+  - แก้เงื่อนไข `Walk-in ปิดงาน` ให้ยึด `status=PAID` เท่านั้น (ไม่ใช้ `paymentStatus=PAID` อย่างเดียว) เพื่อให้เคส `READY_FOR_PICKUP + PAID` ยังเห็นปุ่ม `ยืนยันรับสินค้า`
+  - เคส `Walk-in + ยกเลิกแล้ว` ซ่อนเมนู `การทำงานเพิ่มเติม` ใน action rail เพื่อลดความสับสน (ไม่มี action ต่อใน flow นี้)
+  - เคส `Walk-in + รอชำระ` ซ่อนเมนู `การทำงานเพิ่มเติม` ใน action rail เพื่อให้หน้าโฟกัสแค่ `ยืนยันชำระ` และ `ยกเลิกออเดอร์`
+  - เคส `มารับที่ร้านภายหลัง + รอรับที่ร้าน` (ทั้งจ่ายแล้ว/ยังไม่จ่าย) ซ่อนเมนู `การทำงานเพิ่มเติม` ใน action rail เพื่อให้หน้าโฟกัส action หลัก (`ยืนยันชำระ/ยืนยันรับสินค้า/ยกเลิกออเดอร์`)
+  - ปุ่ม `ยืนยันรับชำระ` และ `ยืนยันรับสินค้า` (รับที่ร้าน/จ่ายแล้ว) ในหน้า detail เพิ่ม custom confirm modal ก่อนส่ง action `confirm_paid`
+  - ซ่อน `ข้อมูลลูกค้า` อัตโนมัติเมื่อเป็นค่า default ของ walk-in (`ลูกค้าหน้าร้าน` + โทร/ที่อยู่ว่าง)
+  - ปรับ `รายการสินค้า` ให้อ่านง่ายขึ้นแบบ 2 แถวต่อสินค้า (ชื่อ+ยอดบรรทัด / SKU+จำนวน+หน่วยฐาน) และปรับ summary ด้านล่างให้ตัวเลขชิดขวา (`tabular-nums`) เพื่อสแกนยอดเร็วขึ้น
+  - บนจอ `lg+` (รวม tablet แนวนอน) ปรับรายการสินค้าเป็นตารางแนวบิล `รายการ | จำนวน | รวม` เพื่อให้การอ่านเหมือน desktop
+  - ปรับ breakpoint หน้า detail ให้ action rail ด้านขวาเริ่มที่ `lg` (tablet แนวนอนใช้ layout เดียวกับ desktop)
+  - รวมปุ่มพิมพ์ใบเสร็จที่ซ้ำกันให้เหลือ action เดียวใน action rail และเปลี่ยนพิมพ์ใบเสร็จ/ป้ายเป็น hidden iframe ในหน้าเดิม (ไม่เปิดแท็บใหม่) โดย cleanup iframe เก่าก่อนเริ่มพิมพ์รอบใหม่เพื่อลดปัญหาพิมพ์ซ้ำ
+  - แก้ issue พิมพ์ครั้งแรกข้อมูลว่างในหน้า detail: เปลี่ยน flow ให้ iframe โหลดปลายทางด้วย `autoprint=1` แล้วให้หน้าพิมพ์เรียก `window.print()` เองหลัง render data แทนการสั่งจาก parent เร็วเกินไป
+  - ปรับการแสดงผลสกุลเงินในหน้า detail/หน้าพิมพ์ให้ใช้ symbol (`₭`, `฿`, `$`) แทนรหัส (`LAK`, `THB`, `USD`) ในจุดแสดงยอดหลัก
+  - เอา text link `กลับไปหน้ารายการขาย` ออกจากหน้า detail เพื่อลดปุ่มซ้ำกับ navigation หลักของระบบ
+
+- ปรับ UX หน้า `/orders` ในตาราง desktop/tablet:
+  - คลิกได้ทั้งแถวเพื่อเปิดรายละเอียดออเดอร์ (`/orders/[orderId]`) และรองรับคีย์บอร์ด (`Enter`/`Space`)
+  - คงตัวอักษรเลขออเดอร์เป็นสีเน้นเพื่อสื่อว่าเป็นรายการที่เปิดดูต่อได้
+
+- ปรับ matrix สถานะสร้างออเดอร์ให้ตรง flow หน้างาน (Walk-in/Pickup):
+  - `Walk-in ทันที + เงินสด/QR/โอน` -> สร้างเป็น `PAID` และลง movement `OUT` ทันที
+  - `Walk-in ทันที + ค้างจ่าย` -> สร้างเป็น `PENDING_PAYMENT` และลง movement `RESERVE`
+  - `มารับที่ร้านภายหลัง` -> สร้างเป็น `READY_FOR_PICKUP` และลง movement `RESERVE` เสมอ; ถ้าชำระแล้วจะตั้ง `paymentStatus=PAID` แต่ยังไม่ตัดสต็อกจนกดยืนยันรับสินค้า
+  - ปรับ `confirm_paid` ให้รองรับเคส `READY_FOR_PICKUP + paymentStatus=PAID` เป็นการยืนยันรับสินค้า (ปล่อยจอง+ตัดสต็อก) และไม่บังคับสลิปซ้ำ
+
+- เพิ่ม policy ยกเลิกออเดอร์แบบ step-up approval ในหน้า `/orders/[orderId]`:
+  - ผู้กดปุ่มยกเลิกต้องมีสิทธิ์ส่งคำขออย่างน้อยหนึ่งสิทธิ์ (`orders.update` หรือ `orders.cancel` หรือ `orders.delete`)
+  - รองรับ 2 โหมดยืนยัน:
+    - `Owner/Manager` ยืนยันเองด้วย `เหตุผล + สไลด์ยืนยัน` (`approvalMode=SELF_SLIDE`)
+    - role อื่นยืนยันด้วย `อีเมลผู้อนุมัติ + รหัสผ่านผู้อนุมัติ + เหตุผล` (`approvalMode=MANAGER_PASSWORD`)
+  - API ตรวจ role ฝั่ง server ว่าโหมด `SELF_SLIDE` ใช้ได้เฉพาะ `Owner/Manager` เท่านั้น
+  - เมื่อยกเลิกสำเร็จ จะเก็บ `cancelReason` และข้อมูลผู้อนุมัติ (`approvedBy*`) ใน audit metadata
+  - ปรับ UI จาก inline form เป็น modal กลางแบบ adaptive ตาม role (คอมโพเนนต์เดียวสำหรับ reuse)
+  - เพิ่ม throttle ฝั่ง UI ในโหมดรหัสผ่าน: ถ้ายืนยันไม่สำเร็จติดกันหลายครั้ง ระบบจะพักการยืนยันชั่วคราว (cooldown) ก่อนลองใหม่
+  - หน้า detail แสดงสรุป `การอนุมัติยกเลิก` หลังยกเลิกสำเร็จ โดยอ่านจาก `audit_events` (`order.cancel`) เช่น เหตุผล, ผู้อนุมัติ, ผู้กดยกเลิก, เวลาอนุมัติ
+  - ปุ่ม `ยกเลิกออเดอร์` ย้ายมาอยู่ action rail หลักของหน้า detail แล้ว (ไม่ซ่อนใน `การทำงานเพิ่มเติม`) เพื่อกดได้ทันที
+  - เพิ่มเอกสารเทส `docs/UAT_CANCEL_APPROVAL.md` (6 เคส) ให้ทีมใช้ทดสอบ flow เดียวกัน
+
+- เพิ่ม `Shipping Provider Master` สำหรับ flow ออนไลน์:
+  - เพิ่มตารางใหม่ `shipping_providers` (migration `0037_bouncy_leper_queen.sql`) เก็บ master ต่อร้าน (`code`, `displayName`, `branchName`, `aliases`, `active`, `sortOrder`)
+  - `getOrderCatalogForStore` คืน `catalog.shippingProviders` จากตารางจริง และมี fallback ค่า default ถ้ายังไม่ได้ migrate
+  - หน้า `/orders/new` เปลี่ยนจาก hardcode ขนส่งเป็นอ่านปุ่ม grid จาก `catalog.shippingProviders` + ปุ่ม `อื่นๆ`
+  - เพิ่มหน้า settings `/settings/store/shipping-providers` + component `store-shipping-providers-settings` สำหรับจัดการรายการขนส่ง (เพิ่ม/แก้ไข/ปิดใช้งาน/ลบ)
+  - เพิ่ม API `/api/settings/store/shipping-providers` (`GET/POST/PATCH/DELETE`) สำหรับ CRUD master ขนส่งของร้าน
+  - `POST /api/onboarding/store` seed provider เริ่มต้นให้ร้านใหม่อัตโนมัติ (`Houngaloun`, `Anousith`, `Mixay`)
+  - `scripts/repair-migrations.mjs` รองรับสร้างตาราง + index + backfill provider default ให้ฐานเดิม
+
+- เพิ่ม `COD Reconcile Panel (MVP)` สำหรับปิดยอด COD รายวันแบบหลายรายการ:
+  - หน้าใหม่ `/orders/cod-reconcile` (client: `components/app/orders-cod-reconcile.tsx`)
+  - หน้า `/orders` เพิ่มปุ่มลัด `ปิดยอด COD รายวัน` (แสดงเฉพาะผู้มีสิทธิ์ `orders.mark_paid`)
+  - รองรับ filter `dateFrom/dateTo`, `provider`, `q` และ pagination
+  - ผู้ใช้แก้ `ยอดโอนจริง` + `codFee` รายรายการ แล้วเลือกหลายรายการเพื่อ `ยืนยันปิดยอดที่เลือก` ได้
+  - มี summary card real-time (ยอดต้องได้/ยอดโอนจริง/codFee/ส่วนต่าง) จากรายการที่เลือก + สรุปร่างข้อมูลทั้งหน้าปัจจุบัน
+  - API ใหม่:
+    - `GET /api/orders/cod-reconcile` ดึงรายการ COD pending reconcile
+    - `POST /api/orders/cod-reconcile` ปิดยอดแบบ batch, เขียน audit action `order.confirm_paid.bulk_cod_reconcile`, invalidate cache dashboard/reports, และรองรับ `Idempotency-Key` กันปิดยอดซ้ำ
+  - query helper ใหม่ `listPendingCodReconcile` ใน `lib/orders/queries.ts`
+
+- แก้ปัญหา dropdown หน่วยสินค้าในหน้า create order แจ้ง React key ซ้ำ (`unit_ea`):
+  - ปรับ `getOrderCatalogForStore` ให้ dedupe `units` ต่อสินค้าโดยยึด `unitId` ไม่ซ้ำ
+  - คงข้อมูล base unit เป็นตัวหลัก แล้วเพิ่ม conversion เฉพาะ unit ที่ยังไม่ถูกใส่
+  - ลดโอกาสเจอ warning `Encountered two children with the same key` ในฟอร์มตะกร้า/checkout
+
+- แก้เคสเลือก `สั่งออนไลน์/จัดส่ง` แล้วเลือก `COD` แต่ยังโดน validation เด้งว่าใช้ COD ไม่ได้:
+  - เพิ่ม `checkoutFlow` ใน `defaultValues` ของ create order form และ sync ทุกครั้งที่เปลี่ยนประเภทออเดอร์
+  - ทำให้ `zodResolver(createOrderSchema)` เห็น `checkoutFlow=ONLINE_DELIVERY` จริงขณะ validate `paymentMethod=COD`
+
+- ขยาย COD return flow ตามงานหน้างานจริง:
+  - เพิ่มคอลัมน์ `orders.cod_return_note` พร้อม migration (`0036_ambiguous_nuke.sql`) เพื่อเก็บเหตุผล/หมายเหตุตีกลับ
+  - หน้า `/orders/[orderId]` (order detail) ในบล็อก COD เพิ่ม textarea `เหตุผล/หมายเหตุ` ตอนกด `ตีกลับเข้าร้าน (COD)` และแสดงหมายเหตุที่บันทึกไว้ในสรุป COD
+  - API `PATCH /api/orders/[orderId]` action `mark_cod_returned` รองรับ `codReturnNote` เพิ่มจากเดิม (`codFee`) และบันทึกลงออเดอร์พร้อม audit metadata
+  - `scripts/repair-migrations.mjs` รองรับเติมคอลัมน์ `orders.cod_return_note` ให้ฐานเก่าที่ยังไม่มีคอลัมน์นี้
+
+- ขยายรายงาน COD ให้เห็นต้นทุนตีกลับชัดขึ้น:
+  - `getCodOverviewSummary` เพิ่ม metric `returnedTodayCodFee` และ `returnedCodFee` (รวม `codFee`)
+  - ตาราง `แยกตามขนส่ง` เพิ่มคอลัมน์ metric `returnedCodFee` ต่อผู้ให้บริการ
+  - หน้า `/reports` แสดง `ค่าตีกลับวันนี้` และ `ค่าตีกลับสะสม (codFee)` แล้ว เพื่อใช้ติดตามต้นทุนตีกลับรายวัน/รายขนส่ง
+
+- อัปเดต COD settlement/return flow ในหน้า `/orders/[orderId]` และ API:
+  - ปุ่ม `ยืนยันรับเงินปลายทาง (COD)` รองรับกรอก `ยอดที่ขนส่งโอนจริง` ก่อนยิง `confirm_paid` (payload `codAmount`)
+  - ปุ่ม `ตีกลับเข้าร้าน (COD)` รองรับกรอก `ค่าตีกลับ` ก่อนยิง `mark_cod_returned` (payload `codFee`)
+  - backend จะบวก `codFee` เข้า `shippingCost` และสะสมในคอลัมน์ `codFee` เพื่อรองรับเคสต้นทุนค่าส่งมารู้ทีหลัง
+  - การ์ดสรุปใน order detail แสดงเพิ่ม `ต้นทุนขนส่งรวม` และ `ค่าตีกลับ COD` เพื่ออ่านผลกำไร/ขาดทุน COD ได้ตรงขึ้น
+
 - ปรับ post-create flow ของหน้า POS (`/orders/new`) ให้แยกตามประเภทออเดอร์:
-  - `Walk-in ทันที` และ `มารับที่ร้านภายหลัง` หลังสร้างสำเร็จจะแสดง success action sheet แทนการเด้งเข้า detail ทันที
+  - หลังสร้างสำเร็จ:
+    - ทุกหน้าจอ (Desktop/Tablet/Mobile และทั้ง mode manage/create-only): แสดง success action sheet ในหน้าเดิมก่อน
   - action หลักใน sheet คือพิมพ์เอกสาร (`พิมพ์ใบเสร็จ` / `พิมพ์ใบรับสินค้า`) และมีทางเลือก `ดูรายละเอียดออเดอร์` หรือ `ออเดอร์ใหม่ต่อ`
-  - เพิ่ม preview บิลใน success action sheet สำหรับ `Walk-in/Pickup` โดยโหลดข้อมูลออเดอร์จริงจาก `GET /api/orders/[orderId]`
-  - ปุ่มพิมพ์ใน sheet ปรับเป็น hybrid:
-    - Desktop: พิมพ์ผ่าน hidden iframe แบบไม่เปิดแท็บใหม่
-    - Mobile/Tablet: เปิดหน้า `/orders/[orderId]/print/receipt?autoprint=1` ในแท็บเดิมเพื่อ auto print และมีปุ่ม `กลับ POS`
+  - เพิ่ม preview บิลใน success action sheet โดยโหลดข้อมูลออเดอร์จริงจาก `GET /api/orders/[orderId]`
+  - flow `สั่งออนไลน์/จัดส่ง` เพิ่มบล็อก `ข้อมูลสติ๊กเกอร์จัดส่ง` (ผู้รับ/โทร/ที่อยู่/ขนส่ง/tracking/ต้นทุนค่าส่ง) และปุ่ม `พิมพ์สติ๊กเกอร์จัดส่ง`
+  - flow `มารับที่ร้านภายหลัง` และ `สั่งออนไลน์/จัดส่ง` มีปุ่ม `ออเดอร์ใหม่ต่อ` ใน success action sheet เพื่อปิด modal แล้วเริ่มออเดอร์ใหม่ได้ทันที
+  - หน้า `/orders/new` เพิ่มปุ่ม `ล่าสุด` ใต้แถบค้นหา: เปิด `SlideUpSheet` รายการออเดอร์ล่าสุด 8 รายการจาก `GET /api/orders` พร้อมปุ่ม `เปิดสรุป` (reopen success action sheet) และ `ดูรายละเอียด`
+  - รายการ `ออเดอร์ล่าสุด` เพิ่มปุ่ม `ยกเลิก` แล้ว (เฉพาะสิทธิ์ `orders.update/cancel/delete`) และใช้ modal กลางตัวเดียวกับหน้า detail ก่อนยิง `PATCH /api/orders/[orderId]` action `cancel` (Owner/Manager ใช้โหมดสไลด์, role อื่นใช้โหมดรหัสผ่าน Manager)
+  - ปุ่มพิมพ์ใน success action sheet พิมพ์ผ่าน hidden iframe เหมือนกันทุกหน้าจอ (ไม่เปิดแท็บใหม่/ไม่เปลี่ยนหน้า)
   - หน้า `/orders/[orderId]/print/receipt` เพิ่ม print CSS ซ่อน `header/bottom nav` ระหว่างพิมพ์ เพื่อกันการติด layout แอปในบิล
-  - `สั่งออนไลน์/จัดส่ง` ยังคงพาไปหน้า order detail ทันทีเหมือนเดิมเพื่อทำงานต่อด้านจัดส่ง
+  - สำหรับ `พิมพ์สติ๊กเกอร์จัดส่ง`: ใช้ hidden iframe ในหน้าเดิมทุกหน้าจอ (ไม่เปิดแท็บใหม่)
+  - ใน success action sheet ของ `สั่งออนไลน์/จัดส่ง` ปรับ block เป็น `ตัวอย่างสติ๊กเกอร์จัดส่ง` แบบการ์ด preview (แทน text list เดิม) เพื่อให้ visual ใกล้เคียง `ตัวอย่างบิล`
 
 - ปรับ feedback ตอนเพิ่มสินค้าหมดสต็อกในหน้า POS:
   - การ์ดสินค้า `หมดสต็อก/ติดจอง` ยังกดได้ แต่ระบบจะไม่เพิ่มลงตะกร้า
@@ -32,7 +153,7 @@
   - ปรับ UI เป็น section พับ/เปิด (`+ เลือกจากรายชื่อลูกค้า`) เพื่อลดความรกของฟอร์มและเปิดเฉพาะตอนต้องการ
   - เพิ่มช่อง `เติมข้อมูลลูกค้าแบบเร็ว` สำหรับ paste ข้อความดิบแล้วแยก `ชื่อ/เบอร์/ที่อยู่` อัตโนมัติเบื้องต้น
   - เพิ่ม section `ข้อมูลขนส่ง` ใน online flow:
-    - เลือก `ผู้ให้บริการขนส่ง` แบบ grid (`Houngaloun`, `Anousith`, `Mixay`, `อื่นๆ`)
+    - เลือก `ผู้ให้บริการขนส่ง` แบบ grid จาก `shipping_providers` ของร้าน + ปุ่ม `อื่นๆ`
     - ค่าเริ่มต้นเป็นว่าง (ไม่ auto select) และผู้ใช้ต้องเลือกเองก่อนกดสร้างออเดอร์
     - ถ้าเลือก `อื่นๆ` กรอกชื่อผู้ให้บริการได้แบบอิสระ
     - เอาช่อง `สาขาที่รับฝาก` ออกจากฟอร์ม checkout online แล้ว (เก็บเฉพาะ provider)
@@ -130,8 +251,8 @@
   - ปรับ layout desktop ของ checkout ออนไลน์ให้ `ส่วนลด` และ `ค่าขนส่ง` อยู่บรรทัดเดียวแบบ 2 คอลัมน์เท่ากัน (1:1)
   - ดีไซน์ `วิธีรับชำระ` ใน checkout เปลี่ยนจาก dropdown เป็นปุ่มเลือกแบบ chips: หน้าร้าน/รับที่ร้าน = `เงินสด`, `QR`, `ค้างจ่าย`; ออนไลน์ = `เงินสด`, `QR`, `ค้างจ่าย`, `COD` และเพิ่ม enum ใหม่ `ON_CREDIT` สำหรับค้างจ่าย
   - validation ฝั่ง client ตาม flow: `Walk-in ทันที` และ `มารับที่ร้านภายหลัง` ไม่บังคับชื่อ/เบอร์ (แนะนำให้กรอกอย่างน้อย 1 อย่างถ้าทราบ), ส่วน `สั่งออนไลน์/จัดส่ง` ยังบังคับเบอร์โทร+ที่อยู่จัดส่ง และเปิด `COD` เฉพาะ flow ออนไลน์
-  - ฝั่ง API `POST /api/orders` รองรับ `checkoutFlow` (optional) และถ้าเป็น `PICKUP_LATER` จะสร้างออเดอร์เป็นสถานะ `READY_FOR_PICKUP` พร้อมบันทึก movement `RESERVE` ทันที
-  - ฝั่ง API `PATCH /api/orders/[orderId]` เปิดให้ `confirm_paid`/`submit_payment_slip` ใช้ได้กับสถานะ `READY_FOR_PICKUP` และการ `cancel` จากสถานะนี้จะปล่อยจองสต็อก (`RELEASE`) กลับ
+  - ฝั่ง API `POST /api/orders` รองรับ `checkoutFlow` (optional) พร้อม matrix ล่าสุด: `Walk-in จ่ายแล้ว => PAID+OUT`, `Walk-in ค้างจ่าย => PENDING_PAYMENT+RESERVE`, `Pickup later => READY_FOR_PICKUP+RESERVE` (จ่ายแล้วตั้ง `paymentStatus=PAID` แต่ยังไม่ OUT), ส่วนออนไลน์คงเริ่มที่ `DRAFT`
+  - ฝั่ง API `PATCH /api/orders/[orderId]` เปิดให้ `confirm_paid`/`submit_payment_slip` ใช้ได้กับสถานะ `READY_FOR_PICKUP`; `confirm_paid` รองรับเคสรับสินค้าหน้าร้านที่จ่ายล่วงหน้า (`READY_FOR_PICKUP + paymentStatus=PAID`) เพื่อปล่อยจอง+ตัดสต็อกโดยไม่บังคับสลิปซ้ำ, และการ `cancel` จากสถานะนี้จะปล่อยจองสต็อก (`RELEASE`) กลับ
   - อัปเดต flow COD ในหน้า detail/route:
     - `mark_packed` รองรับ COD จาก `PENDING_PAYMENT` และจะลง movement `RELEASE+OUT` ตอนแพ็ก (ไม่ต้องรอ paid)
     - `confirm_paid` สำหรับ COD ใช้ปิดยอดหลัง `SHIPPED` เท่านั้น โดยอัปเดต `paymentStatus=COD_SETTLED` + `codSettledAt`
@@ -140,7 +261,8 @@
     - เพิ่มคอลัมน์ `orders.cod_returned_at` และเซ็ตตอนตีกลับสำเร็จ
   - หน้า `/reports` เพิ่ม section `สรุป COD`: ค้างเก็บเงิน, ปิดยอดวันนี้, ตีกลับวันนี้, ตีกลับสะสม, COD สุทธิสะสม และแยกผลตามผู้ให้บริการขนส่ง (daily return ใช้ `cod_returned_at`)
   - ผู้ใช้เลือกสินค้าในหน้า POS ก่อน แล้วกด `ชำระเงิน / กรอกรายละเอียด` เพื่อเปิด Checkout sheet (ลูกค้า/ชำระเงิน/ที่อยู่)
-  - sticky action bar บนมือถือปรับเป็น summary + ปุ่มลัด `แก้ตะกร้า` และปุ่มหลักเดียว `ถัดไป: ชำระเงิน` เพื่อให้ flow checkout ง่ายขึ้น
+  - sticky action bar บนมือถือปรับเป็น summary + ปุ่มลัด `ตะกร้า` และปุ่มหลักเดียว `ถัดไป: ชำระเงิน` เพื่อให้ flow checkout ง่ายขึ้น
+  - ปุ่ม `ตะกร้า` บน sticky bar มือถือขยายพื้นที่กดและเพิ่มขนาดตัวอักษร (`h-9`, `text-sm`, `font-semibold`) เพื่อกดง่ายขึ้น
   - รีดีไซน์ `/orders/new` รอบล่าสุดเป็น `Scan-First POS`:
     - Desktop (`>=1200px`) เป็น 3 คอลัมน์ (`หมวด/ทางลัด`, `สินค้า`, `ตะกร้า`)
     - Tablet (`768-1199px`) เป็น 2 คอลัมน์ (`สินค้า`, `ตะกร้า`)

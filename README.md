@@ -108,6 +108,7 @@ npm run build
 - Permission redirect
 - สร้างร้าน / onboarding
 - จัดการผู้ใช้ในหน้า settings
+- Orders create flow: ดู checklist มาตรฐานที่ `docs/UAT_ORDERS_CREATE_FLOW.md`
 
 ## 6) ถ้าเจอปัญหา migrate แล้วฟ้อง table already exists
 

@@ -1,0 +1,1 @@
+ALTER TABLE `orders` ADD `cod_return_note` text;

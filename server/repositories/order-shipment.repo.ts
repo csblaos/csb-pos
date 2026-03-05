@@ -16,6 +16,7 @@ export type OrderForShipmentLabel = {
     | "DRAFT"
     | "PENDING_PAYMENT"
     | "READY_FOR_PICKUP"
+    | "PICKED_UP_PENDING_PAYMENT"
     | "PAID"
     | "PACKED"
     | "SHIPPED"

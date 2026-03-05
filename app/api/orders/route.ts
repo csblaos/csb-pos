@@ -169,7 +169,10 @@ export async function POST(request: Request) {
     }
 
     const payload = parsed.data;
-    const isPickupLater = payload.checkoutFlow === "PICKUP_LATER";
+    const checkoutFlow = payload.checkoutFlow ?? "WALK_IN_NOW";
+    const isPickupLater = checkoutFlow === "PICKUP_LATER";
+    const isWalkInNow = checkoutFlow === "WALK_IN_NOW";
+    const isOnlineDelivery = checkoutFlow === "ONLINE_DELIVERY";
 
     if (isPickupLater && payload.channel !== "WALK_IN") {
       if (idempotencyRecordId) {
@@ -190,7 +193,7 @@ export async function POST(request: Request) {
         result: "FAIL",
         reasonCode: "INVALID_PICKUP_CHANNEL",
         metadata: {
-          checkoutFlow: payload.checkoutFlow,
+          checkoutFlow,
           channel: payload.channel,
         },
         request,
@@ -281,7 +284,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "กรุณาเพิ่มสินค้าอย่างน้อย 1 รายการ" }, { status: 400 });
     }
 
-    if (isPickupLater) {
+    const selectedPaymentMethod = payload.paymentMethod ?? "CASH";
+    const isOnCreditPayment = selectedPaymentMethod === "ON_CREDIT";
+    const isPrepaidAtCreate =
+      !isOnlineDelivery && !isOnCreditPayment && selectedPaymentMethod !== "COD";
+    const shouldReserveStockOnCreate = isPickupLater || (isWalkInNow && isOnCreditPayment);
+    const shouldStockOutOnCreate = isWalkInNow && isPrepaidAtCreate;
+
+    if (shouldReserveStockOnCreate || shouldStockOutOnCreate) {
       const requiredByProduct = new Map<string, number>();
       for (const item of normalizedItems) {
         requiredByProduct.set(
@@ -306,11 +316,13 @@ export async function POST(request: Request) {
         const insufficientMessage = insufficient
           .map((item) => `${item.productName} (ต้องใช้ ${item.requiredQtyBase}, คงเหลือ ${item.availableQtyBase})`)
           .join(", ");
+        const stockOperationLabel = shouldStockOutOnCreate ? "ตัดสต็อก" : "จองสต็อก";
+        const stockErrorMessage = `สต็อกพร้อมขายไม่พอสำหรับ${stockOperationLabel}: ${insufficientMessage}`;
         if (idempotencyRecordId) {
           await safeMarkIdempotencyFailed({
             recordId: idempotencyRecordId,
             statusCode: 400,
-            body: { message: `สต็อกพร้อมขายไม่พอสำหรับจองรับที่ร้าน: ${insufficientMessage}` },
+            body: { message: stockErrorMessage },
           });
         }
         await safeLogAuditEvent({
@@ -322,17 +334,15 @@ export async function POST(request: Request) {
           action,
           entityType: "order",
           result: "FAIL",
-          reasonCode: "INSUFFICIENT_STOCK_PICKUP",
+          reasonCode: shouldStockOutOnCreate ? "INSUFFICIENT_STOCK_OUT" : "INSUFFICIENT_STOCK_RESERVE",
           metadata: {
-            checkoutFlow: payload.checkoutFlow,
+            checkoutFlow,
+            paymentMethod: selectedPaymentMethod,
             insufficientCount: insufficient.length,
           },
           request,
         });
-        return NextResponse.json(
-          { message: `สต็อกพร้อมขายไม่พอสำหรับจองรับที่ร้าน: ${insufficientMessage}` },
-          { status: 400 },
-        );
+        return NextResponse.json({ message: stockErrorMessage }, { status: 400 });
       }
     }
 
@@ -341,8 +351,7 @@ export async function POST(request: Request) {
       payload.paymentCurrency ?? catalog.storeCurrency,
       parseStoreCurrency(catalog.storeCurrency),
     );
-    const selectedPaymentMethod = payload.paymentMethod ?? "CASH";
-    if (selectedPaymentMethod === "COD" && payload.checkoutFlow !== "ONLINE_DELIVERY") {
+    if (selectedPaymentMethod === "COD" && checkoutFlow !== "ONLINE_DELIVERY") {
       if (idempotencyRecordId) {
         await safeMarkIdempotencyFailed({
           recordId: idempotencyRecordId,
@@ -361,7 +370,7 @@ export async function POST(request: Request) {
         result: "FAIL",
         reasonCode: "INVALID_COD_PAYMENT_METHOD",
         metadata: {
-          checkoutFlow: payload.checkoutFlow,
+          checkoutFlow,
           paymentMethod: selectedPaymentMethod,
         },
         request,
@@ -535,8 +544,19 @@ export async function POST(request: Request) {
     }
 
     const initialPaymentStatus =
-      selectedPaymentMethod === "COD" ? "COD_PENDING_SETTLEMENT" : "UNPAID";
-    const initialStatus = isPickupLater ? "READY_FOR_PICKUP" : "DRAFT";
+      selectedPaymentMethod === "COD"
+        ? "COD_PENDING_SETTLEMENT"
+        : isPrepaidAtCreate
+          ? "PAID"
+          : "UNPAID";
+    const initialStatus = isPickupLater
+      ? "READY_FOR_PICKUP"
+      : shouldStockOutOnCreate
+        ? "PAID"
+        : shouldReserveStockOnCreate
+          ? "PENDING_PAYMENT"
+          : "DRAFT";
+    const initialPaidAt = isPrepaidAtCreate ? new Date().toISOString() : null;
 
     const totals = computeOrderTotals({
       subtotal,
@@ -548,7 +568,7 @@ export async function POST(request: Request) {
     });
 
     const customerNameFallback =
-      payload.checkoutFlow === "PICKUP_LATER"
+      checkoutFlow === "PICKUP_LATER"
         ? "ลูกค้ารับที่ร้าน"
         : payload.channel === "WALK_IN"
           ? "ลูกค้าหน้าร้าน"
@@ -596,10 +616,11 @@ export async function POST(request: Request) {
           paymentAccountId: selectedPaymentAccountId,
           paymentSlipUrl: null,
           paymentProofSubmittedAt: null,
-          shippingProvider: payload.checkoutFlow === "ONLINE_DELIVERY" ? shippingProvider : null,
-          shippingCarrier: payload.checkoutFlow === "ONLINE_DELIVERY" ? shippingCarrier : null,
+          shippingProvider: isOnlineDelivery ? shippingProvider : null,
+          shippingCarrier: isOnlineDelivery ? shippingCarrier : null,
           trackingNo: null,
           shippingCost: payload.shippingCost,
+          paidAt: initialPaidAt,
           createdBy: session.userId,
         })
         .returning({ id: orders.id });
@@ -619,7 +640,10 @@ export async function POST(request: Request) {
         })),
       );
 
-      if (isPickupLater && normalizedItems.length > 0) {
+      if (shouldReserveStockOnCreate && normalizedItems.length > 0) {
+        const reserveNotePrefix = isPickupLater
+          ? "จองสต็อกสำหรับรับที่ร้าน"
+          : "จองสต็อกสำหรับออเดอร์ค้างจ่าย";
         await tx.insert(inventoryMovements).values(
           normalizedItems.map((item) => ({
             storeId,
@@ -628,7 +652,22 @@ export async function POST(request: Request) {
             qtyBase: item.qtyBase,
             refType: "ORDER" as const,
             refId: orderId,
-            note: `จองสต็อกสำหรับรับที่ร้าน ${orderNo}`,
+            note: `${reserveNotePrefix} ${orderNo}`,
+            createdBy: session.userId,
+          })),
+        );
+      }
+
+      if (shouldStockOutOnCreate && normalizedItems.length > 0) {
+        await tx.insert(inventoryMovements).values(
+          normalizedItems.map((item) => ({
+            storeId,
+            productId: item.productId,
+            type: "OUT" as const,
+            qtyBase: item.qtyBase,
+            refType: "ORDER" as const,
+            refId: orderId,
+            note: `ตัดสต็อกทันทีจากการขายหน้าร้าน ${orderNo}`,
             createdBy: session.userId,
           })),
         );
@@ -650,7 +689,10 @@ export async function POST(request: Request) {
             itemCount: normalizedItems.length,
             paymentMethod: selectedPaymentMethod,
             status: initialStatus,
-            checkoutFlow: payload.checkoutFlow ?? "WALK_IN_NOW",
+            paymentStatus: initialPaymentStatus,
+            stockReservedOnCreate: shouldReserveStockOnCreate,
+            stockOutOnCreate: shouldStockOutOnCreate,
+            checkoutFlow,
           },
           request,
         }),

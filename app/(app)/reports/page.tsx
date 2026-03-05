@@ -110,6 +110,7 @@ export default async function ReportsPage() {
           <p>รับเงินวันนี้: {codOverview.settledTodayAmount.toLocaleString("th-TH")} {storeCurrency}</p>
           <p>ตีกลับวันนี้: {codOverview.returnedTodayCount.toLocaleString("th-TH")} ออเดอร์</p>
           <p>ค่าส่งเสียวันนี้: {codOverview.returnedTodayShippingLoss.toLocaleString("th-TH")} {storeCurrency}</p>
+          <p>ค่าตีกลับวันนี้: {codOverview.returnedTodayCodFee.toLocaleString("th-TH")} {storeCurrency}</p>
         </div>
         <p className="text-sm">
           ยอด COD ปิดแล้วสะสม: {codOverview.settledAllAmount.toLocaleString("th-TH")} {storeCurrency}
@@ -120,6 +121,9 @@ export default async function ReportsPage() {
           ตีกลับสะสม: {codOverview.returnedCount.toLocaleString("th-TH")} ออเดอร์
           {" · "}
           ขาดทุนค่าส่งสะสม: {codOverview.returnedShippingLoss.toLocaleString("th-TH")} {storeCurrency}
+        </p>
+        <p className="text-sm">
+          ค่าตีกลับสะสม (codFee): {codOverview.returnedCodFee.toLocaleString("th-TH")} {storeCurrency}
         </p>
         <p className="text-sm font-semibold">
           COD สุทธิสะสม (รับเงิน - ค่าส่งตีกลับ): {codOverview.netAmount.toLocaleString("th-TH")} {storeCurrency}
@@ -141,6 +145,9 @@ export default async function ReportsPage() {
                 <p>
                   ตีกลับ {row.returnedCount.toLocaleString("th-TH")} ออเดอร์ · ขาดทุนค่าส่ง{" "}
                   {row.returnedShippingLoss.toLocaleString("th-TH")} {storeCurrency}
+                </p>
+                <p>
+                  ค่าตีกลับสะสม: {row.returnedCodFee.toLocaleString("th-TH")} {storeCurrency}
                 </p>
                 <p className="font-medium">
                   COD สุทธิ: {row.netAmount.toLocaleString("th-TH")} {storeCurrency}

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { eq } from "drizzle-orm";
-import { ChevronRight, Store, WalletCards } from "lucide-react";
+import { ChevronRight, Store, Truck, WalletCards } from "lucide-react";
 import { redirect } from "next/navigation";
 
 import { StoreFinancialSettings } from "@/components/app/store-financial-settings";
@@ -119,6 +119,24 @@ export default async function SettingsStorePage() {
               <span className="block truncate text-sm font-medium text-slate-900">จัดการบัญชีรับเงิน</span>
               <span className="mt-0.5 block truncate text-xs text-slate-500">
                 เพิ่มบัญชีธนาคาร/PromptPay และตั้งบัญชีหลัก
+              </span>
+            </span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
+          </Link>
+
+          <Link
+            href="/settings/store/shipping-providers"
+            className="group flex min-h-14 items-center gap-3 border-b border-slate-100 px-4 py-3 transition-colors hover:bg-slate-50"
+          >
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+              <Truck className="h-4 w-4" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium text-slate-900">
+                จัดการผู้ให้บริการขนส่ง
+              </span>
+              <span className="mt-0.5 block truncate text-xs text-slate-500">
+                ใช้เป็นรายการขนส่งใน flow ออเดอร์ออนไลน์
               </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />

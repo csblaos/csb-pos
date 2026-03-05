@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { ReceiptPrintActions } from "@/components/app/receipt-print-actions";
 import { getSession } from "@/lib/auth/session";
-import { currencyLabel, vatModeLabel } from "@/lib/finance/store-financial";
+import { currencyLabel, currencySymbol, parseStoreCurrency, vatModeLabel } from "@/lib/finance/store-financial";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 import { getOrderDetail } from "@/lib/orders/queries";
 
@@ -47,6 +47,7 @@ export default async function PrintReceiptPage({
     typeof returnToParam === "string" ? returnToParam : (returnToParam?.[0] ?? "");
   const returnTo = rawReturnTo.startsWith("/") ? rawReturnTo : null;
   const order = await getOrderDetail(session.activeStoreId, orderId);
+  const storeCurrencyDisplay = currencySymbol(parseStoreCurrency(order?.storeCurrency));
 
   if (!order) {
     notFound();
@@ -121,7 +122,7 @@ export default async function PrintReceiptPage({
           </p>
           <p className="flex justify-between font-semibold">
             <span>ยอดสุทธิ</span>
-            <span>{order.total.toLocaleString("th-TH")} {order.storeCurrency}</span>
+            <span>{order.total.toLocaleString("th-TH")} {storeCurrencyDisplay}</span>
           </p>
           <p className="flex justify-between">
             <span>สกุลชำระ</span>

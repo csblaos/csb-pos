@@ -14,6 +14,7 @@ import {
   Shield,
   Store,
   Tags,
+  Truck,
   UserRound,
   Users,
   WalletCards,
@@ -196,6 +197,14 @@ export default async function SettingsPage() {
       title: "บัญชีรับเงิน",
       description: "จัดการบัญชีธนาคารและ QR โอนเงินของร้าน",
       icon: WalletCards,
+      visible: true,
+    },
+    {
+      id: "shipping-providers",
+      href: "/settings/store/shipping-providers",
+      title: "ผู้ให้บริการขนส่ง",
+      description: "ตั้งค่ารายชื่อขนส่งที่ใช้ใน POS ออนไลน์",
+      icon: Truck,
       visible: true,
     },
     {

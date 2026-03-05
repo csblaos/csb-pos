@@ -2,6 +2,22 @@
 
 ไฟล์นี้บันทึก "ทำไม" ของการออกแบบสำคัญ เพื่อให้ AI/คนทำงานต่อไม่เดาเอง
 
+## ADR-016: Pickup รองรับ 2 ลำดับด้วยสถานะกลาง `PICKED_UP_PENDING_PAYMENT`
+
+- Date: March 5, 2026
+- Status: Accepted
+- Decision:
+  - เพิ่มสถานะออเดอร์ `PICKED_UP_PENDING_PAYMENT` สำหรับเคสรับสินค้าแล้วแต่ยังไม่ชำระ
+  - เพิ่ม action `mark_picked_up_unpaid` ใน `PATCH /api/orders/[orderId]` เพื่อรองรับลำดับ `รับสินค้า -> รับชำระ`
+  - คงลำดับเดิม `รับชำระ -> รับสินค้า` ผ่าน `confirm_paid` ไว้เหมือนเดิม
+  - ปรับ `cancel` ให้ตัดสินใจ `RELEASE` หรือ `RETURN` ตาม stock movement จริงของออเดอร์
+- Reason:
+  - หน้างานมีทั้งเคสเก็บเงินก่อนส่งมอบ และส่งมอบก่อนเก็บเงิน
+  - หากใช้สถานะเดิมอย่างเดียวจะเกิดความกำกวมและเสี่ยงตัด/คืนสต็อกซ้ำ
+- Consequence:
+  - UI/API ต้องรองรับสถานะใหม่ใน map/filter/report
+  - งานยกเลิก/ปิดยอดต้องอ่าน movement ของออเดอร์เพื่อกันคำนวณสต็อกผิด
+
 ## ADR-001: ใช้ Idempotency กับ Write Endpoint หลัก
 
 - Date: February 17, 2026
@@ -421,6 +437,40 @@
 - Consequence:
   - รายงาน `ตีกลับวันนี้` และ `ค่าส่งเสียวันนี้` แม่นตามเหตุการณ์จริง
   - ต้องดูแล migration/backfill ค่าเดิมเพื่อให้ข้อมูลเก่าอ่านได้ต่อเนื่อง
+
+## ADR-027: Shipping Provider เปลี่ยนจาก Hardcode เป็น Store Master
+
+- Date: March 5, 2026
+- Status: Accepted
+- Decision:
+  - เพิ่มตาราง `shipping_providers` เป็น master ต่อร้าน (`code`, `display_name`, `branch_name`, `aliases`, `active`, `sort_order`)
+  - หน้า POS ออนไลน์ (`/orders/new`) อ่านรายการ provider จาก `getOrderCatalogForStore().shippingProviders` แทน hardcode ใน component
+  - คง fallback UI `อื่นๆ` ให้กรอกชื่อ provider ได้ เพื่อไม่บล็อกงานหน้างานและรองรับ provider ที่ยังไม่ตั้ง master
+  - onboarding/repair/migration จะ seed ค่าเริ่มต้น (`Houngaloun`, `Anousith`, `Mixay`) ให้ร้านใหม่และฐานเดิม
+- Reason:
+  - ลดปัญหาชื่อขนส่งแตกหลายรูปแบบ ทำให้รายงาน COD ต่อขนส่งเพี้ยน
+  - เตรียมโครงสำหรับเชื่อม shipping API และ mapping alias ในเฟสถัดไป
+- Consequence:
+  - ข้อมูล provider ในออเดอร์ยังเก็บเป็น snapshot (`orders.shipping_provider`) เพื่อคงประวัติ ณ ตอนสร้างออเดอร์
+  - ทีมต้องย้ายการแก้รายชื่อ provider ไปแก้ที่ master (หรือ fallback `อื่นๆ`) แทนการแก้โค้ดหน้า POS
+  - มีหน้า settings สำหรับจัดการ master แล้วที่ `/settings/store/shipping-providers` และ CRUD ผ่าน `/api/settings/store/shipping-providers`
+
+## ADR-028: ยกเลิกออเดอร์ใช้ Step-Up Approval จาก Owner/Manager
+
+- Date: March 5, 2026
+- Status: Accepted
+- Decision:
+  - action `cancel` ใน `PATCH /api/orders/[orderId]` บังคับ payload เพิ่ม `approvalEmail`, `approvalPassword`, `cancelReason`
+  - ผู้กดยกเลิกต้องมีสิทธิ์ส่งคำขออย่างน้อยหนึ่งสิทธิ์ (`orders.update`/`orders.cancel`/`orders.delete`)
+  - API ตรวจผู้อนุมัติจากสมาชิก active ร้านเดียวกัน และ role ต้องเป็น `Owner` หรือ `Manager` พร้อมตรวจรหัสผ่านจริงก่อนยกเลิก
+  - audit event `order.cancel` ต้องเก็บทั้งเหตุผลยกเลิกและข้อมูลผู้อนุมัติ (`approvedBy*`)
+- Reason:
+  - งานยกเลิกออเดอร์มีผลกระทบสต็อก/รายได้สูง จึงต้องมี second-factor เชิงบทบาทแทนการให้พนักงานทั่วไปยกเลิกได้เอง
+  - ยังต้องคงความเร็วหน้างาน จึงอนุญาตให้พนักงานส่งคำขอได้ถ้ามีสิทธิ์แก้ไขออเดอร์ และให้หัวหน้าร้านอนุมัติในจุดเดียว
+- Consequence:
+  - UX หน้า order detail เพิ่มขั้นตอนกรอกผู้อนุมัติและเหตุผลก่อนยกเลิก
+  - ทีมตรวจย้อนหลังเหตุยกเลิกได้ชัดขึ้นจาก audit metadata
+  - การตั้งสิทธิ์ role ในร้านต้องมีอย่างน้อย Owner/Manager ที่พร้อมอนุมัติในรอบงาน
 
 ## Template สำหรับ ADR ใหม่
 

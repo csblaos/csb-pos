@@ -26,7 +26,7 @@
 |---|---|---|---|
 | `/api/onboarding/channels` | `GET` | `Permission:connections.view` | ดูสถานะช่องทาง |
 | `/api/onboarding/channels` | `POST` | `Permission:connections.update` | อัปเดตช่องทาง |
-| `/api/onboarding/store` | `POST` | `Session` | สร้าง/ตั้งค่าร้านช่วง onboarding |
+| `/api/onboarding/store` | `POST` | `Session` | สร้าง/ตั้งค่าร้านช่วง onboarding (seed master `shipping_providers` ค่าเริ่มต้นของร้านให้ทันที: `Houngaloun`, `Anousith`, `Mixay`) |
 | `/api/stores/switch` | `POST` | `Session` | สลับ active store |
 | `/api/stores/branches/switch` | `POST` | `Session` | สลับ active branch |
 | `/api/stores/branches` | `GET` | `Permission:stores.view` | รายการสาขา |
@@ -37,10 +37,12 @@
 
 | Endpoint | Methods | Access Control | Notes |
 |---|---|---|---|
-| `/api/orders` | `GET` | `Permission:orders.view` | list orders |
-| `/api/orders` | `POST` | `Permission:orders.create` | create order + idempotency (คำนวณ `lineTotal` ตามราคาของหน่วยที่เลือก; รองรับราคาหน่วยแปลงแบบกำหนดเองจากสินค้า; ถ้าไม่ส่ง `customerName` จะ fallback อัตโนมัติเป็น `ลูกค้าหน้าร้าน` หรือ `ลูกค้าออนไลน์` ตาม channel; รองรับ `checkoutFlow` (optional) และถ้าเป็น `PICKUP_LATER` จะตั้งสถานะ `READY_FOR_PICKUP` พร้อมจองสต็อกทันที; payment method รองรับ `CASH`,`LAO_QR`,`ON_CREDIT`,`COD`,`BANK_TRANSFER` โดย `COD` ใช้ได้เฉพาะ `ONLINE_DELIVERY`; รองรับฟิลด์ขนส่ง optional ตอนสร้างออเดอร์ออนไลน์ `shippingProvider` และ `shippingCarrier` เพื่อเก็บผู้ให้บริการ/สาขารับฝาก) |
+| `/api/orders` | `GET` | `Permission:orders.view` | list orders (response row มี `status` + `paymentStatus`; UI หน้า `/orders` ใช้แยกเคส `READY_FOR_PICKUP` เป็น badge รอง `ค้างจ่าย`/`ชำระแล้ว`/`รอตรวจสลิป`) |
+| `/api/orders` | `POST` | `Permission:orders.create` | create order + idempotency (คำนวณ `lineTotal` ตามราคาของหน่วยที่เลือก; รองรับราคาหน่วยแปลงแบบกำหนดเองจากสินค้า; ถ้าไม่ส่ง `customerName` จะ fallback อัตโนมัติเป็น `ลูกค้าหน้าร้าน` หรือ `ลูกค้าออนไลน์` ตาม channel; รองรับ `checkoutFlow` (optional) โดย matrix ล่าสุดคือ `WALK_IN_NOW + ชำระแล้ว => status=PAID + OUT ทันที`, `WALK_IN_NOW + ON_CREDIT => status=PENDING_PAYMENT + RESERVE`, `PICKUP_LATER => status=READY_FOR_PICKUP + RESERVE` (ถ้าชำระแล้วจะตั้ง `paymentStatus=PAID` แต่ยังไม่ OUT จนกดยืนยันรับสินค้า), ส่วน `ONLINE_DELIVERY` คง flow เดิมเริ่มที่ `DRAFT`; payment method รองรับ `CASH`,`LAO_QR`,`ON_CREDIT`,`COD`,`BANK_TRANSFER` โดย `COD` ใช้ได้เฉพาะ `ONLINE_DELIVERY`; รองรับฟิลด์ขนส่ง optional ตอนสร้างออเดอร์ออนไลน์ `shippingProvider` และ `shippingCarrier` โดยปกติ UI จะเลือก provider จาก master `shipping_providers` ของร้าน และยังเปิด `อื่นๆ` ให้กรอก custom ได้) |
+| `/api/orders/cod-reconcile` | `GET` | `Permission:orders.view` | list COD ที่รอปิดยอด (`SHIPPED + COD_PENDING_SETTLEMENT`) สำหรับหน้า reconcile; รองรับ query `dateFrom`,`dateTo`,`provider`,`q`,`page`,`pageSize` และคืนรายการ provider สำหรับ filter |
+| `/api/orders/cod-reconcile` | `POST` | `Permission:orders.view` + `orders.mark_paid` | bulk ปิดยอด COD หลายออเดอร์ในครั้งเดียว (`codAmount`,`codFee`) พร้อมเขียน audit (`order.confirm_paid.bulk_cod_reconcile`) และ invalidate dashboard/reports cache; รองรับ `Idempotency-Key` เพื่อกันปิดยอดซ้ำและ replay response เดิม |
 | `/api/orders/[orderId]` | `GET` | `Permission:orders.view` | order detail |
-| `/api/orders/[orderId]` | `PATCH` | `Permission:orders.view` + internal action checks | submit payment/paid/pack/ship/cancel/update shipping + `mark_cod_returned` (สถานะ `READY_FOR_PICKUP` รองรับ `submit_payment_slip`/`confirm_paid` และ `cancel` จะปล่อยจองสต็อก; flow COD: `mark_packed` จาก `PENDING_PAYMENT` ได้และตัดสต็อกตอนแพ็ก, `confirm_paid` ใช้ปิดยอด COD หลัง `SHIPPED` แล้วอัปเดต `paymentStatus=COD_SETTLED`, และ `mark_cod_returned` บังคับสิทธิ์ `orders.cod_return` เท่านั้น พร้อมบันทึกเวลา `cod_returned_at` เพื่อรายงานรายวัน) |
+| `/api/orders/[orderId]` | `PATCH` | `Permission:orders.view` + internal action checks | submit payment/paid/pack/ship/cancel/update shipping + `mark_cod_returned` + `mark_picked_up_unpaid` (pickup flow รองรับ 2 ลำดับแล้ว: `ยืนยันรับชำระ -> ยืนยันรับสินค้า` หรือ `ยืนยันรับสินค้า (ค้างจ่าย) -> ยืนยันรับชำระ`; เพิ่มสถานะกลาง `PICKED_UP_PENDING_PAYMENT` สำหรับเคสรับสินค้าแล้วแต่ยังไม่ชำระ; `confirm_paid` รองรับ `PENDING_PAYMENT`, `READY_FOR_PICKUP`, `PICKED_UP_PENDING_PAYMENT`, และ COD settle หลัง `SHIPPED`; `submit_payment_slip` รองรับ `PICKED_UP_PENDING_PAYMENT` ด้วย; flow COD: `mark_packed` จาก `PENDING_PAYMENT` ได้และตัดสต็อกตอนแพ็ก, `confirm_paid` ปิดยอดด้วย `codAmount`, `mark_cod_returned` บังคับสิทธิ์ `orders.cod_return` พร้อม payload `codFee` + `codReturnNote`; cancel รองรับ 2 โหมด: `approvalMode=MANAGER_PASSWORD` หรือ `approvalMode=SELF_SLIDE`) |
 | `/api/orders/[orderId]/send-qr` | `POST` | `Permission:orders.update` | ส่ง QR message (stub/manual mode) |
 | `/api/orders/[orderId]/shipments/label` | `POST` | `Permission:orders.ship` | สร้าง shipping label + idempotency |
 | `/api/orders/[orderId]/shipments/upload-label` | `POST` | `Permission:orders.update` | อัปโหลดรูปบิล/ป้ายจากเครื่องหรือกล้องขึ้น R2 |
@@ -93,6 +95,8 @@
 | `/api/settings/store/pdf` | `PATCH` | `Permission:settings.update` | update PDF settings |
 | `/api/settings/store/payment-accounts` | `GET` | `Permission:settings.view` | list payment accounts |
 | `/api/settings/store/payment-accounts` | `POST,PATCH,DELETE` | `Permission:stores.update` | manage payment accounts |
+| `/api/settings/store/shipping-providers` | `GET` | `Permission:settings.view` | list shipping provider master ของร้าน (เรียงตาม `sortOrder`) |
+| `/api/settings/store/shipping-providers` | `POST,PATCH,DELETE` | `Permission:stores.update` | manage shipping provider master (`displayName`,`branchName`,`aliases`,`sortOrder`,`active`) สำหรับหน้า POS ออนไลน์ |
 | `/api/settings/users` | `GET` | `Permission:members.view` | list members |
 | `/api/settings/users` | `POST` | `Permission:members.create` | create member |
 | `/api/settings/users/[userId]` | `GET` | `Permission:members.view` | member detail |

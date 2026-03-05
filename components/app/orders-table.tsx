@@ -39,7 +39,7 @@ const columns: ColumnDef<OrderRow>[] = [
         </span>
       ) : (
         <span className="rounded-full bg-amber-100 px-2 py-1 text-xs text-amber-700">
-          รอชำระ
+          ค้างจ่าย
         </span>
       ),
   },

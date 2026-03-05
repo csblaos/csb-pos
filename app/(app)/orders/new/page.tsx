@@ -40,6 +40,12 @@ export default async function NewOrderPage() {
 
     const canView = isPermissionGranted(permissionKeys, "orders.view");
     const canCreate = isPermissionGranted(permissionKeys, "orders.create");
+    const canRequestCancel =
+      isPermissionGranted(permissionKeys, "orders.update") ||
+      isPermissionGranted(permissionKeys, "orders.cancel") ||
+      isPermissionGranted(permissionKeys, "orders.delete");
+    const canSelfApproveCancel =
+      session.activeRoleName === "Owner" || session.activeRoleName === "Manager";
 
     if (!canView) {
       return (
@@ -57,7 +63,13 @@ export default async function NewOrderPage() {
 
     return (
       <section>
-        <OrdersManagement mode="create-only" catalog={catalog} canCreate={canCreate} />
+        <OrdersManagement
+          mode="create-only"
+          catalog={catalog}
+          canCreate={canCreate}
+          canRequestCancel={canRequestCancel}
+          canSelfApproveCancel={canSelfApproveCancel}
+        />
       </section>
     );
   } finally {

@@ -66,14 +66,14 @@ export function serializeSupportedCurrencies(currencies: StoreCurrency[]) {
 
 export function currencyLabel(currency: StoreCurrency) {
   if (currency === "LAK") {
-    return "LAK";
+    return "₭";
   }
 
   if (currency === "THB") {
-    return "THB";
+    return "฿";
   }
 
-  return "USD";
+  return "$";
 }
 
 const CURRENCY_SYMBOLS: Record<StoreCurrency, string> = {
