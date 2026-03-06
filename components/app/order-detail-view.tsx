@@ -38,6 +38,14 @@ type OrderDetailViewProps = {
   canSelfApproveCancel: boolean;
 };
 
+const escapeHtml = (value: string) =>
+  value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
+
 const statusLabel: Record<OrderDetail["status"], string> = {
   DRAFT: "ร่าง",
   PENDING_PAYMENT: "ค้างจ่าย",
@@ -505,8 +513,74 @@ export function OrderDetailView({
     await uploadShippingLabelImage(file, source);
   };
 
-  const printViaIframe = useCallback(
-    (path: string, kind: "receipt" | "label") => {
+  const buildReceiptPrintMarkup = useCallback(() => {
+    const rows = order.items
+      .map(
+        (item) => `<tr>
+          <td style="padding:4px 0;vertical-align:top;">
+            <div>${escapeHtml(item.productName)}</div>
+            <div style="font-size:10px;color:#475569;">${escapeHtml(item.productSku)}</div>
+          </td>
+          <td style="padding:4px 0;text-align:right;white-space:nowrap;">${item.qty.toLocaleString("th-TH")} ${escapeHtml(item.unitCode)}</td>
+          <td style="padding:4px 0;text-align:right;white-space:nowrap;">${item.lineTotal.toLocaleString("th-TH")}</td>
+        </tr>`,
+      )
+      .join("");
+
+    return `<section class="print-page print-receipt">
+      <h1 style="margin:0;text-align:center;font-size:14px;font-weight:700;">ใบเสร็จรับเงิน</h1>
+      <p style="margin:4px 0 0;text-align:center;font-size:11px;">เลขที่ ${escapeHtml(order.orderNo)}</p>
+      <p style="margin:8px 0 0;font-size:11px;">ลูกค้า: ${escapeHtml(order.customerName || order.contactDisplayName || "ลูกค้าทั่วไป")}</p>
+      <p style="margin:2px 0 0;font-size:11px;">วันที่: ${escapeHtml(new Date(order.createdAt).toLocaleString("th-TH"))}</p>
+      <hr style="border:0;border-top:1px dashed #64748b;margin:8px 0;" />
+      <table style="width:100%;border-collapse:collapse;font-size:11px;">
+        <thead>
+          <tr>
+            <th style="text-align:left;padding:0 0 4px;">รายการ</th>
+            <th style="text-align:right;padding:0 0 4px;">จำนวน</th>
+            <th style="text-align:right;padding:0 0 4px;">รวม</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <hr style="border:0;border-top:1px dashed #64748b;margin:8px 0;" />
+      <div style="font-size:11px;display:flex;justify-content:space-between;gap:8px;"><span>ยอดสินค้า</span><span>${order.subtotal.toLocaleString("th-TH")}</span></div>
+      <div style="font-size:11px;display:flex;justify-content:space-between;gap:8px;"><span>ส่วนลด</span><span>${order.discount.toLocaleString("th-TH")}</span></div>
+      <div style="font-size:11px;display:flex;justify-content:space-between;gap:8px;"><span>VAT</span><span>${order.vatAmount.toLocaleString("th-TH")} (${escapeHtml(vatModeLabel(order.storeVatMode))})</span></div>
+      <div style="font-size:11px;display:flex;justify-content:space-between;gap:8px;"><span>ค่าส่ง</span><span>${order.shippingFeeCharged.toLocaleString("th-TH")}</span></div>
+      <div style="font-size:12px;font-weight:700;display:flex;justify-content:space-between;gap:8px;"><span>ยอดสุทธิ</span><span>${order.total.toLocaleString("th-TH")} ${escapeHtml(storeCurrencyDisplay)}</span></div>
+      <div style="font-size:11px;display:flex;justify-content:space-between;gap:8px;"><span>สกุลชำระ</span><span>${escapeHtml(paymentCurrencyDisplay)}</span></div>
+      <div style="font-size:11px;display:flex;justify-content:space-between;gap:8px;"><span>วิธีชำระ</span><span>${escapeHtml(paymentMethodLabel[order.paymentMethod])}</span></div>
+      <hr style="border:0;border-top:1px dashed #64748b;margin:8px 0;" />
+      <p style="margin:0;text-align:center;font-size:11px;">ขอบคุณที่ใช้บริการ</p>
+    </section>`;
+  }, [order, paymentCurrencyDisplay, storeCurrencyDisplay]);
+
+  const buildLabelPrintMarkup = useCallback(() => {
+    return `<section class="print-page print-label">
+      <div style="border:1px solid #0f172a;padding:12px;min-height:136mm;display:flex;flex-direction:column;justify-content:space-between;">
+        <section>
+          <h1 style="margin:0;font-size:18px;font-weight:700;">ป้ายจัดส่ง A6</h1>
+          <p style="margin:4px 0 0;font-size:14px;">ออเดอร์ ${escapeHtml(order.orderNo)}</p>
+          <p style="margin:2px 0 0;font-size:13px;">สถานะ: ${escapeHtml(statusLabel[order.status])}</p>
+        </section>
+        <section style="margin-top:10px;">
+          <p style="margin:0 0 6px;font-size:12px;color:#475569;">ผู้รับ</p>
+          <p style="margin:0;font-size:20px;font-weight:700;line-height:1.2;">${escapeHtml(order.customerName || order.contactDisplayName || "ลูกค้าทั่วไป")}</p>
+          <p style="margin:6px 0 0;font-size:15px;">โทร: ${escapeHtml(order.customerPhone || order.contactPhone || "-")}</p>
+          <p style="margin:6px 0 0;font-size:15px;white-space:pre-wrap;line-height:1.35;">${escapeHtml(order.customerAddress || "-")}</p>
+        </section>
+        <section style="border-top:1px dashed #64748b;padding-top:8px;margin-top:12px;font-size:13px;line-height:1.5;">
+          <p style="margin:0;">ขนส่ง: ${escapeHtml(order.shippingProvider || order.shippingCarrier || "-")}</p>
+          <p style="margin:0;">Tracking: ${escapeHtml(order.trackingNo || "-")}</p>
+          <p style="margin:0;">ต้นทุนค่าส่ง: ${order.shippingCost.toLocaleString("th-TH")} ${escapeHtml(storeCurrencyDisplay)}</p>
+        </section>
+      </div>
+    </section>`;
+  }, [order, storeCurrencyDisplay]);
+
+  const printViaWindow = useCallback(
+    (kind: "receipt" | "label") => {
       if (typeof window === "undefined") {
         return;
       }
@@ -518,25 +592,66 @@ export function OrderDetailView({
         setLabelPrintLoading(true);
       }
 
-      document
-        .querySelectorAll<HTMLIFrameElement>('iframe[data-order-print-frame="true"]')
-        .forEach((existingFrame) => existingFrame.remove());
+      const printRootId = "order-detail-inline-print-root";
+      const printStyleId = "order-detail-inline-print-style";
 
-      const iframe = document.createElement("iframe");
-      iframe.setAttribute("aria-hidden", "true");
-      iframe.dataset.orderPrintFrame = "true";
-      iframe.style.position = "fixed";
-      iframe.style.right = "0";
-      iframe.style.bottom = "0";
-      iframe.style.width = "0";
-      iframe.style.height = "0";
-      iframe.style.border = "0";
-      iframe.style.opacity = "0";
-      iframe.style.pointerEvents = "none";
+      document.getElementById(printRootId)?.remove();
+      document.getElementById(printStyleId)?.remove();
+
+      const printRoot = document.createElement("div");
+      printRoot.id = printRootId;
+      printRoot.setAttribute("aria-hidden", "true");
+      printRoot.innerHTML = kind === "receipt" ? buildReceiptPrintMarkup() : buildLabelPrintMarkup();
+
+      const printStyle = document.createElement("style");
+      printStyle.id = printStyleId;
+      printStyle.textContent = `
+        @media screen {
+          #${printRootId} {
+            display: none !important;
+          }
+        }
+        @media print {
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+          }
+          body > *:not(#${printRootId}) {
+            display: none !important;
+          }
+          #${printRootId} {
+            display: block !important;
+          }
+          #${printRootId} .print-page {
+            color: #000000;
+            font-family: ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+          }
+          #${printRootId} .print-receipt {
+            width: 80mm;
+            margin: 0 auto;
+            padding: 2mm;
+            font-size: 12px;
+            line-height: 1.35;
+          }
+          #${printRootId} .print-label {
+            width: 105mm;
+            margin: 0 auto;
+            padding: 4mm;
+            font-size: 14px;
+            line-height: 1.35;
+          }
+        }
+      `;
+      document.head.appendChild(printStyle);
+      document.body.appendChild(printRoot);
 
       const cleanup = () => {
-        if (iframe.parentNode) {
-          iframe.parentNode.removeChild(iframe);
+        if (printRoot.parentNode) {
+          printRoot.parentNode.removeChild(printRoot);
+        }
+        if (printStyle.parentNode) {
+          printStyle.parentNode.removeChild(printStyle);
         }
       };
 
@@ -553,61 +668,35 @@ export function OrderDetailView({
         }
       };
 
-      iframe.addEventListener(
-        "load",
-        () => {
-          const frameWindow = iframe.contentWindow;
-          if (!frameWindow) {
+      const handleAfterPrint = () => {
+        settleLoading();
+        cleanup();
+      };
+      window.addEventListener("afterprint", handleAfterPrint, { once: true });
+
+      window.setTimeout(() => {
+        settleLoading();
+      }, 1200);
+
+      window.setTimeout(() => {
+        cleanup();
+      }, 20000);
+
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          try {
+            window.focus();
+            window.print();
+          } catch {
+            window.removeEventListener("afterprint", handleAfterPrint);
             setErrorMessage(kind === "receipt" ? "ไม่สามารถพิมพ์ใบเสร็จได้" : "ไม่สามารถพิมพ์ป้ายจัดส่งได้");
             settleLoading();
             cleanup();
-            return;
           }
-
-          // ปล่อยให้หน้าพิมพ์ใน iframe เรียก window.print() เองผ่าน autoprint เพื่อลดปัญหาหน้าแรกข้อมูลยังไม่ครบ
-          try {
-            frameWindow.addEventListener(
-              "afterprint",
-              () => {
-                settleLoading();
-                cleanup();
-              },
-              { once: true },
-            );
-          } catch {
-            // ignore
-          }
-
-          window.setTimeout(() => {
-            settleLoading();
-          }, 1200);
-
-          window.setTimeout(() => {
-            try {
-              cleanup();
-            } catch {
-              // ignore
-            }
-          }, 20000);
-        },
-        { once: true },
-      );
-
-      iframe.addEventListener(
-        "error",
-        () => {
-          setErrorMessage(kind === "receipt" ? "ไม่สามารถพิมพ์ใบเสร็จได้" : "ไม่สามารถพิมพ์ป้ายจัดส่งได้");
-          settleLoading();
-          cleanup();
-        },
-        { once: true },
-      );
-
-      document.body.appendChild(iframe);
-      const separator = path.includes("?") ? "&" : "?";
-      iframe.src = `${path}${separator}autoprint=1`;
+        });
+      });
     },
-    [],
+    [buildLabelPrintMarkup, buildReceiptPrintMarkup],
   );
 
   const confirmPaidButtonLabel = isCodPendingAfterShipped
@@ -1410,7 +1499,7 @@ export function OrderDetailView({
                   type="button"
                   variant="outline"
                   className="h-10 w-full text-xs"
-                  onClick={() => printViaIframe(`/orders/${order.id}/print/receipt`, "receipt")}
+                  onClick={() => printViaWindow("receipt")}
                   disabled={receiptPrintLoading || labelPrintLoading}
                 >
                   {receiptPrintLoading ? "กำลังเปิดพิมพ์..." : "พิมพ์ใบเสร็จ"}
@@ -1517,7 +1606,7 @@ export function OrderDetailView({
                     type="button"
                     variant="outline"
                     className="h-9 text-xs"
-                    onClick={() => printViaIframe(`/orders/${order.id}/print/receipt`, "receipt")}
+                    onClick={() => printViaWindow("receipt")}
                     disabled={receiptPrintLoading || labelPrintLoading}
                   >
                     {receiptPrintLoading ? "กำลังเปิดพิมพ์..." : "พิมพ์ใบเสร็จ"}
@@ -1527,7 +1616,7 @@ export function OrderDetailView({
                       type="button"
                       variant="outline"
                       className="h-9 text-xs"
-                      onClick={() => printViaIframe(`/orders/${order.id}/print/label`, "label")}
+                      onClick={() => printViaWindow("label")}
                       disabled={receiptPrintLoading || labelPrintLoading}
                     >
                       {labelPrintLoading ? "กำลังเปิดพิมพ์..." : "พิมพ์ป้าย"}
