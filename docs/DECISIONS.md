@@ -2,6 +2,24 @@
 
 ไฟล์นี้บันทึก "ทำไม" ของการออกแบบสำคัญ เพื่อให้ AI/คนทำงานต่อไม่เดาเอง
 
+## ADR-019: PostgreSQL Migration ใช้ Sequelize แบบ Query-First แทน ORM Model-First
+
+- Date: March 9, 2026
+- Status: Accepted
+- Decision:
+  - สำหรับการย้ายจาก `Turso/LibSQL + Drizzle` ไป `Aiven PostgreSQL` ให้ใช้ `Sequelize` เป็น infrastructure layer สำหรับ connection pool, transaction, parameter binding, และ health check
+  - query จริงของระบบใหม่ให้ใช้ `sequelize.query(...)` เป็นหลัก ทั้ง read และ write
+  - หลีกเลี่ยงการใช้ Sequelize model/association/hook เป็นแกนของ business logic โดยเฉพาะในโดเมน `orders`, `stock`, `purchase orders`, `reports`, `idempotency`, และ `audit`
+  - แยกชั้น `route/controller -> service -> repository -> SQL` เพื่อให้ service/repository ไม่ผูกกับ Next.js และพร้อม reuse ตอนย้ายไป Express
+- Reason:
+  - query ซับซ้อนของระบบ POS นี้คุมได้ง่ายกว่าเมื่อเขียน SQL โดยตรง
+  - ลด lock-in กับ ORM API และทำให้ย้ายจาก Next.js ไป `Express + TypeScript` ได้โดยเปลี่ยนเพียง transport layer
+  - ยังคงได้ประโยชน์จาก Sequelize เรื่อง transaction/pooling โดยไม่ต้องแบกรับ abstraction ของ ORM model มากเกินไป
+- Consequence:
+  - ทีมต้องมีวินัยเรื่อง parameter binding และห้ามเขียน SQL กระจายใน route handlers
+  - ต้องมี repository/sql mapper กลางที่คืนค่าเป็น plain object เท่านั้น
+  - ระหว่าง migration จะมีสอง stack DB อยู่ช่วงหนึ่ง (`Drizzle/LibSQL` เดิม และ `Sequelize/PostgreSQL` ใหม่) จึงต้องกำหนด rollout แบบ phase ชัดเจน
+
 ## ADR-018: รูปที่เก็บใน R2 ใช้ Strict Server Optimization และเพิ่ม Client Compression เฉพาะ Flow ที่คุ้มค่า
 
 - Date: March 9, 2026

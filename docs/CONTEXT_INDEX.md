@@ -15,6 +15,7 @@
 9. `docs/drizzle-migrations.md`
 10. `docs/orders-system-design.md`
 11. `docs/product-variants-plan.md`
+12. `docs/postgresql-sequelize-migration.md`
 
 ## What Each File Is For
 
@@ -40,6 +41,8 @@
   - แผนออกแบบ `/orders` ระดับระบบสำหรับ roadmap
 - `docs/product-variants-plan.md`
   - แผนโครงสร้างสินค้าแบบ Variant (DB + UX + rollout phases)
+- `docs/postgresql-sequelize-migration.md`
+  - แผนย้ายไป `PostgreSQL + Sequelize.query(...)` และออกแบบให้ย้ายไป Express ได้ง่าย
 
 ## Maintenance Rules
 

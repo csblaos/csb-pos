@@ -28,6 +28,12 @@ import {
   getOrderDetail,
   getOrderItemsForOrder,
 } from "@/lib/orders/queries";
+import {
+  isPostgresSubmitPaymentSlipEnabled,
+  isPostgresUpdateShippingEnabled,
+  submitOrderPaymentSlipInPostgres,
+  updateOrderShippingInPostgres,
+} from "@/lib/orders/postgres-write";
 import { updateOrderSchema } from "@/lib/orders/validation";
 import { getInventoryBalancesByStore } from "@/lib/inventory/queries";
 import { buildAuditEventValues, safeLogAuditEvent } from "@/server/services/audit.service";
@@ -425,6 +431,51 @@ export async function PATCH(
           ? "MANUAL"
           : order.shippingProvider;
 
+      if (isPostgresUpdateShippingEnabled()) {
+        try {
+          await updateOrderShippingInPostgres({
+            storeId,
+            orderId: order.id,
+            actorUserId: session.userId,
+            actorName: session.displayName,
+            actorRole: session.activeRoleName,
+            orderNo: order.orderNo,
+            shippingCarrier: shippingPayload.shippingCarrier?.trim() || null,
+            trackingNo: shippingPayload.trackingNo?.trim() || null,
+            shippingLabelUrl: nextShippingLabelUrl,
+            shippingLabelStatus: nextShippingLabelStatus,
+            shippingProvider: nextShippingProvider,
+            shippingCost: shippingPayload.shippingCost,
+            request,
+          });
+
+          if (idempotencyRecordId) {
+            try {
+              await markIdempotencySucceeded({
+                recordId: idempotencyRecordId,
+                statusCode: 200,
+                body: { ok: true },
+              });
+            } catch (error) {
+              console.error(
+                `[orders.write.pg] idempotency mark failed action=update_shipping orderId=${order.id}: ${
+                  error instanceof Error ? error.message : "unknown"
+                }`,
+              );
+            }
+          }
+
+          await invalidateOrderCaches(storeId);
+          return NextResponse.json({ ok: true });
+        } catch (error) {
+          console.warn(
+            `[orders.write.pg] fallback to turso for update_shipping orderId=${order.id}: ${
+              error instanceof Error ? error.message : "unknown"
+            }`,
+          );
+        }
+      }
+
       await db.transaction(async (tx) => {
         await tx
           .update(orders)
@@ -640,12 +691,56 @@ export async function PATCH(
         });
       }
 
+      const paymentSlipUrl = slipPayload.paymentSlipUrl.trim();
+      const paymentProofSubmittedAt = nowIso();
+
+      if (isPostgresSubmitPaymentSlipEnabled()) {
+        try {
+          await submitOrderPaymentSlipInPostgres({
+            storeId,
+            orderId: order.id,
+            actorUserId: session.userId,
+            actorName: session.displayName,
+            actorRole: session.activeRoleName,
+            orderNo: order.orderNo,
+            paymentSlipUrl,
+            paymentProofSubmittedAt,
+            request,
+          });
+
+          if (idempotencyRecordId) {
+            try {
+              await markIdempotencySucceeded({
+                recordId: idempotencyRecordId,
+                statusCode: 200,
+                body: { ok: true },
+              });
+            } catch (error) {
+              console.error(
+                `[orders.write.pg] idempotency mark failed action=submit_payment_slip orderId=${order.id}: ${
+                  error instanceof Error ? error.message : "unknown"
+                }`,
+              );
+            }
+          }
+
+          await invalidateOrderCaches(storeId);
+          return NextResponse.json({ ok: true });
+        } catch (error) {
+          console.warn(
+            `[orders.write.pg] fallback to turso for submit_payment_slip orderId=${order.id}: ${
+              error instanceof Error ? error.message : "unknown"
+            }`,
+          );
+        }
+      }
+
       await db.transaction(async (tx) => {
         await tx
           .update(orders)
           .set({
-            paymentSlipUrl: slipPayload.paymentSlipUrl.trim(),
-            paymentProofSubmittedAt: nowIso(),
+            paymentSlipUrl,
+            paymentProofSubmittedAt,
             paymentStatus: "PENDING_PROOF",
           })
           .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));

@@ -23,6 +23,7 @@ if (r2PublicBaseUrl) {
 }
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ["sequelize", "pg", "pg-hstore"],
   images: {
     remotePatterns,
   },

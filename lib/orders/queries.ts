@@ -256,8 +256,14 @@ const parseShippingProviderAliases = (raw: string | null | undefined) => {
   }
 };
 
-const parseAuditMetadataObject = (raw: string | null | undefined): Record<string, unknown> | null => {
+const parseAuditMetadataObject = (raw: unknown): Record<string, unknown> | null => {
   if (!raw) {
+    return null;
+  }
+  if (typeof raw === "object" && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  if (typeof raw !== "string") {
     return null;
   }
   try {
@@ -302,6 +308,79 @@ export type PaginatedCodReconcileList = {
   pageCount: number;
 };
 
+type OrderListItemRow = {
+  id: string;
+  orderNo: string;
+  channel: OrderListItem["channel"];
+  status: OrderListItem["status"];
+  paymentStatus: OrderListItem["paymentStatus"];
+  customerName: string | null;
+  contactDisplayName: string | null;
+  total: number;
+  paymentCurrency: OrderListItem["paymentCurrency"];
+  paymentMethod: OrderListItem["paymentMethod"];
+  createdAt: string;
+  paidAt: string | null;
+  shippedAt: string | null;
+};
+
+type OrderDetailRow = Omit<OrderDetail, "items" | "cancelApproval">;
+
+type OrderCancelAuditRow = {
+  occurredAt: string;
+  actorName: string | null;
+  metadata: unknown;
+};
+
+type PostgresQueryMany = typeof import("@/lib/db/query").queryMany;
+type PostgresQueryOne = typeof import("@/lib/db/query").queryOne;
+
+type PostgresOrdersReadContext = {
+  queryMany: PostgresQueryMany;
+  queryOne: PostgresQueryOne;
+};
+
+const getPostgresOrdersReadContext = async (): Promise<PostgresOrdersReadContext | null> => {
+  if (process.env.POSTGRES_ORDERS_READ_ENABLED !== "1") {
+    return null;
+  }
+
+  const [{ queryMany, queryOne }, { isPostgresConfigured }] = await Promise.all([
+    import("@/lib/db/query"),
+    import("@/lib/db/sequelize"),
+  ]);
+
+  if (!isPostgresConfigured()) {
+    return null;
+  }
+
+  return {
+    queryMany,
+    queryOne,
+  };
+};
+
+const logOrdersReadFallback = (operation: string, error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.warn(`[orders.read.pg] fallback to turso for ${operation}: ${message}`);
+};
+
+const getOrderListStatusSql = (tab: OrderListTab) => {
+  if (tab === "PENDING_PAYMENT") {
+    return "and o.status in ('PENDING_PAYMENT', 'READY_FOR_PICKUP', 'PICKED_UP_PENDING_PAYMENT')";
+  }
+
+  if (tab === "PAID") {
+    return "and o.status in ('PAID', 'PACKED')";
+  }
+
+  if (tab === "SHIPPED") {
+    return "and o.status in ('SHIPPED', 'COD_RETURNED')";
+  }
+
+  return "";
+};
+
 const listFilter = (tab: OrderListTab) => {
   if (tab === "PENDING_PAYMENT") {
     return inArray(orders.status, [
@@ -322,11 +401,94 @@ const listFilter = (tab: OrderListTab) => {
   return undefined;
 };
 
+const listOrdersByTabPostgres = async (
+  pg: PostgresOrdersReadContext,
+  storeId: string,
+  tab: OrderListTab,
+  options?: { page?: number; pageSize?: number },
+): Promise<PaginatedOrderList> => {
+  const pageSize = Math.max(1, Math.min(options?.pageSize ?? 20, 100));
+  const page = Math.max(1, options?.page ?? 1);
+  const offset = (page - 1) * pageSize;
+  const statusSql = getOrderListStatusSql(tab);
+
+  const [rows, countRow] = await Promise.all([
+    timeDbQuery("orders.list.rows.pg", async () =>
+      pg.queryMany<OrderListItemRow>(
+        `
+          select
+            o.id,
+            o.order_no as "orderNo",
+            o.channel,
+            o.status,
+            o.payment_status as "paymentStatus",
+            o.customer_name as "customerName",
+            c.display_name as "contactDisplayName",
+            o.total,
+            o.payment_currency as "paymentCurrency",
+            o.payment_method as "paymentMethod",
+            o.created_at as "createdAt",
+            o.paid_at as "paidAt",
+            o.shipped_at as "shippedAt"
+          from orders o
+          left join contacts c on o.contact_id = c.id
+          where o.store_id = :storeId
+          ${statusSql}
+          order by o.created_at desc
+          limit :limit
+          offset :offset
+        `,
+        {
+          replacements: {
+            storeId,
+            limit: pageSize,
+            offset,
+          },
+        },
+      ),
+    ),
+    timeDbQuery("orders.list.count.pg", async () =>
+      pg.queryOne<{ value: string | number }>(
+        `
+          select count(*) as value
+          from orders o
+          where o.store_id = :storeId
+          ${statusSql}
+        `,
+        {
+          replacements: { storeId },
+        },
+      ),
+    ),
+  ]);
+
+  const total = Number(countRow?.value ?? 0);
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+
+  return {
+    rows,
+    total,
+    page,
+    pageSize,
+    pageCount,
+    tab,
+  };
+};
+
 export async function listOrdersByTab(
   storeId: string,
   tab: OrderListTab,
   options?: { page?: number; pageSize?: number },
 ): Promise<PaginatedOrderList> {
+  const pg = await getPostgresOrdersReadContext();
+  if (pg) {
+    try {
+      return await listOrdersByTabPostgres(pg, storeId, tab, options);
+    } catch (error) {
+      logOrdersReadFallback("listOrdersByTab", error);
+    }
+  }
+
   const whereCondition = listFilter(tab);
   const pageSize = Math.max(1, Math.min(options?.pageSize ?? 20, 100));
   const page = Math.max(1, options?.page ?? 1);
@@ -559,7 +721,183 @@ export async function getOrderItemsForOrder(orderId: string) {
   return rows;
 }
 
+const getOrderDetailPostgres = async (
+  pg: PostgresOrdersReadContext,
+  storeId: string,
+  orderId: string,
+): Promise<OrderDetail | null> => {
+  const order = await timeDbQuery("orders.detail.main.pg", async () =>
+    pg.queryOne<OrderDetailRow>(
+      `
+        select
+          o.id,
+          o.order_no as "orderNo",
+          o.channel,
+          o.status,
+          o.payment_status as "paymentStatus",
+          o.contact_id as "contactId",
+          c.display_name as "contactDisplayName",
+          c.phone as "contactPhone",
+          c.last_inbound_at as "contactLastInboundAt",
+          o.customer_name as "customerName",
+          o.customer_phone as "customerPhone",
+          o.customer_address as "customerAddress",
+          o.subtotal,
+          o.discount,
+          o.vat_amount as "vatAmount",
+          o.shipping_fee_charged as "shippingFeeCharged",
+          o.total,
+          o.payment_currency as "paymentCurrency",
+          o.payment_method as "paymentMethod",
+          o.payment_account_id as "paymentAccountId",
+          spa.display_name as "paymentAccountDisplayName",
+          spa.bank_name as "paymentAccountBankName",
+          spa.account_number as "paymentAccountNumber",
+          spa.qr_image_url as "paymentAccountQrImageUrl",
+          o.payment_slip_url as "paymentSlipUrl",
+          o.payment_proof_submitted_at as "paymentProofSubmittedAt",
+          o.shipping_provider as "shippingProvider",
+          o.shipping_label_status as "shippingLabelStatus",
+          o.shipping_label_url as "shippingLabelUrl",
+          o.shipping_label_file_key as "shippingLabelFileKey",
+          o.shipping_request_id as "shippingRequestId",
+          o.shipping_carrier as "shippingCarrier",
+          o.tracking_no as "trackingNo",
+          o.shipping_cost as "shippingCost",
+          o.cod_amount as "codAmount",
+          o.cod_fee as "codFee",
+          o.cod_return_note as "codReturnNote",
+          o.cod_settled_at as "codSettledAt",
+          o.cod_returned_at as "codReturnedAt",
+          o.paid_at as "paidAt",
+          o.shipped_at as "shippedAt",
+          o.created_by as "createdBy",
+          u.name as "createdByName",
+          o.created_at as "createdAt",
+          s.currency as "storeCurrency",
+          s.vat_mode as "storeVatMode",
+          s.vat_enabled as "storeVatEnabled"
+        from orders o
+        inner join stores s on o.store_id = s.id
+        left join contacts c on o.contact_id = c.id
+        left join store_payment_accounts spa on o.payment_account_id = spa.id
+        left join users u on o.created_by = u.id
+        where o.store_id = :storeId
+          and o.id = :orderId
+        limit 1
+      `,
+      {
+        replacements: {
+          storeId,
+          orderId,
+        },
+      },
+    ),
+  );
+
+  if (!order) {
+    return null;
+  }
+
+  const [items, cancelAudit] = await Promise.all([
+    timeDbQuery("orders.detail.items.pg", async () =>
+      pg.queryMany<OrderDetailItem>(
+        `
+          select
+            oi.id,
+            p.id as "productId",
+            p.sku as "productSku",
+            p.name as "productName",
+            u.id as "unitId",
+            u.code as "unitCode",
+            u.name_th as "unitNameTh",
+            oi.qty,
+            oi.qty_base as "qtyBase",
+            oi.price_base_at_sale as "priceBaseAtSale",
+            oi.cost_base_at_sale as "costBaseAtSale",
+            oi.line_total as "lineTotal"
+          from order_items oi
+          inner join products p on oi.product_id = p.id
+          inner join units u on oi.unit_id = u.id
+          where oi.order_id = :orderId
+          order by p.name asc
+        `,
+        {
+          replacements: { orderId },
+        },
+      ),
+    ),
+    timeDbQuery("orders.detail.cancelAudit.pg", async () =>
+      pg.queryOne<OrderCancelAuditRow>(
+        `
+          select
+            occurred_at as "occurredAt",
+            actor_name as "actorName",
+            metadata
+          from audit_events
+          where scope = 'STORE'
+            and store_id = :storeId
+            and action = 'order.cancel'
+            and entity_type = 'order'
+            and entity_id = :orderId
+            and result = 'SUCCESS'
+          order by occurred_at desc
+          limit 1
+        `,
+        {
+          replacements: {
+            storeId,
+            orderId,
+          },
+        },
+      ),
+    ),
+  ]);
+
+  let cancelApproval: OrderDetail["cancelApproval"] = null;
+  if (cancelAudit) {
+    const metadata = parseAuditMetadataObject(cancelAudit.metadata);
+    const getMetadataText = (key: string) => {
+      const value = metadata?.[key];
+      if (typeof value !== "string") {
+        return null;
+      }
+      const trimmed = value.trim();
+      return trimmed.length > 0 ? trimmed : null;
+    };
+
+    cancelApproval = {
+      approvedAt: cancelAudit.occurredAt,
+      cancelReason: getMetadataText("cancelReason"),
+      approvedByName: getMetadataText("approvedByName"),
+      approvedByRole: getMetadataText("approvedByRole"),
+      approvedByEmail: getMetadataText("approvedByEmail"),
+      cancelledByName: cancelAudit.actorName?.trim() || null,
+      approvalMode:
+        metadata?.approvalMode === "MANAGER_PASSWORD" || metadata?.approvalMode === "SELF_SLIDE"
+          ? metadata.approvalMode
+          : null,
+    };
+  }
+
+  return {
+    ...order,
+    paymentAccountQrImageUrl: resolvePaymentQrImageUrl(order.paymentAccountQrImageUrl),
+    cancelApproval,
+    items,
+  };
+};
+
 export async function getOrderDetail(storeId: string, orderId: string): Promise<OrderDetail | null> {
+  const pg = await getPostgresOrdersReadContext();
+  if (pg) {
+    try {
+      return await getOrderDetailPostgres(pg, storeId, orderId);
+    } catch (error) {
+      logOrdersReadFallback("getOrderDetail", error);
+    }
+  }
+
   const paymentAccounts = alias(storePaymentAccounts, "payment_accounts");
   let order:
     | (Omit<OrderDetail, "items" | "cancelApproval"> & {
@@ -995,6 +1333,50 @@ export async function getOrderCatalogForStore(storeId: string): Promise<OrderCat
 export async function getActiveQrPaymentAccountsForStore(
   storeId: string,
 ): Promise<OrderCatalogPaymentAccount[]> {
+  const pg = await getPostgresOrdersReadContext();
+  if (pg) {
+    try {
+      const rows = await timeDbQuery("orders.detail.qrPaymentAccounts.pg", async () =>
+        pg.queryMany<{
+          id: string;
+          displayName: string;
+          accountType: string;
+          bankName: string | null;
+          accountName: string;
+          accountNumber: string | null;
+          qrImageUrl: string | null;
+          isDefault: boolean;
+          isActive: boolean;
+        }>(
+          `
+            select
+              id,
+              display_name as "displayName",
+              account_type as "accountType",
+              bank_name as "bankName",
+              account_name as "accountName",
+              account_number as "accountNumber",
+              qr_image_url as "qrImageUrl",
+              is_default as "isDefault",
+              is_active as "isActive"
+            from store_payment_accounts
+            where store_id = :storeId
+              and is_active = true
+              and account_type = 'LAO_QR'
+            order by is_default desc, created_at asc
+          `,
+          {
+            replacements: { storeId },
+          },
+        ),
+      );
+
+      return rows.map(mapOrderCatalogPaymentAccount);
+    } catch (error) {
+      logOrdersReadFallback("getActiveQrPaymentAccountsForStore", error);
+    }
+  }
+
   try {
     const rows = await timeDbQuery("orders.detail.qrPaymentAccounts", async () =>
       db

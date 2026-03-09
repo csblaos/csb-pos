@@ -6,6 +6,11 @@
 
 - journal entries: `38`
 - latest migration tag: `0037_bouncy_leper_queen`
+- PostgreSQL query-first baseline:
+  - runner: `scripts/migrate-postgres.mjs`
+  - migrations path: `postgres/migrations/`
+  - current baseline: `0001_orders_read_foundation.sql`
+  - scope ของ baseline นี้ยังเป็น mirror schema สำหรับ `orders read` ไม่ใช่ full cutover schema ทั้งระบบ
 - latest focus:
   - โครงสร้างสินค้าแบบ Variant (Phase 1):
     - `product_models`
@@ -218,6 +223,22 @@
 - audit:
   - `audit_events_scope_occurred_at_idx`
   - `audit_events_store_occurred_at_idx`
+
+## PostgreSQL Baseline (Orders Read)
+
+- baseline migration `postgres/migrations/0001_orders_read_foundation.sql` สร้างตารางที่จำเป็นกับ slice แรกของ PostgreSQL read:
+  - `users`
+  - `stores`
+  - `contacts`
+  - `store_payment_accounts`
+  - `units`
+  - `products`
+  - `orders`
+  - `order_items`
+  - `audit_events`
+- บางฟิลด์เวลา (`created_at`, `paid_at`, `shipped_at`, `occurred_at`) ยังเก็บเป็น `text` เพื่อ mirror ข้อมูลเดิมจาก Turso/SQLite และลดความเสี่ยงตอนย้าย data รอบแรก
+- `audit_events.metadata/before/after` ใช้ `jsonb` ใน baseline ฝั่ง PostgreSQL แล้ว เพื่อรองรับ query/read model ฝั่งใหม่ง่ายขึ้น
+- ใช้ `scripts/backfill-postgres-orders-read.mjs` สำหรับย้ายข้อมูล baseline ชุดนี้แบบ upsert/re-run safe จาก Turso -> PostgreSQL
 - notifications:
   - unique `notification_inbox_store_dedupe_unique`
   - `notification_inbox_store_status_detected_idx`

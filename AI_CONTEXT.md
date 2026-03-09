@@ -26,6 +26,12 @@ npm run build
 ```bash
 npm run db:repair
 npm run db:migrate
+npm run db:check:postgres
+npm run db:migrate:postgres
+npm run db:backfill:postgres:orders-read
+npm run db:compare:postgres:orders-read
+npm run smoke:postgres:update-shipping
+npm run smoke:postgres:submit-payment-slip
 ```
 
 ## 2) Engineering Rules (บังคับใช้)
@@ -50,13 +56,19 @@ npm run db:migrate
 - `server/services/` business service layer
 - `server/repositories/` data access layer
 - `drizzle/` SQL migrations + meta
+- `postgres/migrations/` SQL migrations สำหรับ Aiven PostgreSQL (Sequelize query-first path)
 - `scripts/repair-migrations.mjs` repair/compat script
+- `scripts/check-postgres.mjs` health check สำหรับ Aiven PostgreSQL ผ่าน Sequelize
+- `scripts/migrate-postgres.mjs` apply PostgreSQL SQL migrations พร้อมตาราง tracking `__app_postgres_migrations`
+- `scripts/backfill-postgres-orders-read.mjs` backfill ข้อมูลจาก Turso -> PostgreSQL สำหรับ baseline `orders read`
+- `scripts/compare-postgres-orders-read.mjs` เทียบ parity ของ `orders list/detail` ระหว่าง Turso กับ PostgreSQL
 
 เอกสาร inventory:
 - `docs/CODEBASE_MAP.md` แผนที่โค้ดทั้งระบบ (domain ownership)
 - `docs/UI_ROUTE_MAP.md` แผนที่หน้า UI -> component -> API
 - `docs/API_INVENTORY.md` รายการ API ทั้งระบบ
 - `docs/SCHEMA_MAP.md` แผนผังตารางและความสัมพันธ์
+- `docs/postgresql-sequelize-migration.md` แผนย้ายไป PostgreSQL + Sequelize query-first
 
 ## 4) Current Core Flows
 
@@ -433,6 +445,18 @@ npm run db:migrate
 ## 6) Required Environments (เฉพาะที่ใช้บ่อย)
 
 - DB: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`
+- PostgreSQL migration foundation:
+  - `POSTGRES_DATABASE_URL` (ไม่ต้องพ่วง `sslmode` ใน URL; ให้คุมผ่าน env ด้านล่าง)
+  - `POSTGRES_SSL_MODE`
+  - `POSTGRES_SSL_REJECT_UNAUTHORIZED`
+  - `POSTGRES_POOL_MAX`
+  - `POSTGRES_POOL_MIN`
+  - `POSTGRES_POOL_IDLE_MS`
+  - `POSTGRES_POOL_ACQUIRE_MS`
+  - `POSTGRES_LOG_SQL`
+  - `POSTGRES_ORDERS_READ_ENABLED` (`1` เพื่อเปิด orders read ผ่าน PostgreSQL; default `0`)
+  - `POSTGRES_ORDERS_WRITE_UPDATE_SHIPPING_ENABLED` (`1` เพื่อเปิด write path ของ `update_shipping`; default `0`)
+  - `POSTGRES_ORDERS_WRITE_SUBMIT_PAYMENT_SLIP_ENABLED` (`1` เพื่อเปิด write path ของ `submit_payment_slip`; default `0`)
 - Auth: `AUTH_JWT_SECRET`
 - Cron: `CRON_SECRET`
   - สำหรับ GitHub Actions fallback ให้ตั้ง repository secrets เพิ่ม: `CRON_ENDPOINT`, `CRON_SECRET`
@@ -451,6 +475,35 @@ npm run db:migrate
   - `R2_ORDER_SHIPPING_LABEL_PREFIX`
 
 ## 7) Update Contract (Definition of Done)
+
+- PostgreSQL migration foundation (ยังไม่ cutover runtime):
+  - เพิ่ม dependency `sequelize`, `pg`, `pg-hstore`
+  - เพิ่มไฟล์ foundation:
+    - `lib/db/sequelize.ts`
+    - `lib/db/query.ts`
+    - `lib/db/transaction.ts`
+    - `lib/db/sql.ts`
+  - เพิ่ม script `npm run db:check:postgres`
+  - เพิ่ม script `npm run db:migrate:postgres` เพื่อ apply SQL migrations ใน `postgres/migrations`
+  - เพิ่ม script `npm run db:backfill:postgres:orders-read` เพื่อย้ายข้อมูลจาก Turso -> PostgreSQL สำหรับ baseline `orders read`
+  - เพิ่ม script `npm run db:compare:postgres:orders-read` เพื่อเทียบ parity ของ read model หลัง backfill
+  - เพิ่ม script `npm run smoke:postgres:update-shipping` สำหรับทดสอบ SQL path ของ `update_shipping` แบบ transaction + rollback
+  - เพิ่ม script `npm run smoke:postgres:submit-payment-slip` สำหรับทดสอบ SQL path ของ `submit_payment_slip` แบบ transaction + rollback
+  - เพิ่ม `scripts/load-local-env.mjs` เพื่อให้ script PostgreSQL ฝั่ง `db:*` และ `smoke:*` โหลด `.env` / `.env.local` ได้เองโดยไม่ต้อง `source` ก่อนรัน
+  - เติม placeholder env สำหรับ Aiven PostgreSQL ใน `.env.local` แล้ว แต่ยังคง Turso env เดิมไว้เพื่อให้ runtime ปัจจุบันทำงานต่อได้ระหว่าง migration
+  - ตัด `sslmode=require` ออกจาก `POSTGRES_DATABASE_URL` และให้ `lib/db/sequelize.ts` / `scripts/check-postgres.mjs` sanitize SSL query params ออกจาก URL เพื่อไม่ให้ชนกับ `POSTGRES_SSL_REJECT_UNAUTHORIZED=0` ตอนต่อ Aiven
+  - ย้าย vertical slice แรกของ read path แล้ว: `listOrdersByTab` และ `getOrderDetail` รองรับ PostgreSQL ผ่าน `sequelize.query(...)` เมื่อเปิด `POSTGRES_ORDERS_READ_ENABLED=1`; ถ้า query ฝั่ง PostgreSQL fail จะ fallback กลับ Turso/Drizzle พร้อม log เตือน
+  - เพิ่ม baseline PostgreSQL migration `postgres/migrations/0001_orders_read_foundation.sql` สำหรับตารางที่ orders read ใช้จริง (`users`, `stores`, `contacts`, `store_payment_accounts`, `units`, `products`, `orders`, `order_items`, `audit_events`)
+  - เพิ่ม script backfill `scripts/backfill-postgres-orders-read.mjs` แบบ upsert/re-run safe สำหรับ 9 ตารางใน baseline นี้ พร้อมสรุปจำนวนแถว source/target ต่อ table หลังรัน
+  - รัน backfill baseline เข้า Aiven แล้ว (รอบล่าสุด: `users=9`, `stores=6`, `contacts=2`, `store_payment_accounts=2`, `units=7`, `products=16`, `orders=72`, `order_items=81`, `audit_events=157`)
+  - เพิ่ม parity-check script `scripts/compare-postgres-orders-read.mjs` สำหรับเทียบ output ของ `QR accounts`, `orders list` ทุก tab และ `order detail` ทุก order ระหว่าง Turso กับ PostgreSQL ก่อนเปิด `POSTGRES_ORDERS_READ_ENABLED=1`
+  - รัน parity-check แล้วผ่าน: `QR accounts`, `orders list` ทุก tab และ `order detail` ทั้ง 72 ออเดอร์ของ `store_demo_main` ตรงกันระหว่าง Turso กับ PostgreSQL
+  - `getActiveQrPaymentAccountsForStore` รองรับ PostgreSQL read path แล้ว ทำให้หน้า `/orders/[orderId]` ใช้ PostgreSQL ทั้ง `order detail` และ `QR payment accounts` เมื่อเปิด flag
+  - `.env.local` ของเครื่องนี้เปิด `POSTGRES_ORDERS_READ_ENABLED=1` แล้ว เพื่อให้ `/orders`, `/orders/[orderId]`, หน้า print และ API read ที่อิง `getOrderDetail` วิ่งผ่าน PostgreSQL read path จริง
+  - `PATCH /api/orders/[orderId]` action `update_shipping` รองรับ PostgreSQL write path แล้วผ่าน `lib/orders/postgres-write.ts` เมื่อเปิด `POSTGRES_ORDERS_WRITE_UPDATE_SHIPPING_ENABLED=1`; ถ้า PostgreSQL path fail จะ fallback กลับ Turso เดิม
+  - `PATCH /api/orders/[orderId]` action `submit_payment_slip` รองรับ PostgreSQL write path แล้วผ่าน `lib/orders/postgres-write.ts` เมื่อเปิด `POSTGRES_ORDERS_WRITE_SUBMIT_PAYMENT_SLIP_ENABLED=1`; ถ้า PostgreSQL path fail จะ fallback กลับ Turso เดิม
+  - `next.config.ts` externalize `sequelize`, `pg`, `pg-hstore` ใน `serverExternalPackages` เพื่อให้ Next build ไม่พยายาม bundle dependency ฝั่ง server ของ PostgreSQL migration
+  - แนวทาง migration ที่รับแล้วคือ `Sequelize query-first`: ใช้ `sequelize.query(...)` + transaction และหลีกเลี่ยง Sequelize ORM model ในโดเมนหลัก เพื่อให้ย้ายไป Express ง่าย
 
 ทุกงานที่เปลี่ยนพฤติกรรมระบบต้องมีหัวข้อต่อไปนี้ใน `docs/HANDOFF.md`:
 

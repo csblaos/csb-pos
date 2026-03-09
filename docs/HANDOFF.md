@@ -6,6 +6,38 @@
 
 ## Changed (ล่าสุด)
 
+- วาง foundation สำหรับ migration ไป `Aiven PostgreSQL + Sequelize query-first`:
+  - ติดตั้ง dependency `sequelize`, `pg`, `pg-hstore`
+  - เพิ่ม `lib/db/sequelize.ts` สำหรับ singleton, pool, SSL config, และ connection probe
+  - เพิ่ม `lib/db/query.ts` สำหรับ helper `queryMany/queryOne/execute/queryValue`
+  - เพิ่ม `lib/db/transaction.ts` สำหรับ `runInTransaction`
+  - เพิ่ม `lib/db/sql.ts` เป็น template helper สำหรับจัดรูป SQL string
+  - เพิ่ม script `npm run db:check:postgres` ผ่าน `scripts/check-postgres.mjs`
+  - เพิ่ม script `npm run db:migrate:postgres` ผ่าน `scripts/migrate-postgres.mjs`
+  - เพิ่ม script `npm run db:backfill:postgres:orders-read` ผ่าน `scripts/backfill-postgres-orders-read.mjs`
+  - เพิ่ม script `npm run db:compare:postgres:orders-read` ผ่าน `scripts/compare-postgres-orders-read.mjs`
+  - เพิ่ม script `npm run smoke:postgres:update-shipping` ผ่าน `scripts/smoke-postgres-update-shipping.mjs`
+  - เพิ่ม script `npm run smoke:postgres:submit-payment-slip` ผ่าน `scripts/smoke-postgres-submit-payment-slip.mjs`
+  - เพิ่ม `scripts/load-local-env.mjs` เพื่อให้ script PostgreSQL โหลด `.env` / `.env.local` ได้เองโดยไม่ต้อง `source` ใน shell ก่อนรัน
+  - เติม placeholder env สำหรับ Aiven PostgreSQL ใน `.env.local` แล้ว โดยยังคง Turso env เดิมไว้ระหว่าง migration
+  - ตัด `sslmode=require` ออกจาก `POSTGRES_DATABASE_URL` และ sanitize SSL query params ออกจาก URL ใน runtime/script เพื่อให้ใช้ `POSTGRES_SSL_MODE` + `POSTGRES_SSL_REJECT_UNAUTHORIZED` เป็นแหล่งจริงตัวเดียว
+  - เพิ่ม env flag `POSTGRES_ORDERS_READ_ENABLED` (default `0`) สำหรับเปิด vertical slice แรกของ orders read
+  - `lib/orders/queries.ts` รองรับ PostgreSQL read path สำหรับ `listOrdersByTab` และ `getOrderDetail` ผ่าน `sequelize.query(...)` แล้ว; ถ้า query ฝั่ง PostgreSQL fail จะ fallback กลับ Turso/Drizzle พร้อม log เตือน
+  - เพิ่ม baseline migration `postgres/migrations/0001_orders_read_foundation.sql` สำหรับ schema ชุดแรกที่ orders read ต้องใช้ (`users`, `stores`, `contacts`, `store_payment_accounts`, `units`, `products`, `orders`, `order_items`, `audit_events`)
+  - migration runner จะ track ไฟล์ที่ apply แล้วในตาราง `__app_postgres_migrations` และตรวจ checksum กัน drift
+  - เพิ่ม backfill script แบบ upsert/re-run safe สำหรับ 9 ตาราง baseline นี้ และสรุปจำนวนแถว source/target หลังรันแต่ละ table
+  - รัน backfill baseline เข้า Aiven สำเร็จแล้ว: `users=9`, `stores=6`, `contacts=2`, `store_payment_accounts=2`, `units=7`, `products=16`, `orders=72`, `order_items=81`, `audit_events=157`
+  - เพิ่ม parity-check script สำหรับเทียบ `QR accounts`, `orders list` ทุก tab และ `order detail` ทุก order ระหว่าง Turso กับ PostgreSQL ก่อนเปิด flag จริง
+  - รัน parity-check ผ่านแล้ว: `QR accounts`, `orders list` ทุก tab และ `order detail` ทั้ง 72 ออเดอร์ของ `store_demo_main` ตรงกันระหว่างสองฐาน
+  - เพิ่ม PostgreSQL read path ให้ `getActiveQrPaymentAccountsForStore` แล้ว ทำให้หน้า `/orders/[orderId]` วิ่งผ่าน PostgreSQL ครบทั้ง order + QR accounts เมื่อเปิด flag
+  - เปิด `POSTGRES_ORDERS_READ_ENABLED=1` ใน `.env.local` ของเครื่องนี้แล้วเพื่อเริ่มใช้งาน PostgreSQL orders read path จริง
+  - เพิ่ม PostgreSQL write path สำหรับ `PATCH /api/orders/[orderId]` action `update_shipping` ผ่าน `lib/orders/postgres-write.ts` และเปิด `POSTGRES_ORDERS_WRITE_UPDATE_SHIPPING_ENABLED=1` ใน `.env.local` ของเครื่องนี้แล้ว
+  - ถ้า PostgreSQL write path ของ `update_shipping` fail ระบบจะ fallback กลับ Turso path เดิม; ส่วน idempotency ยัง mark สำเร็จใน Turso หลัง PostgreSQL commit เพื่อเลี่ยงการย้ายหลายตารางพร้อมกันใน phase นี้
+  - เพิ่ม PostgreSQL write path สำหรับ `PATCH /api/orders/[orderId]` action `submit_payment_slip` ผ่าน `lib/orders/postgres-write.ts` และเปิด `POSTGRES_ORDERS_WRITE_SUBMIT_PAYMENT_SLIP_ENABLED=1` ใน `.env.local` ของเครื่องนี้แล้ว
+  - `next.config.ts` เพิ่ม `serverExternalPackages: ["sequelize", "pg", "pg-hstore"]` เพื่อให้ build ฝั่ง server ของ Next ไม่ bundle dependency migration ชุดนี้และลด warning จาก Sequelize
+  - เพิ่มเอกสาร `docs/postgresql-sequelize-migration.md`
+  - ตัดสินใจเชิงสถาปัตยกรรมใหม่ว่า migration รอบนี้จะใช้ `Sequelize` แบบ query-first (`sequelize.query(...)`) ไม่ใช้ ORM model เป็นแกนของโดเมนหลัก เพื่อให้ย้ายไป `Express + TypeScript` ง่ายในอนาคต
+
 - ปรับ UX action rail ของ online order ในหน้า `/orders/[orderId]`:
   - ปุ่มหลักเหลือเฉพาะ next step เดียวตามสถานะจริง (`ยืนยันชำระแล้ว/ตรวจสลิปและยืนยันชำระ` -> `แพ็กสินค้า` -> `จัดส่งแล้ว` -> `ยืนยันรับเงินปลายทาง (COD)`)
   - เอาปุ่ม `แพ็กสินค้า` และ `จัดส่งแล้ว` ที่ซ้ำกับ primary action ออกจาก `การทำงานเพิ่มเติม`
