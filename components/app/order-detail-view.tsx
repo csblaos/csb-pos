@@ -12,12 +12,15 @@ import {
   type ManagerCancelApprovalResult,
 } from "@/components/app/manager-cancel-approval-modal";
 import { Button } from "@/components/ui/button";
+import { SlideUpSheet } from "@/components/ui/slide-up-sheet";
 import {
   currencyLabel,
   currencySymbol,
   parseStoreCurrency,
   vatModeLabel,
 } from "@/lib/finance/store-financial";
+import { compressRasterImageFile, validateRasterImageFile } from "@/lib/media/client-image";
+import { RASTER_IMAGE_ACCEPT } from "@/lib/media/image-upload";
 import type { OrderCatalogPaymentAccount, OrderDetail } from "@/lib/orders/queries";
 import { maskAccountValue } from "@/lib/payments/store-payment";
 
@@ -91,6 +94,9 @@ const shippingLabelStatusLabel: Record<OrderDetail["shippingLabelStatus"], strin
   FAILED: "สร้างไม่สำเร็จ",
 };
 
+const SHIPPING_LABEL_MAX_SIZE_MB = 6;
+const SHIPPING_LABEL_MAX_SIZE_BYTES = SHIPPING_LABEL_MAX_SIZE_MB * 1024 * 1024;
+
 export function OrderDetailView({
   order,
   qrPaymentAccounts,
@@ -112,7 +118,6 @@ export function OrderDetailView({
   );
   const [codReturnFeeInput, setCodReturnFeeInput] = useState("");
   const [codReturnNoteInput, setCodReturnNoteInput] = useState(order.codReturnNote ?? "");
-  const [paymentSlipUrl, setPaymentSlipUrl] = useState(order.paymentSlipUrl ?? "");
   const [messageText, setMessageText] = useState(messaging.template);
   const [receiptPrintLoading, setReceiptPrintLoading] = useState(false);
   const [labelPrintLoading, setLabelPrintLoading] = useState(false);
@@ -120,12 +125,14 @@ export function OrderDetailView({
   const [showConfirmPickupBeforePaidModal, setShowConfirmPickupBeforePaidModal] = useState(false);
   const [showCancelApprovalModal, setShowCancelApprovalModal] = useState(false);
   const [showConfirmPaidQrImageViewer, setShowConfirmPaidQrImageViewer] = useState(false);
+  const [showOrderQrImageViewer, setShowOrderQrImageViewer] = useState(false);
   const [showShippingLabelSourcePicker, setShowShippingLabelSourcePicker] = useState(false);
   const [showDeleteShippingLabelConfirm, setShowDeleteShippingLabelConfirm] = useState(false);
   const [confirmPaidPaymentMethod, setConfirmPaidPaymentMethod] = useState<"CASH" | "LAO_QR">("CASH");
   const [confirmPaidPaymentAccountId, setConfirmPaidPaymentAccountId] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [shippingLabelUploadError, setShippingLabelUploadError] = useState<string | null>(null);
   const shippingLabelFileInputRef = useRef<HTMLInputElement | null>(null);
   const shippingLabelCameraInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -165,13 +172,6 @@ export function OrderDetailView({
     order.paymentMethod !== "COD" &&
     order.status === "READY_FOR_PICKUP" &&
     order.paymentStatus !== "PAID";
-  const canSubmitSlip =
-    canUpdate &&
-    (order.status === "PENDING_PAYMENT" ||
-      order.status === "READY_FOR_PICKUP" ||
-      order.status === "PICKED_UP_PENDING_PAYMENT") &&
-    order.paymentMethod === "LAO_QR" &&
-    order.paymentStatus !== "PAID";
   const canMarkPacked =
     !isWalkInPaidComplete &&
     canPack &&
@@ -197,11 +197,6 @@ export function OrderDetailView({
       order.status === "SHIPPED");
   const cancelIsHighRisk =
     order.status === "PAID" || order.status === "PACKED" || order.status === "SHIPPED";
-  const showExtraActions = !(
-    (isWalkInOrder && (order.status === "CANCELLED" || order.status === "PENDING_PAYMENT")) ||
-    order.status === "READY_FOR_PICKUP" ||
-    order.status === "PICKED_UP_PENDING_PAYMENT"
-  );
   const orderFlowLabel = isOnlineOrder
     ? "สั่งออนไลน์/จัดส่ง"
     : isPickupOrder
@@ -217,12 +212,12 @@ export function OrderDetailView({
         order.shippingCost > 0,
     );
   const isLaoQrOrder = order.paymentMethod === "LAO_QR";
-  const qrSlipWorkflowEnabled = isLaoQrOrder && (isOnlineOrder || isPickupOrder);
-  const showQrSlipStatus = isLaoQrOrder && qrSlipWorkflowEnabled;
-  const showQrSlipInput = canSubmitSlip && qrSlipWorkflowEnabled;
-  const showQrProofReadOnly =
-    isLaoQrOrder && qrSlipWorkflowEnabled && Boolean(order.paymentSlipUrl) && !showQrSlipInput;
   const showLaoQrMessaging = order.paymentMethod === "LAO_QR" && isOnlineOrder;
+  const showWhatsappMessagingAction = order.channel === "WHATSAPP" && Boolean(messaging.waDeepLink);
+  const showFacebookMessagingAction =
+    order.channel === "FACEBOOK" && Boolean(messaging.facebookInboxUrl);
+  const messagingActionCount =
+    1 + (showWhatsappMessagingAction ? 1 : 0) + (showFacebookMessagingAction ? 1 : 0);
   const canOpenShippingLabelCamera = typeof window !== "undefined" && "mediaDevices" in navigator;
   const storeCurrencyDisplay = currencySymbol(parseStoreCurrency(order.storeCurrency));
   const paymentCurrencyDisplay = currencyLabel(order.paymentCurrency);
@@ -287,77 +282,55 @@ export function OrderDetailView({
     },
     [selectedConfirmPaidQrAccount],
   );
-  const runPatchAction = async (
-    payload: Record<string, unknown>,
-    key: string,
-    successText: string,
-  ): Promise<ManagerCancelApprovalResult> => {
-    setLoadingKey(key);
-    setErrorMessage(null);
-    setSuccessMessage(null);
-
-    const response = await fetch(`/api/orders/${order.id}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    const data = (await response.json().catch(() => null)) as
-      | {
-          message?: string;
-        }
-      | null;
-
-    if (!response.ok) {
-      const message = data?.message ?? "บันทึกไม่สำเร็จ";
-      setErrorMessage(message);
-      setLoadingKey(null);
-      return { ok: false, message };
-    }
-
-    setSuccessMessage(successText);
-    setLoadingKey(null);
-    router.refresh();
-    return { ok: true };
-  };
-
-  const sendQr = async () => {
-    setLoadingKey("send-qr");
-    setErrorMessage(null);
-    setSuccessMessage(null);
-
-    const response = await fetch(`/api/orders/${order.id}/send-qr`, {
-      method: "POST",
-    });
-
-    const data = (await response.json().catch(() => null)) as
-      | {
-          message?: string;
-          mode?: string;
-          template?: string;
-          waDeepLink?: string | null;
-        }
-      | null;
-
-    if (!response.ok) {
-      setErrorMessage(data?.message ?? "ส่งข้อความไม่สำเร็จ");
-      setLoadingKey(null);
-      return;
-    }
-
-    if (data?.mode === "AUTO") {
-      setSuccessMessage("ส่งอัตโนมัติแล้ว (โหมดจำลอง)");
-    } else {
-      setErrorMessage(data?.message ?? "ต้องส่งแบบแมนนวล");
-      if (data?.template) {
-        setMessageText(data.template);
+  const getOrderQrImageActionUrl = useCallback(
+    (download = false) => {
+      if (!order.paymentAccountId) {
+        return null;
       }
-    }
+      return `/api/orders/payment-accounts/${order.paymentAccountId}/qr-image${
+        download ? "?download=1" : ""
+      }`;
+    },
+    [order.paymentAccountId],
+  );
+  const runPatchAction = useCallback(
+    async (
+      payload: Record<string, unknown>,
+      key: string,
+      successText: string,
+    ): Promise<ManagerCancelApprovalResult> => {
+      setLoadingKey(key);
+      setErrorMessage(null);
+      setSuccessMessage(null);
 
-    setLoadingKey(null);
-  };
+      const response = await fetch(`/api/orders/${order.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = (await response.json().catch(() => null)) as
+        | {
+            message?: string;
+          }
+        | null;
+
+      if (!response.ok) {
+        const message = data?.message ?? "บันทึกไม่สำเร็จ";
+        setErrorMessage(message);
+        setLoadingKey(null);
+        return { ok: false, message };
+      }
+
+      setSuccessMessage(successText);
+      setLoadingKey(null);
+      router.refresh();
+      return { ok: true };
+    },
+    [order.id, router],
+  );
 
   const copyMessage = async () => {
     try {
@@ -374,6 +347,21 @@ export function OrderDetailView({
     }
     setShowConfirmPaidQrImageViewer(true);
   }, [selectedConfirmPaidQrAccount]);
+
+  const openOrderQrImageFull = useCallback(() => {
+    if (!order.paymentAccountQrImageUrl) {
+      return;
+    }
+    setShowOrderQrImageViewer(true);
+  }, [order.paymentAccountQrImageUrl]);
+
+  const openOrderQrImageInNewTab = useCallback(() => {
+    if (!order.paymentAccountQrImageUrl) {
+      return;
+    }
+    const targetUrl = getOrderQrImageActionUrl(false) ?? order.paymentAccountQrImageUrl;
+    window.open(targetUrl, "_blank", "noopener,noreferrer");
+  }, [getOrderQrImageActionUrl, order.paymentAccountQrImageUrl]);
 
   const openConfirmPaidQrImageInNewTab = useCallback(() => {
     if (!selectedConfirmPaidQrAccount?.qrImageUrl) {
@@ -421,6 +409,44 @@ export function OrderDetailView({
     }
   }, [getConfirmPaidQrImageActionUrl, selectedConfirmPaidQrAccount]);
 
+  const downloadOrderQrImage = useCallback(async () => {
+    if (!order.paymentAccountQrImageUrl) {
+      return;
+    }
+
+    const safeFileName = (order.paymentAccountDisplayName || "payment-qr")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+
+    try {
+      const response = await fetch(getOrderQrImageActionUrl(true) ?? order.paymentAccountQrImageUrl);
+      if (!response.ok) {
+        throw new Error("DOWNLOAD_FAILED");
+      }
+
+      const blob = await response.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = `${safeFileName || "payment-qr"}.png`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(blobUrl);
+      toast.success("ดาวน์โหลดรูป QR แล้ว");
+    } catch {
+      const fallbackUrl = getOrderQrImageActionUrl(false) ?? order.paymentAccountQrImageUrl;
+      window.open(fallbackUrl, "_blank", "noopener,noreferrer");
+      toast("เปิดรูป QR ในแท็บใหม่แทน");
+    }
+  }, [
+    getOrderQrImageActionUrl,
+    order.paymentAccountDisplayName,
+    order.paymentAccountQrImageUrl,
+  ]);
+
   const copyConfirmPaidQrAccountNumber = useCallback(async () => {
     if (!selectedConfirmPaidQrAccount?.accountNumber) {
       return;
@@ -435,9 +461,26 @@ export function OrderDetailView({
   }, [selectedConfirmPaidQrAccount]);
 
   const uploadShippingLabelImage = async (file: File, source: "file" | "camera") => {
+    const setUploadError = (message: string) => {
+      setShippingLabelUploadError(message);
+      toast.error(message);
+    };
+
     setLoadingKey(source === "camera" ? "upload-label-camera" : "upload-label-file");
-    setErrorMessage(null);
+    setShippingLabelUploadError(null);
     setSuccessMessage(null);
+
+    if (!file.type.startsWith("image/")) {
+      setUploadError("รองรับเฉพาะไฟล์รูปภาพ");
+      setLoadingKey(null);
+      return;
+    }
+
+    if (file.size > SHIPPING_LABEL_MAX_SIZE_BYTES) {
+      setUploadError(`ไฟล์รูปใหญ่เกินกำหนด (ไม่เกิน ${SHIPPING_LABEL_MAX_SIZE_MB}MB)`);
+      setLoadingKey(null);
+      return;
+    }
 
     try {
       const formData = new FormData();
@@ -457,12 +500,12 @@ export function OrderDetailView({
         | null;
 
       if (!response.ok) {
-        setErrorMessage(data?.message ?? "อัปโหลดรูปบิล/ป้ายจัดส่งไม่สำเร็จ");
+        setUploadError(data?.message ?? "อัปโหลดรูปบิล/ป้ายจัดส่งไม่สำเร็จ");
         return;
       }
 
       if (!data?.labelUrl) {
-        setErrorMessage("ไม่พบลิงก์รูปที่อัปโหลด");
+        setUploadError("ไม่พบลิงก์รูปที่อัปโหลด");
         return;
       }
 
@@ -487,10 +530,11 @@ export function OrderDetailView({
         | null;
 
       if (!patchResponse.ok) {
-        setErrorMessage(patchData?.message ?? "อัปโหลดรูปสำเร็จ แต่บันทึกข้อมูลจัดส่งไม่สำเร็จ");
+        setUploadError(patchData?.message ?? "อัปโหลดรูปสำเร็จ แต่บันทึกข้อมูลจัดส่งไม่สำเร็จ");
         return;
       }
 
+      setShippingLabelUploadError(null);
       setSuccessMessage(
         source === "camera"
           ? "ถ่ายรูปและบันทึกป้ายจัดส่งแล้ว"
@@ -498,13 +542,13 @@ export function OrderDetailView({
       );
       router.refresh();
     } catch {
-      setErrorMessage("อัปโหลดรูปบิล/ป้ายจัดส่งไม่สำเร็จ");
+      setUploadError("อัปโหลดรูปบิล/ป้ายจัดส่งไม่สำเร็จ");
     } finally {
       setLoadingKey(null);
     }
   };
 
-  const removeShippingLabelImage = useCallback(async () => {
+  const removeShippingLabelImage = async () => {
     const result = await runPatchAction(
       {
         action: "update_shipping",
@@ -521,12 +565,13 @@ export function OrderDetailView({
       setShowDeleteShippingLabelConfirm(false);
     }
     return result;
-  }, [order.shippingCarrier, order.shippingCost, order.trackingNo, runPatchAction]);
+  };
 
   const openShippingLabelSourcePicker = useCallback(() => {
     if (!canUpdate || loadingKey !== null) {
       return;
     }
+    setShippingLabelUploadError(null);
     setShowShippingLabelSourcePicker(true);
   }, [canUpdate, loadingKey]);
 
@@ -562,7 +607,28 @@ export function OrderDetailView({
       return;
     }
 
-    await uploadShippingLabelImage(file, source);
+    const validation = validateRasterImageFile(file);
+    if (!validation.ok) {
+      setShippingLabelUploadError(validation.message);
+      toast.error(validation.message);
+      return;
+    }
+
+    setShippingLabelUploadError(null);
+
+    try {
+      const optimizedFile = await compressRasterImageFile(file, {
+        maxWidth: 1600,
+        quality: 0.82,
+        fileNameBase: `${order.orderNo}-shipping-label`,
+      });
+      await uploadShippingLabelImage(optimizedFile, source);
+    } catch {
+      const message =
+        "เตรียมรูปป้ายจัดส่งไม่สำเร็จ กรุณาเลือกไฟล์ JPG, PNG หรือ WebP ที่เล็กลง";
+      setShippingLabelUploadError(message);
+      toast.error(message);
+    }
   };
 
   const buildReceiptPrintMarkup = useCallback(() => {
@@ -755,12 +821,18 @@ export function OrderDetailView({
     ? "ยืนยันรับเงินปลายทาง (COD)"
     : isPickupReadyPrepaid
       ? "ยืนยันรับสินค้า"
-      : "ยืนยันรับชำระ";
+      : isOnlineOrder && order.paymentMethod === "LAO_QR" && order.paymentStatus === "PENDING_PROOF"
+        ? "ตรวจสลิปและยืนยันชำระ"
+        : isOnlineOrder
+          ? "ยืนยันชำระแล้ว"
+          : "ยืนยันรับชำระ";
   const confirmPaidSuccessText = isCodPendingAfterShipped
     ? "ปิดยอด COD แล้ว"
     : isPickupReadyPrepaid
       ? "ยืนยันรับสินค้าแล้ว"
-      : "ยืนยันชำระแล้ว";
+      : isOnlineOrder
+        ? "บันทึกว่าออเดอร์ชำระแล้ว"
+        : "ยืนยันชำระแล้ว";
   const confirmPaidDisabled =
     !canConfirmPaid ||
     loadingKey !== null ||
@@ -771,6 +843,13 @@ export function OrderDetailView({
       !selectedConfirmPaidQrAccount);
   const shouldConfirmReceivePaymentAction = !isCodPendingAfterShipped && !isPickupReadyPrepaid;
   const shouldConfirmPickupReceiveAction = isPickupReadyPrepaid;
+  const confirmPaidConfirmTitle = isPickupReadyPrepaid
+    ? "ยืนยันรับสินค้าแล้ว?"
+    : isCodPendingAfterShipped
+      ? "ยืนยันรับเงินปลายทาง (COD)?"
+      : confirmPaidButtonLabel === "ตรวจสลิปและยืนยันชำระ"
+        ? "ตรวจสลิปและยืนยันชำระ?"
+        : "ยืนยันชำระแล้ว?";
   const runConfirmPaidAction = async () => {
     const pickupSettlementPayload =
       isInStoreCreditSettlement
@@ -859,22 +938,51 @@ export function OrderDetailView({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selectedConfirmPaidQrAccount, showConfirmPaidQrImageViewer]);
 
+  useEffect(() => {
+    if (!showOrderQrImageViewer) {
+      return;
+    }
+    if (!order.paymentAccountQrImageUrl) {
+      setShowOrderQrImageViewer(false);
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShowOrderQrImageViewer(false);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [order.paymentAccountQrImageUrl, showOrderQrImageViewer]);
+
   const timelineSteps = useMemo(() => {
     if (isOnlineOrder) {
-      const labels = ["สร้างออเดอร์", "ยืนยันชำระ", "แพ็กสินค้า", "จัดส่ง", "ปิดงาน"];
+      const labels =
+        order.paymentMethod === "COD"
+          ? ["สร้างออเดอร์", "แพ็กสินค้า", "จัดส่ง", "ปิดยอด COD"]
+          : ["สร้างออเดอร์", "ยืนยันชำระ", "แพ็กสินค้า", "จัดส่ง"];
       let currentStep = 0;
-      if (order.status === "PENDING_PAYMENT" || order.status === "READY_FOR_PICKUP") {
-        currentStep = 1;
-      } else if (order.status === "PAID" || order.status === "PACKED") {
-        currentStep = 2;
-      } else if (order.status === "SHIPPED") {
-        currentStep =
-          order.paymentMethod === "COD" && order.paymentStatus === "COD_PENDING_SETTLEMENT"
-            ? 4
-            : 3;
-      }
-      if (order.paymentStatus === "COD_SETTLED" || order.status === "COD_RETURNED") {
-        currentStep = 4;
+      if (order.paymentMethod === "COD") {
+        if (order.status === "PENDING_PAYMENT") {
+          currentStep = 1;
+        } else if (order.status === "PACKED") {
+          currentStep = 2;
+        } else if (order.status === "SHIPPED") {
+          currentStep = 3;
+        }
+        if (order.paymentStatus === "COD_SETTLED" || order.status === "COD_RETURNED") {
+          currentStep = 3;
+        }
+      } else {
+        if (order.status === "PENDING_PAYMENT" || order.status === "READY_FOR_PICKUP") {
+          currentStep = 1;
+        } else if (order.status === "PAID") {
+          currentStep = 2;
+        } else if (order.status === "PACKED" || order.status === "SHIPPED") {
+          currentStep = 3;
+        }
       }
       return labels.map((label, index) => ({
         label,
@@ -960,17 +1068,25 @@ export function OrderDetailView({
       : canMarkPacked
         ? {
             key: "mark-packed",
-            label: "ยืนยันแพ็กแล้ว",
+            label: isOnlineOrder ? "แพ็กสินค้า" : "ยืนยันแพ็กแล้ว",
             onClick: () =>
-              runPatchAction({ action: "mark_packed" }, "mark-packed", "อัปเดตเป็นแพ็กแล้ว"),
+              runPatchAction(
+                { action: "mark_packed" },
+                "mark-packed",
+                isOnlineOrder ? "บันทึกว่าแพ็กสินค้าแล้ว" : "อัปเดตเป็นแพ็กแล้ว",
+              ),
             disabled: loadingKey !== null,
           }
         : canMarkShipped
           ? {
               key: "mark-shipped",
-              label: "ยืนยันจัดส่งแล้ว",
+              label: isOnlineOrder ? "จัดส่งแล้ว" : "ยืนยันจัดส่งแล้ว",
               onClick: () =>
-                runPatchAction({ action: "mark_shipped" }, "mark-shipped", "อัปเดตเป็นจัดส่งแล้ว"),
+                runPatchAction(
+                  { action: "mark_shipped" },
+                  "mark-shipped",
+                  isOnlineOrder ? "บันทึกว่าออเดอร์จัดส่งแล้ว" : "อัปเดตเป็นจัดส่งแล้ว",
+                ),
               disabled: loadingKey !== null,
             }
           : order.status === "DRAFT" && canUpdate
@@ -986,6 +1102,70 @@ export function OrderDetailView({
                 disabled: loadingKey !== null,
               }
             : null;
+  const primaryActionKey = primaryAction?.key ?? null;
+  const actionRailEmptyMessage =
+    isOnlineOrder && order.status === "SHIPPED" && order.paymentMethod !== "COD"
+      ? "ออเดอร์ออนไลน์นี้จัดส่งแล้ว ไม่มี action หลักเพิ่มเติม"
+      : order.paymentMethod === "COD" && order.paymentStatus === "COD_SETTLED"
+        ? "ออเดอร์ COD นี้ปิดยอดแล้ว"
+        : order.status === "COD_RETURNED"
+          ? "ออเดอร์ COD นี้ตีกลับเข้าร้านแล้ว"
+          : "ไม่มี action ถัดไปในสถานะนี้";
+  const showExtraActionsHeader = !(
+    (isWalkInOrder && (order.status === "CANCELLED" || order.status === "PENDING_PAYMENT")) ||
+    order.status === "READY_FOR_PICKUP" ||
+    order.status === "PICKED_UP_PENDING_PAYMENT"
+  );
+  const extraActions = [
+    canMarkPacked && primaryActionKey !== "mark-packed"
+      ? {
+          key: "mark-packed",
+          label: isOnlineOrder ? "แพ็กสินค้า" : "ยืนยันแพ็กแล้ว",
+          tone: "outline" as const,
+          onClick: () =>
+            runPatchAction(
+              { action: "mark_packed" },
+              "mark-packed",
+              isOnlineOrder ? "บันทึกว่าแพ็กสินค้าแล้ว" : "อัปเดตเป็นแพ็กแล้ว",
+            ),
+          disabled: loadingKey !== null,
+        }
+      : null,
+    canMarkShipped && primaryActionKey !== "mark-shipped"
+      ? {
+          key: "mark-shipped",
+          label: isOnlineOrder ? "จัดส่งแล้ว" : "ยืนยันจัดส่งแล้ว",
+          tone: "outline" as const,
+          onClick: () =>
+            runPatchAction(
+              { action: "mark_shipped" },
+              "mark-shipped",
+              isOnlineOrder ? "บันทึกว่าออเดอร์จัดส่งแล้ว" : "อัปเดตเป็นจัดส่งแล้ว",
+            ),
+          disabled: loadingKey !== null,
+        }
+      : null,
+    canMarkCodReturned
+      ? {
+          key: "mark-cod-returned",
+          label: "ตีกลับเข้าร้าน (COD)",
+          tone: "warning" as const,
+          onClick: () =>
+            runPatchAction(
+              {
+                action: "mark_cod_returned",
+                codFee: Number.isFinite(codReturnFeeNumber)
+                  ? Math.max(0, Math.trunc(codReturnFeeNumber))
+                  : 0,
+                codReturnNote: codReturnNoteInput.trim(),
+              },
+              "mark-cod-returned",
+              "บันทึกตีกลับเข้าร้านแล้ว",
+            ),
+          disabled: codReturnDisabled,
+        }
+      : null,
+  ].filter((action): action is NonNullable<typeof action> => Boolean(action));
 
   return (
     <section className="mx-auto max-w-6xl space-y-4 overflow-x-hidden pb-10">
@@ -1250,11 +1430,6 @@ export function OrderDetailView({
                   {maskAccountValue(order.paymentAccountNumber)}
                 </p>
               ) : null}
-              {showQrSlipStatus ? (
-                <p className="text-xs text-slate-500">
-                  สถานะสลิป: {order.paymentSlipUrl ? "แนบแล้ว (รอตรวจสอบ)" : "ยังไม่แนบ"}
-                </p>
-              ) : null}
               {order.paymentMethod === "COD" ? (
                 <div className="mt-2 border-l-2 border-slate-300 pl-2 text-xs text-slate-600">
                   <p>ยอด COD ที่เก็บได้: {codCollectedAmount.toLocaleString("th-TH")} {storeCurrencyDisplay}</p>
@@ -1274,7 +1449,7 @@ export function OrderDetailView({
             <article className="space-y-3 border-b border-slate-200 pb-4">
               <h2 className="text-sm font-semibold text-slate-900">ชำระด้วย QR โอนเงิน</h2>
               {order.paymentAccountQrImageUrl ? (
-                <div className="overflow-hidden border border-slate-200 bg-slate-50 p-2">
+                <div className="space-y-2 overflow-hidden border border-slate-200 bg-slate-50 p-2">
                   <Image
                     src={order.paymentAccountQrImageUrl}
                     alt="QR payment"
@@ -1283,6 +1458,26 @@ export function OrderDetailView({
                     className="mx-auto h-52 w-52 rounded-lg object-contain"
                     unoptimized
                   />
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 w-full text-xs"
+                      onClick={openOrderQrImageFull}
+                    >
+                      ดูรูปเต็ม
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 w-full text-xs"
+                      onClick={() => {
+                        void downloadOrderQrImage();
+                      }}
+                    >
+                      ดาวน์โหลด QR
+                    </Button>
+                  </div>
                 </div>
               ) : (
                 <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
@@ -1311,54 +1506,6 @@ export function OrderDetailView({
                 </p>
               </div>
 
-              {showQrSlipInput ? (
-                <div className="space-y-2">
-                  <label className="text-xs text-muted-foreground" htmlFor="payment-slip-url">
-                    ลิงก์หลักฐานการชำระ
-                  </label>
-                  <input
-                    id="payment-slip-url"
-                    className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
-                    value={paymentSlipUrl}
-                    onChange={(event) => setPaymentSlipUrl(event.target.value)}
-                    disabled={!showQrSlipInput || loadingKey !== null}
-                    placeholder="https://..."
-                  />
-                  <Button
-                    className="h-10 w-full sm:w-auto"
-                    onClick={() =>
-                      runPatchAction(
-                        { action: "submit_payment_slip", paymentSlipUrl },
-                        "submit-slip",
-                        "แนบหลักฐานแล้ว รอตรวจสอบการชำระ",
-                      )
-                    }
-                    disabled={!showQrSlipInput || loadingKey !== null}
-                  >
-                    {loadingKey === "submit-slip" ? "กำลังบันทึก..." : "แนบหลักฐาน / ส่งรอตรวจสอบ"}
-                  </Button>
-                </div>
-              ) : null}
-
-              {showQrProofReadOnly ? (
-                <div className="space-y-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
-                  <p className="font-medium text-slate-900">หลักฐานการชำระ</p>
-                  <p>
-                    สถานะ:{" "}
-                    <span className="font-medium text-slate-900">
-                      {order.paymentStatus === "PENDING_PROOF" ? "แนบแล้ว (รอตรวจสอบ)" : "บันทึกไว้ในออเดอร์"}
-                    </span>
-                  </p>
-                  <a
-                    href={order.paymentSlipUrl ?? "#"}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex w-fit font-medium text-blue-700 hover:underline"
-                  >
-                    เปิดหลักฐานการชำระ
-                  </a>
-                </div>
-              ) : null}
             </article>
           ) : null}
 
@@ -1430,7 +1577,7 @@ export function OrderDetailView({
                   <input
                     ref={shippingLabelFileInputRef}
                     type="file"
-                    accept="image/*"
+                    accept={RASTER_IMAGE_ACCEPT}
                     className="hidden"
                     disabled={!canUpdate || loadingKey !== null}
                     onChange={(event) => {
@@ -1440,7 +1587,7 @@ export function OrderDetailView({
                   <input
                     ref={shippingLabelCameraInputRef}
                     type="file"
-                    accept="image/*"
+                    accept={RASTER_IMAGE_ACCEPT}
                     capture="environment"
                     className="hidden"
                     disabled={!canUpdate || loadingKey !== null}
@@ -1449,8 +1596,14 @@ export function OrderDetailView({
                     }}
                   />
                 </div>
+                {shippingLabelUploadError ? (
+                  <p className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                    {shippingLabelUploadError}
+                  </p>
+                ) : null}
                 <p className="text-[11px] text-muted-foreground">
                   ระบบจะบันทึกรูปป้ายจัดส่งให้อัตโนมัติทันทีหลังเลือกรูปหรือถ่ายรูปเสร็จ
+                  รองรับไฟล์ JPG, PNG หรือ WebP ไม่เกิน 6MB และจะถูกปรับเป็น WebP ก่อนอัปโหลด
                 </p>
               </div>
             </article>
@@ -1458,67 +1611,49 @@ export function OrderDetailView({
 
           {showLaoQrMessaging ? (
             <article className="space-y-3 border-b border-slate-200 pb-4">
-              <h2 className="text-sm font-semibold text-slate-900">การส่งข้อความ</h2>
+              <h2 className="text-sm font-semibold text-slate-900">ข้อความสำหรับส่งลูกค้า</h2>
 
-              <Button className="h-10 w-full sm:w-auto" onClick={sendQr} disabled={loadingKey !== null}>
-                {loadingKey === "send-qr"
-                  ? "กำลังส่ง..."
-                  : messaging.within24h
-                    ? "Send QR (ส่งอัตโนมัติ)"
-                    : "Send QR"}
-              </Button>
+              <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+                ระบบยังไม่เชื่อม Facebook/WhatsApp API จึงต้องส่งข้อความเองผ่านปุ่มด้านล่าง
+              </div>
 
-              {!messaging.within24h ? (
-                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
-                  ลูกค้าเกิน 24 ชั่วโมง ต้องส่งแบบแมนนวล
-                </div>
-              ) : (
-                <div className="rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-800">
-                  ลูกค้าอยู่ในช่วง 24 ชั่วโมง สามารถส่งอัตโนมัติได้
-                </div>
-              )}
+              <textarea
+                value={messageText}
+                onChange={(event) => setMessageText(event.target.value)}
+                className="min-h-24 w-full rounded-md border px-3 py-2 text-sm outline-none ring-primary focus:ring-2"
+              />
 
-              {!messaging.within24h ? (
-                <>
-                  <textarea
-                    value={messageText}
-                    onChange={(event) => setMessageText(event.target.value)}
-                    className="min-h-24 w-full rounded-md border px-3 py-2 text-sm outline-none ring-primary focus:ring-2"
-                  />
+              <div
+                className={`grid grid-cols-1 gap-2 ${
+                  messagingActionCount >= 3 ? "sm:grid-cols-3" : messagingActionCount === 2 ? "sm:grid-cols-2" : ""
+                }`}
+              >
+                <Button type="button" className="h-9" onClick={copyMessage}>
+                  คัดลอกข้อความ
+                </Button>
 
-                  <div className="grid grid-cols-3 gap-2">
-                    <Button type="button" className="h-9" onClick={copyMessage}>
-                      คัดลอกข้อความ
-                    </Button>
+                {showWhatsappMessagingAction ? (
+                  <a
+                    href={messaging.waDeepLink ?? "#"}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex h-9 items-center justify-center rounded-md border border-green-400 text-xs font-medium text-green-700"
+                  >
+                    เปิด WhatsApp
+                  </a>
+                ) : null}
 
-                    <a
-                      href={messaging.waDeepLink ?? "#"}
-                      target="_blank"
-                      rel="noreferrer"
-                      className={`flex h-9 items-center justify-center rounded-md border text-xs font-medium ${
-                        messaging.waDeepLink
-                          ? "border-green-400 text-green-700"
-                          : "pointer-events-none border-slate-200 text-slate-400"
-                      }`}
-                    >
-                      เปิด WhatsApp
-                    </a>
-
-                    <a
-                      href={messaging.facebookInboxUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex h-9 items-center justify-center rounded-md border border-blue-400 text-xs font-medium text-blue-700"
-                    >
-                      เปิด Facebook
-                    </a>
-                  </div>
-                </>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  ระบบจะใช้ข้อความอัตโนมัติพร้อมเลขออเดอร์และยอดชำระ
-                </p>
-              )}
+                {showFacebookMessagingAction ? (
+                  <a
+                    href={messaging.facebookInboxUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex h-9 items-center justify-center rounded-md border border-blue-400 text-xs font-medium text-blue-700"
+                  >
+                    เปิด Facebook
+                  </a>
+                ) : null}
+              </div>
             </article>
           ) : null}
 
@@ -1528,7 +1663,7 @@ export function OrderDetailView({
 
         <aside className="lg:sticky lg:top-24 lg:h-fit">
           <div className="space-y-3 border-y border-slate-200 py-3">
-            <h2 className="text-sm font-semibold text-slate-900">Action</h2>
+            <h2 className="text-sm font-semibold text-slate-900">การทำงานหลัก</h2>
             {isWalkInPaidComplete ? (
               <>
                 <div className="space-y-1 text-xs text-slate-600">
@@ -1616,7 +1751,7 @@ export function OrderDetailView({
                   </Button>
                 ) : (
                   <p className="rounded-md border border-dashed border-slate-200 p-2 text-xs text-slate-500">
-                    ไม่มี action ถัดไปในสถานะนี้
+                    {actionRailEmptyMessage}
                   </p>
                 )}
                 {canMarkPickupBeforePaid ? (
@@ -1670,51 +1805,29 @@ export function OrderDetailView({
                   ) : null}
                 </div>
 
-                {showExtraActions ? (
+                {showExtraActionsHeader && extraActions.length > 0 ? (
                   <details className="rounded-md border border-slate-200 p-2">
                     <summary className="cursor-pointer text-xs font-medium text-slate-700">
                       การทำงานเพิ่มเติม
                     </summary>
                     <div className="mt-2 space-y-2">
-                      <Button
-                        className="h-9 w-full"
-                        variant="outline"
-                        onClick={() =>
-                          runPatchAction({ action: "mark_packed" }, "mark-packed", "อัปเดตเป็นแพ็กแล้ว")
-                        }
-                        disabled={!canMarkPacked || loadingKey !== null}
-                      >
-                        {loadingKey === "mark-packed" ? "กำลังบันทึก..." : "ยืนยันแพ็กแล้ว"}
-                      </Button>
-                      <Button
-                        className="h-9 w-full"
-                        variant="outline"
-                        onClick={() =>
-                          runPatchAction({ action: "mark_shipped" }, "mark-shipped", "อัปเดตเป็นจัดส่งแล้ว")
-                        }
-                        disabled={!canMarkShipped || loadingKey !== null}
-                      >
-                        {loadingKey === "mark-shipped" ? "กำลังบันทึก..." : "ยืนยันจัดส่งแล้ว"}
-                      </Button>
-                      <Button
-                        className="h-9 w-full bg-orange-600 text-white hover:bg-orange-700"
-                        onClick={() =>
-                          runPatchAction(
-                            {
-                              action: "mark_cod_returned",
-                              codFee: Number.isFinite(codReturnFeeNumber)
-                                ? Math.max(0, Math.trunc(codReturnFeeNumber))
-                                : 0,
-                              codReturnNote: codReturnNoteInput.trim(),
-                            },
-                            "mark-cod-returned",
-                            "บันทึกตีกลับเข้าร้านแล้ว",
-                          )
-                        }
-                        disabled={codReturnDisabled}
-                      >
-                        {loadingKey === "mark-cod-returned" ? "กำลังบันทึก..." : "ตีกลับเข้าร้าน (COD)"}
-                      </Button>
+                      {extraActions.map((action) => (
+                        <Button
+                          key={action.key}
+                          className={
+                            action.tone === "warning"
+                              ? "h-9 w-full bg-orange-600 text-white hover:bg-orange-700"
+                              : "h-9 w-full"
+                          }
+                          variant={action.tone === "warning" ? undefined : "outline"}
+                          onClick={() => {
+                            void action.onClick();
+                          }}
+                          disabled={action.disabled}
+                        >
+                          {loadingKey === action.key ? "กำลังบันทึก..." : action.label}
+                        </Button>
+                      ))}
                     </div>
                   </details>
                 ) : null}
@@ -1811,14 +1924,18 @@ export function OrderDetailView({
               className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-4 shadow-xl"
             >
               <h3 id="confirm-receive-payment-title" className="text-sm font-semibold text-slate-900">
-                {isPickupReadyPrepaid ? "ยืนยันรับสินค้าแล้ว?" : "ยืนยันรับชำระ?"}
+                {confirmPaidConfirmTitle}
               </h3>
               <p className="mt-1 text-xs text-slate-600">
                 {isPickupReadyPrepaid
                   ? "เมื่อยืนยันแล้วระบบจะตัดสต็อกจากรายการจองและปิดงานรับสินค้าทันที"
+                  : isCodPendingAfterShipped
+                    ? "เมื่อยืนยันแล้วระบบจะบันทึกยอดโอนจริงจากขนส่งและปิดยอด COD ให้ทันที"
                   : isInStoreCreditSettlement
                     ? "เลือกวิธีรับเงินจริงก่อนบันทึก เพื่อให้ข้อมูลชำระตรงกับหน้าร้าน"
-                    : "เมื่อยืนยันแล้วออเดอร์จะถูกอัปเดตเป็นสถานะชำระแล้วทันที"}
+                    : isOnlineOrder && order.paymentMethod === "LAO_QR" && order.paymentStatus === "PENDING_PROOF"
+                      ? "เมื่อยืนยันแล้วระบบจะถือว่าสลิปนี้ตรวจสอบผ่านและอัปเดตเป็นชำระแล้วทันที"
+                      : "เมื่อยืนยันแล้วออเดอร์จะถูกอัปเดตเป็นสถานะชำระแล้วทันที"}
               </p>
               {isInStoreCreditSettlement ? (
                 <div className="mt-4 space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -1992,9 +2109,7 @@ export function OrderDetailView({
                 >
                   {loadingKey === "confirm-paid"
                     ? "กำลังบันทึก..."
-                    : isPickupReadyPrepaid
-                      ? "ยืนยันรับสินค้า"
-                      : "ยืนยันรับชำระ"}
+                    : confirmPaidButtonLabel}
                 </Button>
               </div>
             </div>
@@ -2060,67 +2175,109 @@ export function OrderDetailView({
           </div>
         </div>
       ) : null}
-      {showShippingLabelSourcePicker ? (
-        <div className="fixed inset-0 z-[95]">
-          <button
-            type="button"
-            className="absolute inset-0 bg-slate-900/55"
-            aria-label="ปิดตัวเลือกอัปโหลดรูปป้ายจัดส่ง"
-            onClick={closeShippingLabelSourcePicker}
-            disabled={loadingKey !== null}
-          />
-          <div className="relative flex min-h-full items-end justify-center p-4 sm:items-center">
-            <div
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="shipping-label-source-title"
-              className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-4 shadow-xl"
-            >
-              <h3 id="shipping-label-source-title" className="text-sm font-semibold text-slate-900">
-                เพิ่มรูปป้ายจัดส่ง
-              </h3>
-              <p className="mt-1 text-xs text-slate-600">
-                เลือกวิธีที่ต้องการ ถ้าเครื่องนี้เปิดกล้องไม่ได้ ให้ใช้เลือกรูปจากเครื่องแทน
-              </p>
-              <div className="mt-4 space-y-2">
-                <Button
-                  type="button"
-                  className="h-10 w-full"
-                  onClick={() => pickShippingLabelFromDevice("file")}
-                  disabled={loadingKey !== null}
-                >
-                  เลือกรูปจากเครื่อง
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-10 w-full"
-                  onClick={() => pickShippingLabelFromDevice("camera")}
-                  disabled={loadingKey !== null || !canOpenShippingLabelCamera}
-                >
-                  ถ่ายรูปจากกล้อง
-                </Button>
-                {!canOpenShippingLabelCamera ? (
-                  <p className="text-[11px] text-slate-500">
-                    เครื่องหรือ browser นี้ไม่รองรับการเรียกกล้องโดยตรง
-                  </p>
-                ) : null}
+      {showOrderQrImageViewer && order.paymentAccountQrImageUrl ? (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/85 px-3 py-6 sm:px-6"
+          onClick={() => setShowOrderQrImageViewer(false)}
+        >
+          <div
+            className="relative w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-700 bg-slate-950 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-slate-800 px-3 py-2.5 text-slate-100">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium">{order.paymentAccountDisplayName || "QR payment"}</p>
+                <p className="truncate text-xs text-slate-400">ดู QR เต็มในหน้าเดิม</p>
               </div>
-              <div className="mt-4">
-                <Button
+              <div className="flex items-center gap-2">
+                <button
                   type="button"
-                  variant="ghost"
-                  className="h-9 w-full"
-                  onClick={closeShippingLabelSourcePicker}
-                  disabled={loadingKey !== null}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-700 bg-slate-900 text-slate-100 hover:border-slate-500"
+                  onClick={openOrderQrImageInNewTab}
+                  aria-label="เปิดรูป QR ในแท็บใหม่"
+                  title="เปิดรูป QR ในแท็บใหม่"
                 >
-                  ปิด
-                </Button>
+                  <ExternalLink className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-700 bg-slate-900 text-slate-100 hover:border-slate-500"
+                  onClick={() => {
+                    void downloadOrderQrImage();
+                  }}
+                  aria-label="ดาวน์โหลดรูป QR"
+                  title="ดาวน์โหลดรูป QR"
+                >
+                  <ArrowDownToLine className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-700 bg-slate-900 text-slate-100 hover:border-slate-500"
+                  onClick={() => setShowOrderQrImageViewer(false)}
+                  aria-label="ปิดรูป QR"
+                  title="ปิดรูป QR"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
+            </div>
+            <div className="flex max-h-[calc(100dvh-9rem)] items-center justify-center bg-[radial-gradient(circle_at_center,_rgba(148,163,184,0.14),_transparent_60%)] p-4 sm:p-6">
+              <Image
+                src={order.paymentAccountQrImageUrl}
+                alt={`QR ${order.paymentAccountDisplayName || "payment"}`}
+                width={1200}
+                height={1200}
+                className="h-auto max-h-[calc(100dvh-13rem)] w-auto max-w-full rounded-lg object-contain"
+                unoptimized
+              />
             </div>
           </div>
         </div>
       ) : null}
+      <SlideUpSheet
+        isOpen={showShippingLabelSourcePicker}
+        onClose={closeShippingLabelSourcePicker}
+        title="เพิ่มรูปป้ายจัดส่ง"
+        description="เลือกวิธีที่ต้องการ ถ้าเครื่องนี้เปิดกล้องไม่ได้ ให้ใช้เลือกรูปจากเครื่องแทน"
+        panelMaxWidthClass="min-[1200px]:max-w-sm"
+        disabled={loadingKey !== null}
+        footer={
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 w-full rounded-xl"
+            onClick={closeShippingLabelSourcePicker}
+            disabled={loadingKey !== null}
+          >
+            ปิด
+          </Button>
+        }
+      >
+        <div className="space-y-2 pb-1">
+          <Button
+            type="button"
+            className="h-10 w-full rounded-xl"
+            onClick={() => pickShippingLabelFromDevice("file")}
+            disabled={loadingKey !== null}
+          >
+            เลือกรูปจากเครื่อง
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 w-full rounded-xl"
+            onClick={() => pickShippingLabelFromDevice("camera")}
+            disabled={loadingKey !== null || !canOpenShippingLabelCamera}
+          >
+            ถ่ายรูปจากกล้อง
+          </Button>
+          {!canOpenShippingLabelCamera ? (
+            <p className="text-[11px] text-slate-500">
+              เครื่องหรือ browser นี้ไม่รองรับการเรียกกล้องโดยตรง
+            </p>
+          ) : null}
+        </div>
+      </SlideUpSheet>
       {showDeleteShippingLabelConfirm ? (
         <div className="fixed inset-0 z-[96]">
           <button

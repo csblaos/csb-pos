@@ -30,7 +30,6 @@ import {
 } from "@/lib/orders/queries";
 import { updateOrderSchema } from "@/lib/orders/validation";
 import { getInventoryBalancesByStore } from "@/lib/inventory/queries";
-import { getGlobalPaymentPolicy } from "@/lib/system-config/policy";
 import { buildAuditEventValues, safeLogAuditEvent } from "@/server/services/audit.service";
 import { invalidateDashboardSummaryCache } from "@/server/services/dashboard.service";
 import {
@@ -771,26 +770,6 @@ export async function PATCH(
           effectivePaymentAccountId = paymentAccount.id;
         } else {
           effectivePaymentAccountId = null;
-        }
-      }
-
-      if (
-        !isCodSettlementAfterShipped &&
-        !isPickupCompleteAfterPrepaid &&
-        !isInStoreCreditSettlement &&
-        effectivePaymentMethod === "LAO_QR"
-      ) {
-        const paymentPolicy = await getGlobalPaymentPolicy();
-        if (paymentPolicy.requireSlipForLaoQr && !order.paymentSlipUrl) {
-          return failAction(
-            "SLIP_REQUIRED",
-            "ต้องแนบสลิปก่อนยืนยันชำระสำหรับออเดอร์ QR",
-            400,
-            {
-              orderNo: order.orderNo,
-              paymentMethod: order.paymentMethod,
-            },
-          );
         }
       }
 

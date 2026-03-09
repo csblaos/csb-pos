@@ -45,10 +45,28 @@ function toUploadErrorResponse(error: unknown) {
       return NextResponse.json({ message: "รองรับเฉพาะไฟล์รูปภาพ" }, { status: 400 });
     }
 
+    if (error.message === "UNSUPPORTED_RASTER_FORMAT") {
+      return NextResponse.json(
+        {
+          message: "รองรับเฉพาะไฟล์ JPG, PNG หรือ WebP สำหรับป้ายจัดส่ง",
+        },
+        { status: 400 },
+      );
+    }
+
     if (error.message === "FILE_TOO_LARGE") {
       return NextResponse.json(
         {
           message: `ไฟล์รูปใหญ่เกินกำหนด (ไม่เกิน ${SHIPPING_LABEL_MAX_SIZE_MB}MB)`,
+        },
+        { status: 400 },
+      );
+    }
+
+    if (error.message === "IMAGE_OPTIMIZATION_FAILED") {
+      return NextResponse.json(
+        {
+          message: "ไม่สามารถปรับขนาดรูปป้ายจัดส่งได้ กรุณาเลือกไฟล์ JPG, PNG หรือ WebP ที่เล็กลง",
         },
         { status: 400 },
       );
@@ -229,8 +247,12 @@ export async function POST(
     const failReasonCode =
       error instanceof Error && error.message === "UNSUPPORTED_FILE_TYPE"
         ? "UNSUPPORTED_FILE_TYPE"
+        : error instanceof Error && error.message === "UNSUPPORTED_RASTER_FORMAT"
+          ? "UNSUPPORTED_RASTER_FORMAT"
         : error instanceof Error && error.message === "FILE_TOO_LARGE"
           ? "FILE_TOO_LARGE"
+          : error instanceof Error && error.message === "IMAGE_OPTIMIZATION_FAILED"
+            ? "IMAGE_OPTIMIZATION_FAILED"
           : "INTERNAL_ERROR";
 
     if (auditContext) {

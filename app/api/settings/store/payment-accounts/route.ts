@@ -212,10 +212,26 @@ function toQrUploadErrorResponse(error: unknown) {
       return NextResponse.json({ message: "รองรับเฉพาะไฟล์รูปภาพสำหรับ QR" }, { status: 400 });
     }
 
+    if (error.message === "UNSUPPORTED_RASTER_FORMAT") {
+      return NextResponse.json(
+        { message: "รองรับเฉพาะไฟล์ JPG, PNG หรือ WebP สำหรับ QR" },
+        { status: 400 },
+      );
+    }
+
     if (error.message === "FILE_TOO_LARGE") {
       return NextResponse.json(
         {
           message: `ไฟล์รูป QR ใหญ่เกินกำหนด (ไม่เกิน ${PAYMENT_QR_MAX_SIZE_MB}MB)`,
+        },
+        { status: 400 },
+      );
+    }
+
+    if (error.message === "IMAGE_OPTIMIZATION_FAILED") {
+      return NextResponse.json(
+        {
+          message: "ไม่สามารถปรับขนาดรูป QR ได้ กรุณาเลือกไฟล์ JPG, PNG หรือ WebP ที่เล็กลง",
         },
         { status: 400 },
       );

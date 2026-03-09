@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import sharp from "sharp";
 
+import { isRasterImageContentType } from "@/lib/media/image-upload";
+
 type R2Config = {
   accountId: string;
   accessKeyId: string;
@@ -342,6 +344,10 @@ export async function uploadPaymentQrImageToR2(params: {
     throw new Error("UNSUPPORTED_FILE_TYPE");
   }
 
+  if (!isRasterImageContentType(params.file.type)) {
+    throw new Error("UNSUPPORTED_RASTER_FORMAT");
+  }
+
   if (params.file.size > uploadPolicy.maxSizeBytes) {
     throw new Error("FILE_TOO_LARGE");
   }
@@ -350,7 +356,7 @@ export async function uploadPaymentQrImageToR2(params: {
   let contentType = params.file.type || "application/octet-stream";
   let body: Uint8Array = new Uint8Array(await params.file.arrayBuffer());
 
-  if (uploadPolicy.autoResize && params.file.type !== "image/svg+xml") {
+  if (uploadPolicy.autoResize) {
     try {
       const resized = await sharp(body)
         .rotate()
@@ -366,7 +372,7 @@ export async function uploadPaymentQrImageToR2(params: {
       extension = "webp";
       contentType = "image/webp";
     } catch {
-      // fallback to original file when resize fails
+      throw new Error("IMAGE_OPTIMIZATION_FAILED");
     }
   }
 
@@ -480,6 +486,10 @@ export async function uploadOrderShippingLabelToR2(params: {
     throw new Error("UNSUPPORTED_FILE_TYPE");
   }
 
+  if (!isRasterImageContentType(params.file.type)) {
+    throw new Error("UNSUPPORTED_RASTER_FORMAT");
+  }
+
   if (params.file.size > MAX_ORDER_SHIPPING_LABEL_SIZE_BYTES) {
     throw new Error("FILE_TOO_LARGE");
   }
@@ -488,24 +498,22 @@ export async function uploadOrderShippingLabelToR2(params: {
   let contentType = params.file.type || "application/octet-stream";
   let body: Uint8Array = new Uint8Array(await params.file.arrayBuffer());
 
-  if (params.file.type !== "image/svg+xml") {
-    try {
-      const resized = await sharp(body)
-        .rotate()
-        .resize({
-          width: DEFAULT_ORDER_SHIPPING_LABEL_RESIZE_MAX_WIDTH,
-          withoutEnlargement: true,
-          fit: "inside",
-        })
-        .webp({ quality: WEBP_QUALITY })
-        .toBuffer();
+  try {
+    const resized = await sharp(body)
+      .rotate()
+      .resize({
+        width: DEFAULT_ORDER_SHIPPING_LABEL_RESIZE_MAX_WIDTH,
+        withoutEnlargement: true,
+        fit: "inside",
+      })
+      .webp({ quality: WEBP_QUALITY })
+      .toBuffer();
 
-      body = resized;
-      extension = "webp";
-      contentType = "image/webp";
-    } catch {
-      // fallback to original file when resize fails
-    }
+    body = resized;
+    extension = "webp";
+    contentType = "image/webp";
+  } catch {
+    throw new Error("IMAGE_OPTIMIZATION_FAILED");
   }
 
   if (body.byteLength > MAX_ORDER_SHIPPING_LABEL_SIZE_BYTES) {
@@ -556,6 +564,10 @@ export async function uploadProductImageToR2(params: {
     throw new Error("UNSUPPORTED_FILE_TYPE");
   }
 
+  if (!isRasterImageContentType(params.file.type)) {
+    throw new Error("UNSUPPORTED_RASTER_FORMAT");
+  }
+
   if (params.file.size > MAX_PRODUCT_IMAGE_SIZE_BYTES) {
     throw new Error("FILE_TOO_LARGE");
   }
@@ -564,24 +576,22 @@ export async function uploadProductImageToR2(params: {
   let contentType = params.file.type || "application/octet-stream";
   let body: Uint8Array = new Uint8Array(await params.file.arrayBuffer());
 
-  if (params.file.type !== "image/svg+xml") {
-    try {
-      const resized = await sharp(body)
-        .rotate()
-        .resize({
-          width: DEFAULT_PRODUCT_IMAGE_RESIZE_MAX_WIDTH,
-          withoutEnlargement: true,
-          fit: "inside",
-        })
-        .webp({ quality: PRODUCT_IMAGE_WEBP_QUALITY })
-        .toBuffer();
+  try {
+    const resized = await sharp(body)
+      .rotate()
+      .resize({
+        width: DEFAULT_PRODUCT_IMAGE_RESIZE_MAX_WIDTH,
+        withoutEnlargement: true,
+        fit: "inside",
+      })
+      .webp({ quality: PRODUCT_IMAGE_WEBP_QUALITY })
+      .toBuffer();
 
-      body = resized;
-      extension = "webp";
-      contentType = "image/webp";
-    } catch {
-      // fallback to original file when resize fails
-    }
+    body = resized;
+    extension = "webp";
+    contentType = "image/webp";
+  } catch {
+    throw new Error("IMAGE_OPTIMIZATION_FAILED");
   }
 
   if (body.byteLength > MAX_PRODUCT_IMAGE_SIZE_BYTES) {

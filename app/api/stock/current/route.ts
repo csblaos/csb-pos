@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { getInventoryBalanceForProduct } from "@/lib/inventory/queries";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: Request) {
   try {
     const { storeId } = await enforcePermission("inventory.view");

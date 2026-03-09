@@ -6,6 +6,34 @@
 
 ## Changed (ล่าสุด)
 
+- ปรับ UX action rail ของ online order ในหน้า `/orders/[orderId]`:
+  - ปุ่มหลักเหลือเฉพาะ next step เดียวตามสถานะจริง (`ยืนยันชำระแล้ว/ตรวจสลิปและยืนยันชำระ` -> `แพ็กสินค้า` -> `จัดส่งแล้ว` -> `ยืนยันรับเงินปลายทาง (COD)`)
+  - เอาปุ่ม `แพ็กสินค้า` และ `จัดส่งแล้ว` ที่ซ้ำกับ primary action ออกจาก `การทำงานเพิ่มเติม`
+  - ข้อความ empty state ของ action rail เปลี่ยนเป็นภาษางาน เช่น `ออเดอร์ออนไลน์นี้จัดส่งแล้ว ไม่มี action หลักเพิ่มเติม`
+  - confirm modal ของ `confirm_paid` ปรับ title/description/button ให้สอดคล้องกับบริบท online และ COD มากขึ้น
+
+- ปรับ stepper ของ online order ในหน้า `/orders/[orderId]`:
+  - non-COD: `สร้างออเดอร์ -> ยืนยันชำระ -> แพ็กสินค้า -> จัดส่ง`
+  - COD: `สร้างออเดอร์ -> แพ็กสินค้า -> จัดส่ง -> ปิดยอด COD`
+  - เอา step `ปิดงาน` ออกจาก online flow เพราะไม่มี close action จริงสำหรับทุกเคส
+
+- แก้ build issue ตอน `next build` ที่เคยสะดุดระหว่าง prerender:
+  - บังคับ `app/api/stock/current/route.ts` เป็น `force-dynamic`
+  - บังคับ `app/(app)/settings/audit-log/page.tsx` เป็น `force-dynamic`
+  - ผลคือ `next build` ผ่านแล้วใน sandbox แม้จะยังมี log DNS ของ Turso ระหว่าง collect page data
+
+- ปรับ media upload policy ให้คุม storage cost เข้มขึ้น:
+  - `product image`, `shipping label`, และ `payment QR` รับเฉพาะไฟล์ raster (`JPG/PNG/WebP`) แล้ว; ไม่รับ `SVG`
+  - ฝั่ง server (`lib/storage/r2.ts`) บังคับ optimize เป็น `WebP` ก่อนเก็บเสมอ และถ้า optimize ไม่สำเร็จจะ reject แทนการ fallback ไปเก็บไฟล์ดิบ
+  - หน้า `/products` เพิ่ม client-side compression ก่อนอัปโหลดรูปสินค้า (`640px WebP`)
+  - หน้า `/orders/[orderId]` เพิ่ม client-side compression ก่อนอัปโหลดรูปป้ายจัดส่ง (`1600px WebP`)
+  - หน้า `/settings/store/payments` ปรับ file picker/validation ให้สอดคล้องกับ policy raster-only ของรูป QR
+
+- ปรับ UX error ตอนอัปโหลดรูปป้ายจัดส่งในหน้า `/orders/[orderId]`:
+  - ตรวจชนิดไฟล์และขนาด (`ไม่เกิน 6MB`) ตั้งแต่ฝั่ง client ก่อนยิง `POST /api/orders/[orderId]/shipments/upload-label`
+  - เมื่อไฟล์ไม่ผ่าน validation หรือ upload/bind shipping ไม่สำเร็จ ระบบจะแสดง `toast` ทันที
+  - คง inline error ไว้ใต้ปุ่ม `อัปโหลด/ถ่ายรูปป้าย` เพื่อให้ผู้ใช้เห็นจุดที่ต้องแก้แม้ toast จะหายไปแล้ว
+  - helper text ใต้ปุ่มอัปโหลดระบุข้อจำกัดไฟล์รูป `ไม่เกิน 6MB` ชัดขึ้น
 - ปรับ storage ของรูป QR บัญชีรับเงินให้เก็บเป็น `object key/path` ใน DB:
   - `POST/PATCH /api/settings/store/payment-accounts` จะเก็บค่า `upload.objectKey` แทน full public URL สำหรับไฟล์ที่อัปโหลดใหม่
   - ถ้าส่ง `qrImageUrl` เข้ามาเป็น full URL เดิมของ R2/CDN หรือเป็น key/path ของไฟล์ ระบบจะ normalize ให้เป็น key ก่อนบันทึก
@@ -32,10 +60,17 @@
   - ปุ่มดาวน์โหลดเปลี่ยนไปเรียก route same-origin `GET /api/orders/payment-accounts/[accountId]/qr-image?download=1` ก่อน เพื่อลดปัญหา CORS/CDN download; ถ้าไม่สำเร็จจะ fallback ไปเปิดรูปในแท็บใหม่
 
 - ปรับ section `ชำระด้วย QR โอนเงิน` ในหน้า `/orders/[orderId]`:
-  - เคส `Walk-in + ชำระแล้ว` ตัด field/action `ลิงก์สลิปการโอน` ออก เหลือเฉพาะรูป QR + ชื่อบัญชี + ธนาคาร + เลขบัญชีแบบ read-only
-  - เคส `Pickup/Online` ที่ยังต้องส่งสลิป ใช้ label ใหม่ `ลิงก์หลักฐานการชำระ` + ปุ่ม `แนบหลักฐาน / ส่งรอตรวจสอบ`
-  - ถ้ามีสลิปแล้วและไม่อยู่ในขั้นต้องกรอกต่อ จะเปลี่ยนเป็นบล็อก read-only `หลักฐานการชำระ`
+  - หน้า detail ตัด field `ลิงก์หลักฐานการชำระ`, placeholder `https://...`, และปุ่ม `แนบหลักฐาน / ส่งรอตรวจสอบ` ออกแล้ว เพื่อให้ตรงกับ workflow ใช้งานจริงในลาว
+  - เคส `Walk-in + ชำระแล้ว` ยังคงเหลือเฉพาะรูป QR + ชื่อบัญชี + ธนาคาร + เลขบัญชีแบบ read-only
+  - เพิ่มปุ่ม `ดูรูปเต็ม` และ `ดาวน์โหลด QR` ให้บล็อก QR summary ในหน้า detail แล้ว; ปุ่มดาวน์โหลดจะใช้ route same-origin ก่อนและ fallback เปิดรูปในแท็บใหม่ถ้าดาวน์โหลดไม่สำเร็จ
+  - เคส `Pickup/Online` ให้พนักงานตรวจสลิปจากแชต/ช่องทางภายนอก แล้วค่อยกด action หลัก `ยืนยันชำระแล้ว` หรือ `ตรวจสลิปและยืนยันชำระ` ในหน้า detail แทนการบันทึกลิงก์ลงออเดอร์; backend `confirm_paid` เลิกบังคับ `paymentSlipUrl` สำหรับ flow นี้แล้ว
   - reopen checkout modal แล้ว section นี้จะกลับไปปิดเสมอ เพื่อลดความยาวของฟอร์มในจอเล็ก
+
+- ปรับ section `การส่งข้อความ` ในหน้า `/orders/[orderId]`:
+  - เอาปุ่ม `Send QR` และข้อความอ้างว่า `ส่งอัตโนมัติได้` ออกแล้ว
+  - เปลี่ยนหัวข้อเป็น `ข้อความสำหรับส่งลูกค้า`
+  - ปุ่มเป็น contextual actions ตาม channel จริงของออเดอร์: `คัดลอกข้อความ` มีเสมอ, `เปิด WhatsApp` จะแสดงเฉพาะออเดอร์ WhatsApp ที่มี deep link, `เปิด Facebook` จะแสดงเฉพาะออเดอร์ Facebook
+  - เพิ่มข้อความชัดเจนว่า system ยังไม่เชื่อม Facebook/WhatsApp API จริง จึงต้องส่งเองจากภายนอก
 
 - ปรับ UX modal `ชำระเงินและรายละเอียดออเดอร์` ในหน้า `/orders/new`:
   - เพิ่ม option `scrollToTopOnOpen` ใน `SlideUpSheet` (default `false`)
@@ -44,7 +79,7 @@
 - ปรับบล็อก `การจัดส่ง` ในหน้า `/orders/[orderId]` (โหมดออนไลน์) เป็น manual upload-first:
   - เอาช่องกรอก manual (`ขนส่ง/เลขพัสดุ/ลิงก์/ต้นทุน`) และ action เก่า (`สร้าง Shipping Label`, `ส่งข้อมูลจัดส่งให้ลูกค้า`) ออกจากบล็อกนี้
   - คงเฉพาะสรุปข้อมูลจัดส่ง + preview รูปล่าสุด + ปุ่มเดียว `อัปโหลด/ถ่ายรูปป้าย`
-  - เมื่อกดปุ่มจะเปิด chooser ให้เลือก `เลือกรูปจากเครื่อง` หรือ `ถ่ายรูปจากกล้อง`; ถ้าเครื่อง/ browser ไม่รองรับกล้องจะ disable option กล้องแทน
+  - เมื่อกดปุ่มจะเปิด chooser แบบ `SlideUpSheet` ให้เลือก `เลือกรูปจากเครื่อง` หรือ `ถ่ายรูปจากกล้อง`; บนมือถือเป็น slide-up และ swipe down ปิดได้, ถ้าเครื่อง/ browser ไม่รองรับกล้องจะ disable option กล้องแทน
   - หลังอัปโหลดสำเร็จ ระบบจะ PATCH `update_shipping` ให้อัตโนมัติทันที (ไม่ต้องกดบันทึกซ้ำ)
   - มือถือรองรับการเปิดกล้องโดยตรงผ่าน input `capture="environment"` เมื่อเลือกทาง `ถ่ายรูปจากกล้อง`
   - ถ้ามีรูปป้ายอยู่แล้ว จะมีปุ่ม `ลบรูปป้าย` พร้อม custom confirm modal; การลบรอบนี้จะเคลียร์เฉพาะ `shippingLabelUrl` ออกจากออเดอร์และคงข้อมูลขนส่งอื่นไว้

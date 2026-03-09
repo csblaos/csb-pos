@@ -2,6 +2,24 @@
 
 ไฟล์นี้บันทึก "ทำไม" ของการออกแบบสำคัญ เพื่อให้ AI/คนทำงานต่อไม่เดาเอง
 
+## ADR-018: รูปที่เก็บใน R2 ใช้ Strict Server Optimization และเพิ่ม Client Compression เฉพาะ Flow ที่คุ้มค่า
+
+- Date: March 9, 2026
+- Status: Accepted
+- Decision:
+  - สำหรับ `product image`, `shipping label`, และ `payment QR` ให้ฝั่ง server รับเฉพาะไฟล์ raster (`JPG/PNG/WebP`) และต้อง optimize สำเร็จก่อนเก็บลง R2
+  - ยกเลิกแนวทาง fallback ไปเก็บไฟล์ดิบเมื่อ `sharp` ล้มเหลวใน media ทั้งสามประเภทนี้
+  - เพิ่ม client-side compression เฉพาะ flow ที่ผู้ใช้มักอัปโหลดรูปจากกล้อง/แกลเลอรีบ่อยและมีผลต่อ upload time ชัดเจน คือ `product image` และ `shipping label`
+  - คง `store logo` เป็น policy แยกต่างหากที่ยังรองรับ `SVG` และเปิด/ปิด auto-resize ได้
+- Reason:
+  - ลด storage cost และขนาดไฟล์ที่เก็บจริงให้คุมได้สม่ำเสมอ
+  - ลดเวลารออัปโหลดใน flow หน้างานที่ใช้มือถือหรือรูปจากกล้องบ่อย
+  - แยก media ที่ต้องคงความยืดหยุ่นเชิงแบรนด์ (`store logo`) ออกจาก media เชิงปฏิบัติการ (`product/shipping/QR`)
+- Consequence:
+  - UI/API ต้องสื่อข้อจำกัดฟอร์แมตใหม่ให้ชัด และตอบข้อความ error ที่ตรงกับการ optimize
+  - ไฟล์ `SVG` ใช้ได้เฉพาะ logo policy เท่านั้น ส่วน media operational อื่นจะถูก reject
+  - ถ้า browser/client ไม่สามารถ compress ได้ จะยังมี server strict เป็น gate สุดท้าย
+
 ## ADR-017: ไฟล์สื่อที่อยู่ใน R2 เก็บเป็น Object Key ไม่เก็บ Full URL
 
 - Date: March 6, 2026

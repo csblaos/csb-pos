@@ -46,7 +46,7 @@
 | `/api/orders/payment-accounts/[accountId]/qr-image` | `GET` | `Permission:orders.create` หรือ `orders.view` | proxy รูป QR ของบัญชีรับเงินแบบ same-origin; default คืน `inline image`, และถ้า query `download=1` จะส่ง `Content-Disposition: attachment` สำหรับดาวน์โหลด |
 | `/api/orders/[orderId]/send-qr` | `POST` | `Permission:orders.update` | ส่ง QR message (stub/manual mode) |
 | `/api/orders/[orderId]/shipments/label` | `POST` | `Permission:orders.ship` | สร้าง shipping label + idempotency |
-| `/api/orders/[orderId]/shipments/upload-label` | `POST` | `Permission:orders.update` | อัปโหลดรูปบิล/ป้ายจากเครื่องหรือกล้องขึ้น R2 |
+| `/api/orders/[orderId]/shipments/upload-label` | `POST` | `Permission:orders.update` | อัปโหลดรูปบิล/ป้ายจากเครื่องหรือกล้องขึ้น R2 (รับเฉพาะ `JPG/PNG/WebP`, ขนาดไม่เกิน `6MB`, และ optimize เป็น WebP แบบ strict ก่อนเก็บ; ถ้า optimize ไม่สำเร็จจะตอบ `400` แทนการเก็บไฟล์ดิบ) |
 | `/api/orders/[orderId]/send-shipping` | `POST` | `Permission:orders.ship` | ส่งข้อความแจ้งจัดส่ง (auto/manual fallback) |
 
 ## Products / Categories
@@ -55,7 +55,7 @@
 |---|---|---|---|
 | `/api/products` | `GET` | `Permission:products.view` | รายการสินค้าแบบ pagination (`q`,`categoryId`,`status`,`sort`,`page`,`pageSize`) + คืน `total`,`hasMore`,`summary`, ข้อมูล variant (`modelName`,`variantLabel`,`variantOptions`), ค่าสต็อก (`stockOnHand`,`stockReserved`,`stockAvailable`) และ `costTracking` (source/time/actor/reason/reference) |
 | `/api/products` | `POST` | `Permission:products.create` | เพิ่มสินค้า (รองรับ payload `variant` เพื่อผูก/สร้าง model และบันทึก options; `conversions[]` รองรับ `pricePerUnit` แบบ optional สำหรับตั้งราคาหน่วยแปลง) |
-| `/api/products/[productId]` | `PATCH` | หลัก `Permission:products.update` | มี action ย่อยบางตัวใช้ `hasPermission` เพิ่ม; multipart image upload จะเก็บ `products.imageUrl` เป็น object key/path แล้ว resolve กลับเป็น public URL ใน response; action `update` รองรับ payload `variant` + `conversions[].pricePerUnit`; action `update_cost` ต้องมี `reason` และจะเขียน audit event `product.cost.manual_update` |
+| `/api/products/[productId]` | `PATCH` | หลัก `Permission:products.update` | มี action ย่อยบางตัวใช้ `hasPermission` เพิ่ม; multipart image upload จะรับเฉพาะ `JPG/PNG/WebP`, optimize เป็น `640px WebP` แบบ strict ก่อนเก็บ `products.imageUrl` เป็น object key/path แล้ว resolve กลับเป็น public URL ใน response; action `update` รองรับ payload `variant` + `conversions[].pricePerUnit`; action `update_cost` ต้องมี `reason` และจะเขียน audit event `product.cost.manual_update` |
 | `/api/products/models` | `GET` | `Permission:products.view` | ดึงรายการชื่อ Model สำหรับ auto-suggest (`q`,`limit`) และคืน `nextSortOrder` + `variantLabels` เมื่อส่ง `name` (รองรับ `variantQ`) เพื่อ auto ตั้ง `ลำดับแสดง` และแนะนำ `ชื่อ Variant` |
 | `/api/products/search` | `GET` | `Permission:products.view` | search |
 | `/api/products/generate-barcode` | `POST` | `Permission:products.create` | generate barcode |
@@ -95,7 +95,7 @@
 | `/api/settings/store/pdf` | `GET` | `Permission:settings.view` | PDF settings |
 | `/api/settings/store/pdf` | `PATCH` | `Permission:settings.update` | update PDF settings |
 | `/api/settings/store/payment-accounts` | `GET` | `Permission:settings.view` | list payment accounts (response จะ resolve `qrImageUrl` เป็น public URL เสมอถ้าเป็นไฟล์ใน R2/CDN ของระบบ) |
-| `/api/settings/store/payment-accounts` | `POST,PATCH,DELETE` | `Permission:stores.update` | manage payment accounts (`qrImageUrl` รับได้ทั้ง full URL เดิมหรือ object key/path; ฝั่ง server จะ normalize เป็น key ตอนบันทึกสำหรับไฟล์ของระบบ) |
+| `/api/settings/store/payment-accounts` | `POST,PATCH,DELETE` | `Permission:stores.update` | manage payment accounts (`qrImageUrl` รับได้ทั้ง full URL เดิมหรือ object key/path; ถ้าอัปโหลดไฟล์ใหม่จะรับเฉพาะ `JPG/PNG/WebP`, optimize เป็น WebP แบบ strict ก่อนเก็บ และ normalize เป็น key ตอนบันทึกสำหรับไฟล์ของระบบ) |
 | `/api/settings/store/shipping-providers` | `GET` | `Permission:settings.view` | list shipping provider master ของร้าน (เรียงตาม `sortOrder`) |
 | `/api/settings/store/shipping-providers` | `POST,PATCH,DELETE` | `Permission:stores.update` | manage shipping provider master (`displayName`,`branchName`,`aliases`,`sortOrder`,`active`) สำหรับหน้า POS ออนไลน์ |
 | `/api/settings/users` | `GET` | `Permission:members.view` | list members |

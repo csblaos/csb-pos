@@ -14,6 +14,7 @@ import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { SlideUpSheet } from "@/components/ui/slide-up-sheet";
 import { authFetch } from "@/lib/auth/client-token";
+import { getRasterImageTypeLabel, isRasterImageContentType, RASTER_IMAGE_ACCEPT } from "@/lib/media/image-upload";
 import {
   findLaosBankByCode,
   findLaosBankByName,
@@ -299,6 +300,12 @@ export function StorePaymentAccountsSettings({
 
     if (!file.type.startsWith("image/")) {
       setErrorMessage("รองรับเฉพาะไฟล์รูปภาพสำหรับ QR");
+      event.target.value = "";
+      return;
+    }
+
+    if (!isRasterImageContentType(file.type)) {
+      setErrorMessage(`รองรับเฉพาะไฟล์ ${getRasterImageTypeLabel()} สำหรับ QR`);
       event.target.value = "";
       return;
     }
@@ -729,7 +736,7 @@ export function StorePaymentAccountsSettings({
                   <input
                     ref={qrInputRef}
                     type="file"
-                    accept="image/*"
+                    accept={RASTER_IMAGE_ACCEPT}
                     className="hidden"
                     onChange={handleQrFileChanged}
                     disabled={isSaving || isDeleting || !canUploadQrImage}
@@ -746,7 +753,9 @@ export function StorePaymentAccountsSettings({
                   </Button>
                 </div>
 
-                <p className="text-[11px] text-slate-500">รองรับไฟล์ภาพ ไม่เกิน {MAX_QR_IMAGE_SIZE_MB}MB</p>
+                <p className="text-[11px] text-slate-500">
+                  รองรับไฟล์ {getRasterImageTypeLabel()} ไม่เกิน {MAX_QR_IMAGE_SIZE_MB}MB
+                </p>
 
                 {previewImageSrc ? (
                   <div className="space-y-2">

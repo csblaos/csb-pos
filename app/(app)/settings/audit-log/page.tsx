@@ -18,6 +18,8 @@ import { db } from "@/lib/db/client";
 import { auditEvents, stores, users } from "@/lib/db/schema";
 import { hasPermission } from "@/lib/rbac/access";
 
+export const dynamic = "force-dynamic";
+
 type SearchParams = Record<string, string | string[] | undefined>;
 type ResultFilter = "ALL" | "SUCCESS" | "FAIL";
 

@@ -62,11 +62,43 @@ export async function PATCH(
         );
       }
 
-      const { objectKey: imageKey } = await uploadProductImageToR2({
-        storeId,
-        productName: targetProduct.name,
-        file,
-      });
+      let imageKey: string;
+      try {
+        const upload = await uploadProductImageToR2({
+          storeId,
+          productName: targetProduct.name,
+          file,
+        });
+        imageKey = upload.objectKey;
+      } catch (error) {
+        if (error instanceof Error) {
+          if (error.message === "UNSUPPORTED_FILE_TYPE") {
+            return NextResponse.json({ message: "รองรับเฉพาะไฟล์รูปภาพ" }, { status: 400 });
+          }
+          if (error.message === "UNSUPPORTED_RASTER_FORMAT") {
+            return NextResponse.json(
+              { message: "รองรับเฉพาะไฟล์ JPG, PNG หรือ WebP สำหรับรูปสินค้า" },
+              { status: 400 },
+            );
+          }
+          if (error.message === "FILE_TOO_LARGE") {
+            return NextResponse.json(
+              { message: "ไฟล์รูปสินค้าใหญ่เกินกำหนด (ไม่เกิน 3MB)" },
+              { status: 400 },
+            );
+          }
+          if (error.message === "IMAGE_OPTIMIZATION_FAILED") {
+            return NextResponse.json(
+              {
+                message: "ไม่สามารถปรับขนาดรูปสินค้าได้ กรุณาเลือกไฟล์ JPG, PNG หรือ WebP ที่เล็กลง",
+              },
+              { status: 400 },
+            );
+          }
+        }
+
+        return NextResponse.json({ message: "อัปโหลดรูปสินค้าไม่สำเร็จ" }, { status: 500 });
+      }
 
       // Delete old image if exists
       if (targetProduct.imageUrl) {

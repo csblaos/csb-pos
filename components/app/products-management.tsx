@@ -10,6 +10,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
 } from "react";
 import { useFieldArray, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -47,6 +48,8 @@ import {
   productUpsertSchema,
 } from "@/lib/products/validation";
 import { currencySymbol, type StoreCurrency } from "@/lib/finance/store-financial";
+import { compressRasterImageFile, validateRasterImageFile } from "@/lib/media/client-image";
+import { RASTER_IMAGE_ACCEPT } from "@/lib/media/image-upload";
 
 /* ─── Types ─── */
 
@@ -312,6 +315,7 @@ export function ProductsManagement({
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [isImageProcessing, setIsImageProcessing] = useState(false);
   const [currentImageUrl, setCurrentImageUrl] = useState<string | null>(null);
   const [isImageMarkedForRemoval, setIsImageMarkedForRemoval] = useState(false);
   const [matrixAxisOneName, setMatrixAxisOneName] = useState("Color");
@@ -703,6 +707,38 @@ export function ProductsManagement({
     setImagePreview(url);
     return () => URL.revokeObjectURL(url);
   }, [imageFile]);
+
+  const handleProductImageFileChange = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0] ?? null;
+      event.target.value = "";
+      if (!file) {
+        return;
+      }
+
+      const validation = validateRasterImageFile(file);
+      if (!validation.ok) {
+        toast.error(validation.message);
+        return;
+      }
+
+      setIsImageProcessing(true);
+      try {
+        const optimizedFile = await compressRasterImageFile(file, {
+          maxWidth: 640,
+          quality: 0.75,
+          fileNameBase: file.name,
+        });
+        setImageFile(optimizedFile);
+        setIsImageMarkedForRemoval(false);
+      } catch {
+        toast.error("เตรียมรูปสินค้าไม่สำเร็จ กรุณาลองใช้ไฟล์ JPG, PNG หรือ WebP อื่น");
+      } finally {
+        setIsImageProcessing(false);
+      }
+    },
+    [],
+  );
 
   const fetchModelSuggestions = useCallback(
     async (search: string) => {
@@ -1546,6 +1582,11 @@ export function ProductsManagement({
 
   /* ── Submit product ── */
   const onSubmit = form.handleSubmit(async (values) => {
+    if (isImageProcessing) {
+      toast.error("กำลังเตรียมรูปสินค้า กรุณารอสักครู่แล้วลองบันทึกอีกครั้ง");
+      return;
+    }
+
     const submitIntent = submitIntentRef.current;
     const key = mode === "create" ? "create" : `update-${editingProductId}`;
     setLoadingKey(key);
@@ -2851,7 +2892,11 @@ export function ProductsManagement({
                   ? "border border-slate-200 hover:border-blue-300"
                   : "border-2 border-dashed border-slate-300 hover:border-blue-400"
               }`}
-              onClick={() => imageInputRef.current?.click()}
+              onClick={() => {
+                if (!isImageProcessing) {
+                  imageInputRef.current?.click();
+                }
+              }}
             >
               {displayedImage ? (
                 <Image
@@ -2871,14 +2916,10 @@ export function ProductsManagement({
             <input
               ref={imageInputRef}
               type="file"
-              accept="image/*"
+              accept={RASTER_IMAGE_ACCEPT}
               className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) {
-                  setImageFile(f);
-                  setIsImageMarkedForRemoval(false);
-                }
+              onChange={(event) => {
+                void handleProductImageFileChange(event);
               }}
             />
             <p className="text-xs text-muted-foreground">
@@ -2892,7 +2933,7 @@ export function ProductsManagement({
                   ? "กำลังแสดงรูปใหม่ (ยังไม่บันทึก)"
                   : null}
               {mode === "edit" ? <br /> : null}
-              สูงสุด 3 MB · จะถูกปรับเป็น 640px WebP
+              {isImageProcessing ? "กำลังเตรียมรูป..." : "สูงสุด 3 MB · จะถูกปรับเป็น 640px WebP"}
             </p>
             {imageFile && (
               <button
