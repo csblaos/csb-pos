@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { and, eq } from "drizzle-orm";
-
-import { db } from "@/lib/db/client";
+import type { db as TursoDb } from "@/lib/db/client";
 import {
   productModelAttributes,
   productModelAttributeValues,
@@ -13,7 +12,7 @@ import {
   type ProductVariantOption,
 } from "@/lib/products/variant-options";
 
-type VariantDbClient = Pick<typeof db, "select" | "insert" | "update">;
+type VariantDbClient = Pick<typeof TursoDb, "select" | "insert" | "update">;
 
 export type NormalizedVariantPayload = {
   modelName: string;

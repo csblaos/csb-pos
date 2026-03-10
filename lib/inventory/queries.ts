@@ -79,6 +79,77 @@ export type StoreStockThresholds = {
   lowStockThreshold: number;
 };
 
+export type OrderStockState = {
+  hasStockOutFromOrder: boolean;
+  hasActiveReserve: boolean;
+};
+
+type PostgresInventoryReadContext = {
+  queryMany: <T>(
+    sql: string,
+    options?: {
+      replacements?: Record<string, unknown> | unknown[];
+    },
+  ) => Promise<T[]>;
+  queryOne: <T>(
+    sql: string,
+    options?: {
+      replacements?: Record<string, unknown> | unknown[];
+    },
+  ) => Promise<T | null>;
+};
+
+const getPostgresInventoryReadContext = async (): Promise<PostgresInventoryReadContext | null> => {
+  if (process.env.POSTGRES_INVENTORY_READ_ENABLED !== "1") {
+    return null;
+  }
+
+  try {
+    const [{ queryMany, queryOne }, { ensurePostgresConnection, isPostgresConfigured }] =
+      await Promise.all([import("@/lib/db/query"), import("@/lib/db/sequelize")]);
+
+    if (!isPostgresConfigured()) {
+      return null;
+    }
+
+    await ensurePostgresConnection();
+    return { queryMany, queryOne };
+  } catch (error) {
+    console.warn(
+      `[inventory.read.pg] init fallback to turso: ${
+        error instanceof Error ? error.message : "unknown"
+      }`,
+    );
+    return null;
+  }
+};
+
+const logInventoryReadFallback = (operation: string, error: unknown) => {
+  console.warn(
+    `[inventory.read.pg] fallback operation=${operation}: ${
+      error instanceof Error ? error.message : "unknown"
+    }`,
+  );
+};
+
+const mapInventoryBalanceRows = (
+  rows: Array<{
+    productId: string;
+    onHand: number | string | null;
+    reserved: number | string | null;
+  }>,
+): InventoryBalance[] =>
+  rows.map((row) => {
+    const onHand = Number(row.onHand ?? 0);
+    const reserved = Number(row.reserved ?? 0);
+    return {
+      productId: row.productId,
+      onHand,
+      reserved,
+      available: onHand - reserved,
+    };
+  });
+
 export async function getStoreStockThresholds(
   storeId: string,
 ): Promise<StoreStockThresholds> {
@@ -132,16 +203,7 @@ const movementBalances = async (
     )
     .groupBy(inventoryMovements.productId);
 
-  return rows.map((row) => {
-    const onHand = Number(row.onHand ?? 0);
-    const reserved = Number(row.reserved ?? 0);
-    return {
-      productId: row.productId,
-      onHand,
-      reserved,
-      available: onHand - reserved,
-    };
-  });
+  return mapInventoryBalanceRows(rows);
 };
 
 const movementBalancesByProductIds = async (
@@ -179,19 +241,48 @@ const movementBalancesByProductIds = async (
     )
     .groupBy(inventoryMovements.productId);
 
-  return rows.map((row) => {
-    const onHand = Number(row.onHand ?? 0);
-    const reserved = Number(row.reserved ?? 0);
-    return {
-      productId: row.productId,
-      onHand,
-      reserved,
-      available: onHand - reserved,
-    };
-  });
+  return mapInventoryBalanceRows(rows);
 };
 
 export async function getInventoryBalancesByStore(storeId: string) {
+  const pg = await getPostgresInventoryReadContext();
+  if (pg) {
+    try {
+      const rows = await pg.queryMany<{
+        productId: string;
+        onHand: number | string | null;
+        reserved: number | string | null;
+      }>(
+        `
+          select
+            product_id as "productId",
+            coalesce(sum(case
+              when type = 'IN' then qty_base
+              when type = 'RETURN' then qty_base
+              when type = 'OUT' then -qty_base
+              when type = 'ADJUST' then qty_base
+              else 0
+            end), 0) as "onHand",
+            coalesce(sum(case
+              when type = 'RESERVE' then qty_base
+              when type = 'RELEASE' then -qty_base
+              else 0
+            end), 0) as "reserved"
+          from inventory_movements
+          where store_id = :storeId
+          group by product_id
+        `,
+        {
+          replacements: { storeId },
+        },
+      );
+
+      return mapInventoryBalanceRows(rows);
+    } catch (error) {
+      logInventoryReadFallback("getInventoryBalancesByStore", error);
+    }
+  }
+
   return movementBalances(storeId);
 }
 
@@ -199,12 +290,115 @@ export async function getInventoryBalancesByStoreForProducts(
   storeId: string,
   productIds: string[],
 ) {
+  const pg = await getPostgresInventoryReadContext();
+  if (pg) {
+    try {
+      const rows = await getInventoryBalancesByStore(storeId);
+      const productIdSet = new Set(productIds);
+      return rows.filter((row) => productIdSet.has(row.productId));
+    } catch (error) {
+      logInventoryReadFallback("getInventoryBalancesByStoreForProducts", error);
+    }
+  }
+
   return movementBalancesByProductIds(storeId, productIds);
 }
 
 export async function getInventoryBalanceForProduct(storeId: string, productId: string) {
+  const pg = await getPostgresInventoryReadContext();
+  if (pg) {
+    try {
+      const rows = await getInventoryBalancesByStore(storeId);
+      return rows.find((row) => row.productId === productId) ?? {
+        productId,
+        onHand: 0,
+        reserved: 0,
+        available: 0,
+      };
+    } catch (error) {
+      logInventoryReadFallback("getInventoryBalanceForProduct", error);
+    }
+  }
+
   const rows = await movementBalances(storeId, productId);
   return rows[0] ?? { productId, onHand: 0, reserved: 0, available: 0 };
+}
+
+export async function getOrderStockStateForOrder(
+  storeId: string,
+  orderId: string,
+): Promise<OrderStockState> {
+  const pg = await getPostgresInventoryReadContext();
+  if (pg) {
+    try {
+      const row = await pg.queryOne<{
+        reserveCount: number | string | null;
+        releaseCount: number | string | null;
+        outCount: number | string | null;
+      }>(
+        `
+          select
+            coalesce(sum(case when type = 'RESERVE' then 1 else 0 end), 0) as "reserveCount",
+            coalesce(sum(case when type = 'RELEASE' then 1 else 0 end), 0) as "releaseCount",
+            coalesce(sum(case when type = 'OUT' then 1 else 0 end), 0) as "outCount"
+          from inventory_movements
+          where store_id = :storeId
+            and ref_type = 'ORDER'
+            and ref_id = :orderId
+        `,
+        {
+          replacements: {
+            storeId,
+            orderId,
+          },
+        },
+      );
+
+      const reserveCount = Number(row?.reserveCount ?? 0);
+      const releaseCount = Number(row?.releaseCount ?? 0);
+      const outCount = Number(row?.outCount ?? 0);
+
+      return {
+        hasStockOutFromOrder: outCount > 0,
+        hasActiveReserve: reserveCount > releaseCount,
+      };
+    } catch (error) {
+      logInventoryReadFallback("getOrderStockStateForOrder", error);
+    }
+  }
+
+  const movementRows = await db
+    .select({ type: inventoryMovements.type })
+    .from(inventoryMovements)
+    .where(
+      and(
+        eq(inventoryMovements.storeId, storeId),
+        eq(inventoryMovements.refType, "ORDER"),
+        eq(inventoryMovements.refId, orderId),
+      ),
+    );
+
+  let reserveCount = 0;
+  let releaseCount = 0;
+  let outCount = 0;
+  for (const row of movementRows) {
+    if (row.type === "RESERVE") {
+      reserveCount += 1;
+      continue;
+    }
+    if (row.type === "RELEASE") {
+      releaseCount += 1;
+      continue;
+    }
+    if (row.type === "OUT") {
+      outCount += 1;
+    }
+  }
+
+  return {
+    hasStockOutFromOrder: outCount > 0,
+    hasActiveReserve: reserveCount > releaseCount,
+  };
 }
 
 export async function getStockProductsForStore(

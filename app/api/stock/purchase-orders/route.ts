@@ -1,18 +1,26 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
+import { buildRequestContext } from "@/lib/http/request-context";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
+import {
+  createPurchaseOrderReceivedInPostgres,
+  isPostgresPurchaseCreateReceivedEnabled,
+  poNumberExistsInPostgres,
+} from "@/lib/purchases/postgres-write";
 import { createPurchaseOrderSchema } from "@/lib/purchases/validation";
 import {
   createPurchaseOrder,
   getPurchaseOrderListPage,
   PurchaseServiceError,
 } from "@/server/services/purchase.service";
+import { getNextPoNumber } from "@/server/repositories/purchase.repo";
 import { safeLogAuditEvent } from "@/server/services/audit.service";
 import {
   claimIdempotency,
-  getIdempotencyKey,
+  getIdempotencyKeyFromHeaders,
   hashRequestBody,
+  markIdempotencySucceeded,
   safeMarkIdempotencyFailed,
 } from "@/server/services/idempotency.service";
 import { db } from "@/lib/db/client";
@@ -47,6 +55,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const action = "po.create";
 
+  let requestContext = buildRequestContext(null);
   let auditContext: {
     storeId: string;
     userId: string;
@@ -57,6 +66,7 @@ export async function POST(request: Request) {
 
   try {
     const { session, storeId } = await enforcePermission("inventory.create");
+    requestContext = buildRequestContext(request);
     auditContext = {
       storeId,
       userId: session.userId,
@@ -65,7 +75,7 @@ export async function POST(request: Request) {
     };
 
     const rawBody = await request.text();
-    const idempotencyKey = getIdempotencyKey(request);
+    const idempotencyKey = getIdempotencyKeyFromHeaders(request.headers);
     const requestHash = hashRequestBody(rawBody);
     let body: unknown;
 
@@ -148,7 +158,7 @@ export async function POST(request: Request) {
         metadata: {
           issues: parsed.error.issues.map((issue) => issue.path.join(".")).slice(0, 5),
         },
-        request,
+        requestContext,
       });
       return NextResponse.json({ message: firstError }, { status: 400 });
     }
@@ -162,6 +172,61 @@ export async function POST(request: Request) {
 
     const storeCurrency = storeRow?.currency ?? "LAK";
 
+    if (parsed.data.receiveImmediately && isPostgresPurchaseCreateReceivedEnabled()) {
+      let poNumber = await getNextPoNumber(storeId);
+      const poNumberBase = poNumber;
+      let attempts = 0;
+
+      while (await poNumberExistsInPostgres(storeId, poNumber)) {
+        attempts += 1;
+        const suffix =
+          attempts <= 5
+            ? `${Math.floor(Math.random() * 90 + 10)}`
+            : `${Date.now().toString().slice(-6)}-${attempts}`;
+        poNumber = `${poNumberBase}-${suffix}`;
+      }
+
+      try {
+        const purchaseOrder = await createPurchaseOrderReceivedInPostgres({
+          storeId,
+          userId: session.userId,
+          storeCurrency: storeCurrency as "LAK" | "THB" | "USD",
+          poNumber,
+          payload: parsed.data,
+          actorName: session.displayName,
+          actorRole: session.activeRoleName,
+          requestContext,
+        });
+
+        if (idempotencyRecordId) {
+          try {
+            await markIdempotencySucceeded({
+              recordId: idempotencyRecordId,
+              statusCode: 200,
+              body: {
+                ok: true,
+                purchaseOrder,
+              },
+            });
+          } catch (error) {
+            console.error(
+              `[purchase.write.pg] idempotency mark failed action=po.create poNumber=${poNumber}: ${
+                error instanceof Error ? error.message : "unknown"
+              }`,
+            );
+          }
+        }
+
+        return NextResponse.json({ ok: true, purchaseOrder });
+      } catch (error) {
+        console.warn(
+          `[purchase.write.pg] fallback to turso for po.create receiveImmediately poNumber=${poNumber}: ${
+            error instanceof Error ? error.message : "unknown"
+          }`,
+        );
+      }
+    }
+
     const po = await createPurchaseOrder({
       storeId,
       userId: session.userId,
@@ -170,7 +235,7 @@ export async function POST(request: Request) {
       audit: {
         actorName: session.displayName,
         actorRole: session.activeRoleName,
-        request,
+        requestContext,
       },
       idempotency: idempotencyRecordId
         ? {
@@ -203,7 +268,7 @@ export async function POST(request: Request) {
           metadata: {
             message: error.message,
           },
-          request,
+          requestContext,
         });
       }
       return NextResponse.json(
@@ -234,7 +299,7 @@ export async function POST(request: Request) {
         metadata: {
           message: error instanceof Error ? error.message : "unknown",
         },
-        request,
+        requestContext,
       });
     }
     return toRBACErrorResponse(error);

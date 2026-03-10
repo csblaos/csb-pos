@@ -1,5 +1,10 @@
 import "server-only";
 
+import {
+  connectOnboardingChannelInPostgres,
+  isPostgresProductsOnboardingWriteEnabled,
+  logProductsOnboardingWriteFallback,
+} from "@/lib/platform/postgres-products-onboarding-write";
 import { createPerfScope, timePerf } from "@/server/perf/perf";
 import {
   readStoreChannelStatus,
@@ -22,6 +27,16 @@ export async function connectOnboardingChannel(
     const scope = createPerfScope("onboarding.channels.service.connect");
 
     try {
+      if (isPostgresProductsOnboardingWriteEnabled()) {
+        try {
+          return await scope.step("pg.connectChannel", async () =>
+            connectOnboardingChannelInPostgres(storeId, channel),
+          );
+        } catch (error) {
+          logProductsOnboardingWriteFallback("onboarding.channels.connect", error);
+        }
+      }
+
       const now = new Date().toISOString();
 
       await scope.step("repo.upsertConnection", async () => {

@@ -1,16 +1,13 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
-
 import { redisDelete, redisGetJson, redisSetJson } from "@/lib/cache/redis";
-import { db } from "@/lib/db/client";
-import { stores } from "@/lib/db/schema";
 import {
   getCodOverviewSummary,
   getGrossProfitSummary,
   getOutstandingPurchaseRows,
   getPurchaseApAgingSummary,
   getPurchaseFxDeltaSummary,
+  getReportStoreCurrency,
   getSalesByChannel,
   getSalesSummary,
   getTopProducts,
@@ -65,21 +62,15 @@ export async function getReportsViewData(params: {
     }
   }
 
-  const [salesSummary, topProducts, salesByChannel, grossProfit, codOverview, storeRow] =
+  const [salesSummary, topProducts, salesByChannel, grossProfit, codOverview, storeCurrency] =
     await Promise.all([
       getSalesSummary(params.storeId),
       getTopProducts(params.storeId, topProductsLimit),
       getSalesByChannel(params.storeId),
       getGrossProfitSummary(params.storeId),
       getCodOverviewSummary(params.storeId),
-      db
-        .select({ currency: stores.currency })
-        .from(stores)
-        .where(eq(stores.id, params.storeId))
-        .limit(1)
-        .then((rows) => rows[0] ?? null),
+      getReportStoreCurrency(params.storeId),
     ]);
-  const storeCurrency = (storeRow?.currency ?? "LAK") as "LAK" | "THB" | "USD";
   const [purchaseFx, purchaseApAging] = await Promise.all([
     getPurchaseFxDeltaSummary(params.storeId, storeCurrency),
     getPurchaseApAgingSummary(params.storeId, storeCurrency),
@@ -104,12 +95,7 @@ export async function getReportsViewData(params: {
 }
 
 export async function getOutstandingPurchaseRowsForExport(storeId: string) {
-  const [storeRow] = await db
-    .select({ currency: stores.currency })
-    .from(stores)
-    .where(eq(stores.id, storeId))
-    .limit(1);
-  const storeCurrency = (storeRow?.currency ?? "LAK") as "LAK" | "THB" | "USD";
+  const storeCurrency = await getReportStoreCurrency(storeId);
   const rows = await getOutstandingPurchaseRows(storeId, storeCurrency);
   return {
     storeCurrency,

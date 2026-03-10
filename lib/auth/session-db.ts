@@ -1,7 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { db } from "@/lib/db/client";
 import { roles, storeMembers, stores } from "@/lib/db/schema";
 import { ensureMainBranchExists, listAccessibleBranchesForMember } from "@/lib/branches/access";
 import {
@@ -9,6 +8,13 @@ import {
   clearSessionCookie,
   deleteSessionById,
 } from "@/lib/auth/session";
+import {
+  findActiveMembershipByStoreFromPostgres,
+  findPrimaryMembershipFromPostgres,
+  getUserMembershipFlagsFromPostgres,
+  listActiveMembershipsFromPostgres,
+  logAuthRbacReadFallback,
+} from "@/lib/platform/postgres-auth-rbac";
 
 type SessionUser = {
   id: string;
@@ -30,7 +36,19 @@ export type UserMembershipFlags = {
   hasSuspendedMembership: boolean;
 };
 
+const getTursoDb = async () => (await import("@/lib/db/client")).db;
+
 async function findPrimaryMembership(userId: string) {
+  try {
+    const postgresMembership = await findPrimaryMembershipFromPostgres(userId);
+    if (postgresMembership !== undefined) {
+      return postgresMembership ?? null;
+    }
+  } catch (error) {
+    logAuthRbacReadFallback("auth.primary-membership", error);
+  }
+
+  const db = await getTursoDb();
   const rows = await db
     .select({
       storeId: storeMembers.storeId,
@@ -53,6 +71,16 @@ export async function findActiveMembershipByStore(
   userId: string,
   storeId: string,
 ): Promise<ActiveMembership | null> {
+  try {
+    const postgresMembership = await findActiveMembershipByStoreFromPostgres(userId, storeId);
+    if (postgresMembership !== undefined) {
+      return postgresMembership ?? null;
+    }
+  } catch (error) {
+    logAuthRbacReadFallback("auth.membership-by-store", error);
+  }
+
+  const db = await getTursoDb();
   const rows = await db
     .select({
       storeId: storeMembers.storeId,
@@ -77,6 +105,16 @@ export async function findActiveMembershipByStore(
 }
 
 export async function listActiveMemberships(userId: string): Promise<ActiveMembership[]> {
+  try {
+    const postgresMemberships = await listActiveMembershipsFromPostgres(userId);
+    if (postgresMemberships !== undefined) {
+      return postgresMemberships;
+    }
+  } catch (error) {
+    logAuthRbacReadFallback("auth.list-active-memberships", error);
+  }
+
+  const db = await getTursoDb();
   return db
     .select({
       storeId: storeMembers.storeId,
@@ -93,6 +131,16 @@ export async function listActiveMemberships(userId: string): Promise<ActiveMembe
 }
 
 export async function getUserMembershipFlags(userId: string): Promise<UserMembershipFlags> {
+  try {
+    const postgresFlags = await getUserMembershipFlagsFromPostgres(userId);
+    if (postgresFlags !== undefined) {
+      return postgresFlags;
+    }
+  } catch (error) {
+    logAuthRbacReadFallback("auth.membership-flags", error);
+  }
+
+  const db = await getTursoDb();
   const rows = await db
     .select({
       status: storeMembers.status,

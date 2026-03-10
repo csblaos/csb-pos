@@ -5,11 +5,38 @@ import { AppTopNav } from "@/components/app/app-top-nav";
 import { BottomTabNav } from "@/components/app/bottom-tab-nav";
 import { getSession } from "@/lib/auth/session";
 import { getUserSystemRole } from "@/lib/auth/system-admin";
-import { db } from "@/lib/db/client";
 import { stores } from "@/lib/db/schema";
+import {
+  getStoreShellProfileFromPostgres,
+  logAuthRbacReadFallback,
+} from "@/lib/platform/postgres-auth-rbac";
 import { getUserPermissionsForCurrentSession } from "@/lib/rbac/access";
 import { getStorefrontLayoutPreset } from "@/lib/storefront/layout/registry";
 import { normalizeStoreType } from "@/lib/storefront/types";
+
+const getTursoDb = async () => (await import("@/lib/db/client")).db;
+
+const getActiveStoreProfile = async (storeId: string) => {
+  try {
+    const postgresProfile = await getStoreShellProfileFromPostgres(storeId);
+    if (postgresProfile !== undefined) {
+      return postgresProfile ?? null;
+    }
+  } catch (error) {
+    logAuthRbacReadFallback("app-shell.store-profile", error);
+  }
+
+  const db = await getTursoDb();
+  return db
+    .select({
+      name: stores.name,
+      logoUrl: stores.logoUrl,
+    })
+    .from(stores)
+    .where(eq(stores.id, storeId))
+    .limit(1)
+    .then((rows) => rows[0] ?? null);
+};
 
 export default async function AppLayout({
   children,
@@ -33,15 +60,7 @@ export default async function AppLayout({
 
   const [permissionKeys, activeStoreProfile] = await Promise.all([
     getUserPermissionsForCurrentSession(),
-    db
-      .select({
-        name: stores.name,
-        logoUrl: stores.logoUrl,
-      })
-      .from(stores)
-      .where(eq(stores.id, session.activeStoreId))
-      .limit(1)
-      .then((rows) => rows[0] ?? null),
+    getActiveStoreProfile(session.activeStoreId),
   ]);
   const activeStoreType = normalizeStoreType(session.activeStoreType);
   const layoutPreset = getStorefrontLayoutPreset(activeStoreType);

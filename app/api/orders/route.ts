@@ -14,6 +14,11 @@ import {
   type OrderListTab,
   listOrdersByTab,
 } from "@/lib/orders/queries";
+import {
+  createOrderInPostgres,
+  isPostgresCreateOrderEnabled,
+  orderNoExistsInPostgres,
+} from "@/lib/orders/postgres-write";
 import { buildAuditEventValues, safeLogAuditEvent } from "@/server/services/audit.service";
 import { invalidateDashboardSummaryCache } from "@/server/services/dashboard.service";
 import {
@@ -590,6 +595,84 @@ export async function POST(request: Request) {
 
     if (existingOrderNo) {
       orderNo = `${orderNo}-${Math.floor(Math.random() * 90 + 10)}`;
+    }
+
+    if (isPostgresCreateOrderEnabled()) {
+      const orderNoBase = orderNo;
+      let pgOrderNo = orderNo;
+      let attempts = 0;
+
+      while (await orderNoExistsInPostgres(storeId, pgOrderNo)) {
+        attempts += 1;
+        const suffix =
+          attempts <= 5
+            ? `${Math.floor(Math.random() * 90 + 10)}`
+            : `${Date.now().toString().slice(-6)}-${attempts}`;
+        pgOrderNo = `${orderNoBase}-${suffix}`;
+      }
+
+      orderNo = pgOrderNo;
+    }
+
+    if (isPostgresCreateOrderEnabled()) {
+      try {
+        const { orderId } = await createOrderInPostgres({
+          storeId,
+          actorUserId: session.userId,
+          actorName: session.displayName,
+          actorRole: session.activeRoleName,
+          orderNo,
+          channel: payload.channel,
+          status: initialStatus,
+          contactId: payload.channel === "WALK_IN" ? null : payload.contactId || null,
+          customerName,
+          customerPhone,
+          customerAddress: payload.customerAddress?.trim() || null,
+          subtotal,
+          discount: totals.discount,
+          vatAmount: totals.vatAmount,
+          shippingFeeCharged: payload.shippingFeeCharged,
+          total: totals.total,
+          paymentCurrency: selectedPaymentCurrency,
+          paymentMethod: selectedPaymentMethod,
+          paymentStatus: initialPaymentStatus,
+          paymentAccountId: selectedPaymentAccountId,
+          shippingProvider: isOnlineDelivery ? shippingProvider : null,
+          shippingCarrier: isOnlineDelivery ? shippingCarrier : null,
+          shippingCost: payload.shippingCost,
+          paidAt: initialPaidAt,
+          checkoutFlow,
+          shouldReserveStockOnCreate,
+          shouldStockOutOnCreate,
+          items: normalizedItems,
+          request,
+        });
+
+        if (idempotencyRecordId) {
+          try {
+            await markIdempotencySucceeded({
+              recordId: idempotencyRecordId,
+              statusCode: 201,
+              body: { ok: true, orderId, orderNo },
+            });
+          } catch (error) {
+            console.error(
+              `[orders.write.pg] idempotency mark failed action=create orderNo=${orderNo}: ${
+                error instanceof Error ? error.message : "unknown"
+              }`,
+            );
+          }
+        }
+
+        await invalidateOrderReadCaches(storeId);
+        return NextResponse.json({ ok: true, orderId, orderNo }, { status: 201 });
+      } catch (error) {
+        console.warn(
+          `[orders.write.pg] fallback to turso for create orderNo=${orderNo}: ${
+            error instanceof Error ? error.message : "unknown"
+          }`,
+        );
+      }
     }
 
     let orderId = "";

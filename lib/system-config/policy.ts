@@ -2,8 +2,13 @@ import "server-only";
 
 import { eq, sql } from "drizzle-orm";
 
-import { db } from "@/lib/db/client";
 import { systemConfig } from "@/lib/db/schema";
+import {
+  getGlobalPaymentPolicyFromPostgres,
+  getGlobalSessionPolicyFromPostgres,
+  getGlobalStoreLogoPolicyFromPostgres,
+  logAuthRbacReadFallback,
+} from "@/lib/platform/postgres-auth-rbac";
 
 const GLOBAL_CONFIG_ID = "global";
 const DEFAULT_SESSION_LIMIT = 1;
@@ -12,6 +17,8 @@ const DEFAULT_PAYMENT_REQUIRE_SLIP_FOR_LAO_QR = true;
 const DEFAULT_STORE_LOGO_MAX_SIZE_MB = 5;
 const DEFAULT_STORE_LOGO_AUTO_RESIZE = true;
 const DEFAULT_STORE_LOGO_RESIZE_MAX_WIDTH = 1280;
+
+const getTursoDb = async () => (await import("@/lib/db/client")).db;
 
 const toPositiveIntOrNull = (value: unknown) => {
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
@@ -46,6 +53,16 @@ export type GlobalPaymentPolicy = {
 };
 
 export async function getGlobalSessionPolicy(): Promise<GlobalSessionPolicy> {
+  try {
+    const postgresPolicy = await getGlobalSessionPolicyFromPostgres();
+    if (postgresPolicy) {
+      return postgresPolicy;
+    }
+  } catch (error) {
+    logAuthRbacReadFallback("system-config.session-policy", error);
+  }
+
+  const db = await getTursoDb();
   const [row] = await db
     .select({
       defaultSessionLimit: systemConfig.defaultSessionLimit,
@@ -61,6 +78,16 @@ export async function getGlobalSessionPolicy(): Promise<GlobalSessionPolicy> {
 
 export async function getGlobalStoreLogoPolicy(): Promise<GlobalStoreLogoPolicy> {
   try {
+    const postgresPolicy = await getGlobalStoreLogoPolicyFromPostgres();
+    if (postgresPolicy) {
+      return postgresPolicy;
+    }
+  } catch (error) {
+    logAuthRbacReadFallback("system-config.store-logo-policy", error);
+  }
+
+  try {
+    const db = await getTursoDb();
     const [row] = await db
       .select({
         maxSizeMb: systemConfig.storeLogoMaxSizeMb,
@@ -94,6 +121,16 @@ export async function getGlobalStoreLogoPolicy(): Promise<GlobalStoreLogoPolicy>
 
 export async function getGlobalPaymentPolicy(): Promise<GlobalPaymentPolicy> {
   try {
+    const postgresPolicy = await getGlobalPaymentPolicyFromPostgres();
+    if (postgresPolicy) {
+      return postgresPolicy;
+    }
+  } catch (error) {
+    logAuthRbacReadFallback("system-config.payment-policy", error);
+  }
+
+  try {
+    const db = await getTursoDb();
     const [row] = await db
       .select({
         maxAccountsPerStore: systemConfig.paymentMaxAccountsPerStore,
@@ -123,6 +160,7 @@ export async function getGlobalPaymentPolicy(): Promise<GlobalPaymentPolicy> {
 export async function upsertGlobalSessionPolicy(input: GlobalSessionPolicy) {
   const defaultSessionLimit = toPositiveIntOrNull(input.defaultSessionLimit) ?? DEFAULT_SESSION_LIMIT;
 
+  const db = await getTursoDb();
   await db
     .insert(systemConfig)
     .values({
@@ -152,6 +190,7 @@ export async function upsertGlobalStoreLogoPolicy(input: GlobalStoreLogoPolicy) 
     toIntInRangeOrNull(input.resizeMaxWidth, 256, 4096) ??
     DEFAULT_STORE_LOGO_RESIZE_MAX_WIDTH;
 
+  const db = await getTursoDb();
   await db
     .insert(systemConfig)
     .values({
@@ -184,6 +223,7 @@ export async function upsertGlobalPaymentPolicy(input: GlobalPaymentPolicy) {
       ? input.requireSlipForLaoQr
       : DEFAULT_PAYMENT_REQUIRE_SLIP_FOR_LAO_QR;
 
+  const db = await getTursoDb();
   await db
     .insert(systemConfig)
     .values({

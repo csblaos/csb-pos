@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 
+import { buildRequestContext } from "@/lib/http/request-context";
 import { reversePurchaseOrderPaymentSchema } from "@/lib/purchases/validation";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { safeLogAuditEvent } from "@/server/services/audit.service";
 import {
   claimIdempotency,
-  getIdempotencyKey,
+  getIdempotencyKeyFromHeaders,
   hashRequestBody,
   safeMarkIdempotencyFailed,
 } from "@/server/services/idempotency.service";
@@ -24,6 +25,7 @@ type RouteParams = {
 export async function POST(request: Request, { params }: RouteParams) {
   const action = "po.payment.reverse";
 
+  let requestContext = buildRequestContext(null);
   let auditContext: {
     storeId: string;
     userId: string;
@@ -36,6 +38,7 @@ export async function POST(request: Request, { params }: RouteParams) {
   try {
     const { session, storeId } = await enforcePermission("inventory.create");
     const { poId, paymentId } = await params;
+    requestContext = buildRequestContext(request);
     auditContext = {
       storeId,
       userId: session.userId,
@@ -45,7 +48,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     };
 
     const rawBody = await request.text();
-    const idempotencyKey = getIdempotencyKey(request);
+    const idempotencyKey = getIdempotencyKeyFromHeaders(request.headers);
     const requestHash = hashRequestBody(rawBody);
     let body: unknown;
 
@@ -140,7 +143,7 @@ export async function POST(request: Request, { params }: RouteParams) {
             .map((issue) => issue.path.join("."))
             .slice(0, 5),
         },
-        request,
+        requestContext,
       });
       return NextResponse.json({ message: firstError }, { status: 400 });
     }
@@ -154,7 +157,7 @@ export async function POST(request: Request, { params }: RouteParams) {
       audit: {
         actorName: session.displayName,
         actorRole: session.activeRoleName,
-        request,
+        requestContext,
       },
       idempotency: idempotencyRecordId
         ? {
@@ -188,7 +191,7 @@ export async function POST(request: Request, { params }: RouteParams) {
           metadata: {
             message: error.message,
           },
-          request,
+          requestContext,
         });
       }
       return NextResponse.json({ message: error.message }, { status: error.status });
@@ -217,7 +220,7 @@ export async function POST(request: Request, { params }: RouteParams) {
         metadata: {
           message: error instanceof Error ? error.message : "unknown",
         },
-        request,
+        requestContext,
       });
     }
 

@@ -4,15 +4,13 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 import {
+  getStoreProductThresholds,
   getStoreProductSummaryCounts,
   listCategories,
   listStoreProductsPage,
   listUnits,
 } from "@/lib/products/service";
 import { getStoreFinancialConfig } from "@/lib/stores/financial";
-import { db } from "@/lib/db/client";
-import { stores } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
 import { ProductsHeaderRefreshButton } from "@/components/app/products-header-refresh-button";
 
 const PRODUCT_PAGE_SIZE = 30;
@@ -77,7 +75,8 @@ export default async function ProductsPage({
     );
   }
 
-  const [productPage, summaryCounts, units, categories, financial, storeRow] = await Promise.all([
+  const [productPage, summaryCounts, units, categories, financial, storeThresholds] =
+    await Promise.all([
     listStoreProductsPage({
       storeId: session.activeStoreId,
       status: initialStatusFilter,
@@ -89,15 +88,7 @@ export default async function ProductsPage({
     listUnits(session.activeStoreId),
     listCategories(session.activeStoreId),
     getStoreFinancialConfig(session.activeStoreId),
-    db
-      .select({
-        outStockThreshold: stores.outStockThreshold,
-        lowStockThreshold: stores.lowStockThreshold,
-      })
-      .from(stores)
-      .where(eq(stores.id, session.activeStoreId))
-      .limit(1)
-      .then((rows) => rows[0] ?? null),
+    getStoreProductThresholds(session.activeStoreId),
   ]);
 
   return (
@@ -117,8 +108,8 @@ export default async function ProductsPage({
         units={units}
         categories={categories}
         currency={financial?.currency ?? "LAK"}
-        storeOutStockThreshold={storeRow?.outStockThreshold ?? 0}
-        storeLowStockThreshold={storeRow?.lowStockThreshold ?? 10}
+        storeOutStockThreshold={storeThresholds.outStockThreshold}
+        storeLowStockThreshold={storeThresholds.lowStockThreshold}
         canCreate={canCreate}
         canUpdate={canUpdate}
         canArchive={canArchive}

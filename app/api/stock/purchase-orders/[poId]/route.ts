@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
+import { buildRequestContext } from "@/lib/http/request-context";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
+import {
+  isPostgresPurchaseReceiveStatusEnabled,
+  receivePurchaseOrderInPostgres,
+} from "@/lib/purchases/postgres-write";
 import {
   updatePOStatusSchema,
   updatePurchaseOrderSchema,
@@ -17,8 +22,9 @@ import { stores } from "@/lib/db/schema";
 import { safeLogAuditEvent } from "@/server/services/audit.service";
 import {
   claimIdempotency,
-  getIdempotencyKey,
+  getIdempotencyKeyFromHeaders,
   hashRequestBody,
+  markIdempotencySucceeded,
   safeMarkIdempotencyFailed,
 } from "@/server/services/idempotency.service";
 
@@ -44,6 +50,7 @@ export async function GET(_request: Request, { params }: RouteParams) {
 export async function PATCH(request: Request, { params }: RouteParams) {
   const action = "po.status.change";
 
+  let requestContext = buildRequestContext(null);
   let auditContext: {
     storeId: string;
     userId: string;
@@ -55,6 +62,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 
   try {
     const { session, storeId } = await enforcePermission("inventory.create");
+    requestContext = buildRequestContext(request);
     const { poId } = await params;
     auditContext = {
       storeId,
@@ -65,7 +73,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     };
 
     const rawBody = await request.text();
-    const idempotencyKey = getIdempotencyKey(request);
+    const idempotencyKey = getIdempotencyKeyFromHeaders(request.headers);
     const requestHash = hashRequestBody(rawBody);
     let body: unknown;
 
@@ -149,9 +157,54 @@ export async function PATCH(request: Request, { params }: RouteParams) {
         metadata: {
           issues: parsed.error.issues.map((issue) => issue.path.join(".")).slice(0, 5),
         },
-        request,
+        requestContext,
       });
       return NextResponse.json({ message: firstError }, { status: 400 });
+    }
+
+    if (
+      parsed.data.status === "RECEIVED" &&
+      isPostgresPurchaseReceiveStatusEnabled()
+    ) {
+      try {
+        const currentPo = await getPurchaseOrderDetail(poId, storeId);
+        const purchaseOrder = await receivePurchaseOrderInPostgres({
+          storeId,
+          userId: session.userId,
+          po: currentPo,
+          payload: parsed.data,
+          actorName: session.displayName,
+          actorRole: session.activeRoleName,
+          requestContext,
+        });
+
+        if (idempotencyRecordId) {
+          try {
+            await markIdempotencySucceeded({
+              recordId: idempotencyRecordId,
+              statusCode: 200,
+              body: {
+                ok: true,
+                purchaseOrder,
+              },
+            });
+          } catch (error) {
+            console.error(
+              `[purchase.write.pg] idempotency mark failed action=po.status.change poId=${poId}: ${
+                error instanceof Error ? error.message : "unknown"
+              }`,
+            );
+          }
+        }
+
+        return NextResponse.json({ ok: true, purchaseOrder });
+      } catch (error) {
+        console.warn(
+          `[purchase.write.pg] fallback to turso for po.status.change receive poId=${poId}: ${
+            error instanceof Error ? error.message : "unknown"
+          }`,
+        );
+      }
     }
 
     const po = await updatePurchaseOrderStatusFlow({
@@ -162,7 +215,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       audit: {
         actorName: session.displayName,
         actorRole: session.activeRoleName,
-        request,
+        requestContext,
       },
       idempotency: idempotencyRecordId
         ? {
@@ -196,7 +249,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
           metadata: {
             message: error.message,
           },
-          request,
+          requestContext,
         });
       }
       return NextResponse.json(
@@ -226,7 +279,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
         metadata: {
           message: error instanceof Error ? error.message : "unknown",
         },
-        request,
+        requestContext,
       });
     }
     return toRBACErrorResponse(error);
@@ -236,6 +289,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
 export async function PUT(request: Request, { params }: RouteParams) {
   const action = "po.update";
 
+  let requestContext = buildRequestContext(null);
   let auditContext: {
     storeId: string;
     userId: string;
@@ -247,6 +301,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
 
   try {
     const { session, storeId } = await enforcePermission("inventory.create");
+    requestContext = buildRequestContext(request);
     const { poId } = await params;
     auditContext = {
       storeId,
@@ -257,7 +312,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
     };
 
     const rawBody = await request.text();
-    const idempotencyKey = getIdempotencyKey(request);
+    const idempotencyKey = getIdempotencyKeyFromHeaders(request.headers);
     const requestHash = hashRequestBody(rawBody);
     let body: unknown;
 
@@ -341,7 +396,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
         metadata: {
           issues: parsed.error.issues.map((issue) => issue.path.join(".")).slice(0, 5),
         },
-        request,
+        requestContext,
       });
       return NextResponse.json({ message: firstError }, { status: 400 });
     }
@@ -361,7 +416,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
       audit: {
         actorName: session.displayName,
         actorRole: session.activeRoleName,
-        request,
+        requestContext,
       },
       idempotency: idempotencyRecordId
         ? {
@@ -395,7 +450,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
           metadata: {
             message: error.message,
           },
-          request,
+          requestContext,
         });
       }
       return NextResponse.json(
@@ -425,7 +480,7 @@ export async function PUT(request: Request, { params }: RouteParams) {
         metadata: {
           message: error instanceof Error ? error.message : "unknown",
         },
-        request,
+        requestContext,
       });
     }
     return toRBACErrorResponse(error);

@@ -7,7 +7,6 @@ import { z } from "zod";
 import { hashPassword } from "@/lib/auth/password";
 import { buildSessionForUser } from "@/lib/auth/session-db";
 import { createSessionCookie, SessionStoreUnavailableError } from "@/lib/auth/session";
-import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
 
 const signupSchema = z.object({
@@ -16,7 +15,10 @@ const signupSchema = z.object({
   password: z.string().min(8).max(128),
 });
 
+const getTursoDb = async () => (await import("@/lib/db/client")).db;
+
 export async function POST(request: Request) {
+  const db = await getTursoDb();
   const payload = signupSchema.safeParse(await request.json());
   if (!payload.success) {
     return NextResponse.json({ message: "ข้อมูลสมัครสมาชิกไม่ถูกต้อง" }, { status: 400 });

@@ -2,8 +2,13 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq, inArray } from "drizzle-orm";
 
-import { db } from "@/lib/db/client";
 import { storeBranches, storeMemberBranches } from "@/lib/db/schema";
+import {
+  ensureMainBranchExistsInPostgres,
+  getMemberBranchAccessFromPostgres,
+  listStoreBranchesFromPostgres,
+  logAuthRbacReadFallback,
+} from "@/lib/platform/postgres-auth-rbac";
 
 export type MemberBranchAccessMode = "ALL" | "SELECTED";
 
@@ -21,7 +26,19 @@ export type StoreBranchAccessItem = {
   createdAt: string;
 };
 
+const getTursoDb = async () => (await import("@/lib/db/client")).db;
+
 export async function ensureMainBranchExists(storeId: string) {
+  try {
+    const postgresMainBranch = await ensureMainBranchExistsInPostgres(storeId);
+    if (postgresMainBranch !== undefined) {
+      return postgresMainBranch;
+    }
+  } catch (error) {
+    logAuthRbacReadFallback("branches.ensure-main", error);
+  }
+
+  const db = await getTursoDb();
   const [mainBranch] = await db
     .select({
       id: storeBranches.id,
@@ -74,6 +91,16 @@ export async function ensureMainBranchExists(storeId: string) {
 }
 
 export async function listStoreBranches(storeId: string): Promise<StoreBranchAccessItem[]> {
+  try {
+    const postgresBranches = await listStoreBranchesFromPostgres(storeId);
+    if (postgresBranches !== undefined) {
+      return postgresBranches;
+    }
+  } catch (error) {
+    logAuthRbacReadFallback("branches.list", error);
+  }
+
+  const db = await getTursoDb();
   return db
     .select({
       id: storeBranches.id,
@@ -92,6 +119,16 @@ export async function getMemberBranchAccess(
   userId: string,
   storeId: string,
 ): Promise<BranchAccessSummary> {
+  try {
+    const postgresAccess = await getMemberBranchAccessFromPostgres(userId, storeId);
+    if (postgresAccess !== undefined) {
+      return postgresAccess;
+    }
+  } catch (error) {
+    logAuthRbacReadFallback("branches.member-access", error);
+  }
+
+  const db = await getTursoDb();
   const rows = await db
     .select({ branchId: storeMemberBranches.branchId })
     .from(storeMemberBranches)
@@ -151,6 +188,7 @@ export async function canMemberAccessBranch(
   storeId: string,
   branchId: string,
 ) {
+  const db = await getTursoDb();
   const [targetBranch, accessibleBranches] = await Promise.all([
     db
       .select({ id: storeBranches.id })
@@ -173,6 +211,7 @@ export async function replaceMemberBranchAccess(params: {
   mode: MemberBranchAccessMode;
   branchIds: string[];
 }) {
+  const db = await getTursoDb();
   if (params.mode === "ALL") {
     await db
       .delete(storeMemberBranches)

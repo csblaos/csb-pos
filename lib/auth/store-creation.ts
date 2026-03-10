@@ -2,8 +2,11 @@ import "server-only";
 
 import { and, eq, sql } from "drizzle-orm";
 
-import { db } from "@/lib/db/client";
 import { roles, storeMembers, users } from "@/lib/db/schema";
+import {
+  getStoreCreationPolicyFromPostgres,
+  logSettingsSystemAdminReadFallback,
+} from "@/lib/platform/postgres-settings-admin";
 
 export type StoreCreationPolicy = {
   systemRole: "USER" | "SUPERADMIN" | "SYSTEM_ADMIN";
@@ -19,6 +22,16 @@ export type StoreCreationAccess = {
 };
 
 export async function getStoreCreationPolicy(userId: string): Promise<StoreCreationPolicy> {
+  try {
+    const postgresPolicy = await getStoreCreationPolicyFromPostgres(userId);
+    if (postgresPolicy) {
+      return postgresPolicy;
+    }
+  } catch (error) {
+    logSettingsSystemAdminReadFallback("system-admin.store-creation-policy", error);
+  }
+
+  const { db } = await import("@/lib/db/client");
   const [userRow, membershipRow] = await Promise.all([
     db
       .select({
@@ -95,6 +108,7 @@ export async function canUserCreateStore(userId: string): Promise<StoreCreationA
 }
 
 export async function countStoresByOwner(userId: string) {
+  const { db } = await import("@/lib/db/client");
   const [row] = await db
     .select({ count: sql<number>`count(*)` })
     .from(storeMembers)

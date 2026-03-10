@@ -2,7 +2,10 @@ import "server-only";
 
 import { and, eq, sql } from "drizzle-orm";
 
-import { db } from "@/server/db/client";
+import {
+  getOnboardingChannelStatusFromPostgres,
+  logProductsOnboardingReadFallback,
+} from "@/lib/platform/postgres-products-onboarding";
 import { createPerfScope, timeDb } from "@/server/perf/perf";
 import { fbConnections, waConnections } from "@/lib/db/schema";
 
@@ -17,7 +20,10 @@ type ChannelStatusReadMode = "parallel" | "combined";
 const getReadMode = (): ChannelStatusReadMode =>
   process.env.CHANNEL_STATUS_QUERY_MODE === "parallel" ? "parallel" : "combined";
 
+const getTursoDb = async () => (await import("@/server/db/client")).db;
+
 async function readStoreChannelStatusParallel(storeId: string): Promise<ChannelState> {
+  const db = await getTursoDb();
   const [fb, wa] = await Promise.all([
     timeDb("onboarding.channels.repo.readFacebook", async () =>
       db
@@ -42,6 +48,7 @@ async function readStoreChannelStatusParallel(storeId: string): Promise<ChannelS
 }
 
 async function readStoreChannelStatusCombined(storeId: string): Promise<ChannelState> {
+  const db = await getTursoDb();
   const [row] = await timeDb("onboarding.channels.repo.readCombined", async () =>
     db
       .select({
@@ -59,6 +66,15 @@ async function readStoreChannelStatusCombined(storeId: string): Promise<ChannelS
 }
 
 export async function readStoreChannelStatus(storeId: string): Promise<ChannelState> {
+  try {
+    const postgresStatus = await getOnboardingChannelStatusFromPostgres(storeId);
+    if (postgresStatus) {
+      return postgresStatus;
+    }
+  } catch (error) {
+    logProductsOnboardingReadFallback("onboarding.channels.status", error);
+  }
+
   const mode = getReadMode();
   const perf = createPerfScope(`onboarding.channels.repo.readStatus.${mode}`);
 
@@ -74,6 +90,7 @@ export async function readStoreChannelStatus(storeId: string): Promise<ChannelSt
 }
 
 export async function upsertFacebookConnected(storeId: string, connectedAt: string) {
+  const db = await getTursoDb();
   const [existing] = await timeDb("onboarding.channels.repo.findFacebook", async () =>
     db
       .select({ id: fbConnections.id })
@@ -109,6 +126,7 @@ export async function upsertFacebookConnected(storeId: string, connectedAt: stri
 }
 
 export async function upsertWhatsappConnected(storeId: string, connectedAt: string) {
+  const db = await getTursoDb();
   const [existing] = await timeDb("onboarding.channels.repo.findWhatsapp", async () =>
     db
       .select({ id: waConnections.id })

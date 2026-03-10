@@ -8,8 +8,11 @@ import {
   getStoreCreationPolicy,
 } from "@/lib/auth/store-creation";
 import { getGlobalBranchPolicy } from "@/lib/branches/policy";
-import { db } from "@/lib/db/client";
 import { fbConnections, orders, storeBranches, storeMembers, waConnections } from "@/lib/db/schema";
+import {
+  getSuperadminHomeSnapshotInputsFromPostgres,
+  logSettingsSystemAdminReadFallback,
+} from "@/lib/platform/postgres-settings-admin";
 import {
   getGlobalPaymentPolicy,
   getGlobalSessionPolicy,
@@ -47,62 +50,84 @@ async function getSuperadminHomeSnapshotUncached(
   userId: string,
   storeIds: string[],
 ): Promise<SuperadminHomeSnapshot> {
+  let postgresInputs:
+    | Awaited<ReturnType<typeof getSuperadminHomeSnapshotInputsFromPostgres>>
+    | undefined;
+
+  try {
+    postgresInputs = await getSuperadminHomeSnapshotInputsFromPostgres(storeIds);
+  } catch (error) {
+    logSettingsSystemAdminReadFallback("settings.superadmin.home-snapshot", error);
+  }
+
+  const fallbackMetricsPromise = async () => {
+    const { db } = await import("@/lib/db/client");
+    const [branchRows, memberRows, fbErrorRows, waErrorRows, todayOrderRows, todaySalesRows] =
+      await Promise.all([
+        db
+          .select({ storeId: storeBranches.storeId, count: sql<number>`count(*)` })
+          .from(storeBranches)
+          .where(inArray(storeBranches.storeId, storeIds))
+          .groupBy(storeBranches.storeId),
+        db
+          .select({
+            storeId: storeMembers.storeId,
+            status: storeMembers.status,
+            count: sql<number>`count(*)`,
+          })
+          .from(storeMembers)
+          .where(inArray(storeMembers.storeId, storeIds))
+          .groupBy(storeMembers.storeId, storeMembers.status),
+        db
+          .select({ storeId: fbConnections.storeId })
+          .from(fbConnections)
+          .where(and(inArray(fbConnections.storeId, storeIds), eq(fbConnections.status, "ERROR"))),
+        db
+          .select({ storeId: waConnections.storeId })
+          .from(waConnections)
+          .where(and(inArray(waConnections.storeId, storeIds), eq(waConnections.status, "ERROR"))),
+        db
+          .select({ value: sql<number>`count(*)` })
+          .from(orders)
+          .where(
+            and(
+              inArray(orders.storeId, storeIds),
+              sql`${orders.createdAt} >= datetime('now', 'localtime', 'start of day', 'utc')`,
+              sql`${orders.createdAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')`,
+            ),
+          ),
+        db
+          .select({ value: sql<number>`coalesce(sum(${orders.total}), 0)` })
+          .from(orders)
+          .where(
+            and(
+              inArray(orders.storeId, storeIds),
+              inArray(orders.status, paidStatuses),
+              sql`${orders.paidAt} >= datetime('now', 'localtime', 'start of day', 'utc')`,
+              sql`${orders.paidAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')`,
+            ),
+          ),
+      ]);
+
+    return {
+      branchRows,
+      memberRows,
+      fbErrorStoreIds: [...new Set(fbErrorRows.map((row) => row.storeId))],
+      waErrorStoreIds: [...new Set(waErrorRows.map((row) => row.storeId))],
+      totalTodayOrders: toNumber(todayOrderRows[0]?.value),
+      totalTodaySales: toNumber(todaySalesRows[0]?.value),
+    };
+  };
+
   const [
-    branchRows,
-    memberRows,
-    fbErrorRows,
-    waErrorRows,
-    todayOrderRows,
-    todaySalesRows,
+    metrics,
     storePolicy,
     globalBranchPolicy,
     globalSessionPolicy,
     globalPaymentPolicy,
     globalStoreLogoPolicy,
   ] = await Promise.all([
-    db
-      .select({ storeId: storeBranches.storeId, count: sql<number>`count(*)` })
-      .from(storeBranches)
-      .where(inArray(storeBranches.storeId, storeIds))
-      .groupBy(storeBranches.storeId),
-    db
-      .select({
-        storeId: storeMembers.storeId,
-        status: storeMembers.status,
-        count: sql<number>`count(*)`,
-      })
-      .from(storeMembers)
-      .where(inArray(storeMembers.storeId, storeIds))
-      .groupBy(storeMembers.storeId, storeMembers.status),
-    db
-      .select({ storeId: fbConnections.storeId })
-      .from(fbConnections)
-      .where(and(inArray(fbConnections.storeId, storeIds), eq(fbConnections.status, "ERROR"))),
-    db
-      .select({ storeId: waConnections.storeId })
-      .from(waConnections)
-      .where(and(inArray(waConnections.storeId, storeIds), eq(waConnections.status, "ERROR"))),
-    db
-      .select({ value: sql<number>`count(*)` })
-      .from(orders)
-      .where(
-        and(
-          inArray(orders.storeId, storeIds),
-          sql`${orders.createdAt} >= datetime('now', 'localtime', 'start of day', 'utc')`,
-          sql`${orders.createdAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')`,
-        ),
-      ),
-    db
-      .select({ value: sql<number>`coalesce(sum(${orders.total}), 0)` })
-      .from(orders)
-      .where(
-        and(
-          inArray(orders.storeId, storeIds),
-          inArray(orders.status, paidStatuses),
-          sql`${orders.paidAt} >= datetime('now', 'localtime', 'start of day', 'utc')`,
-          sql`${orders.paidAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')`,
-        ),
-      ),
+    postgresInputs ? Promise.resolve(postgresInputs) : fallbackMetricsPromise(),
     getStoreCreationPolicy(userId),
     getGlobalBranchPolicy(),
     getGlobalSessionPolicy(),
@@ -110,6 +135,8 @@ async function getSuperadminHomeSnapshotUncached(
     getGlobalStoreLogoPolicy(),
   ]);
 
+  const branchRows = metrics.branchRows;
+  const memberRows = metrics.memberRows;
   const branchCountByStore = new Map(branchRows.map((row) => [row.storeId, toNumber(row.count)]));
   const memberStatusByStore = new Map<
     string,
@@ -134,10 +161,9 @@ async function getSuperadminHomeSnapshotUncached(
 
     memberStatusByStore.set(row.storeId, summary);
   }
-
   const channelErrorStoreIds = new Set([
-    ...fbErrorRows.map((row) => row.storeId),
-    ...waErrorRows.map((row) => row.storeId),
+    ...metrics.fbErrorStoreIds,
+    ...metrics.waErrorStoreIds,
   ]);
 
   const storesNeedAttention = storeIds.filter((storeId) => {
@@ -172,8 +198,8 @@ async function getSuperadminHomeSnapshotUncached(
     totalInvitedMembers,
     totalSuspendedMembers,
     channelErrorStoreCount: channelErrorStoreIds.size,
-    totalTodayOrders: toNumber(todayOrderRows[0]?.value),
-    totalTodaySales: toNumber(todaySalesRows[0]?.value),
+    totalTodayOrders: metrics.totalTodayOrders,
+    totalTodaySales: metrics.totalTodaySales,
     storeCreationAllowed: storeAccess.allowed,
     storeCreationBlockedReason: storeAccess.reason ?? null,
     globalSessionDefault: globalSessionPolicy.defaultSessionLimit,

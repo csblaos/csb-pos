@@ -1,14 +1,10 @@
 import Link from "next/link";
-import { and, eq, inArray, sql } from "drizzle-orm";
 import { BarChart3, ChevronRight, PlugZap, Store } from "lucide-react";
 import { redirect } from "next/navigation";
 
 import { getSession } from "@/lib/auth/session";
 import { listActiveMemberships } from "@/lib/auth/session-db";
-import { db } from "@/lib/db/client";
-import { fbConnections, orders, storeBranches, storeMembers, waConnections } from "@/lib/db/schema";
-
-const paidStatuses: Array<"PAID" | "PACKED" | "SHIPPED"> = ["PAID", "PACKED", "SHIPPED"];
+import { getSuperadminOverviewMetrics } from "@/lib/superadmin/overview";
 
 const toNumber = (value: unknown) => Number(value ?? 0);
 
@@ -25,55 +21,8 @@ export default async function SettingsSuperadminOverviewPage() {
 
   const storeIds = memberships.map((membership) => membership.storeId);
 
-  const [branchRows, memberRows, todaySalesRows, todayOrdersRows, fbRows, waRows] = await Promise.all([
-    db
-      .select({ storeId: storeBranches.storeId, count: sql<number>`count(*)` })
-      .from(storeBranches)
-      .where(inArray(storeBranches.storeId, storeIds))
-      .groupBy(storeBranches.storeId),
-    db
-      .select({
-        storeId: storeMembers.storeId,
-        status: storeMembers.status,
-        count: sql<number>`count(*)`,
-      })
-      .from(storeMembers)
-      .where(inArray(storeMembers.storeId, storeIds))
-      .groupBy(storeMembers.storeId, storeMembers.status),
-    db
-      .select({ value: sql<number>`coalesce(sum(${orders.total}), 0)` })
-      .from(orders)
-      .where(
-        and(
-          inArray(orders.storeId, storeIds),
-          inArray(orders.status, paidStatuses),
-          sql`${orders.paidAt} >= datetime('now', 'localtime', 'start of day', 'utc')`,
-          sql`${orders.paidAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')`,
-        ),
-      ),
-    db
-      .select({ value: sql<number>`count(*)` })
-      .from(orders)
-      .where(
-        and(
-          inArray(orders.storeId, storeIds),
-          sql`${orders.createdAt} >= datetime('now', 'localtime', 'start of day', 'utc')`,
-          sql`${orders.createdAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')`,
-        ),
-      ),
-    db
-      .select({ storeId: fbConnections.storeId })
-      .from(fbConnections)
-      .where(
-        and(inArray(fbConnections.storeId, storeIds), eq(fbConnections.status, "CONNECTED")),
-      ),
-    db
-      .select({ storeId: waConnections.storeId })
-      .from(waConnections)
-      .where(
-        and(inArray(waConnections.storeId, storeIds), eq(waConnections.status, "CONNECTED")),
-      ),
-  ]);
+  const { branchRows, memberRows, todaySales, todayOrders, connectedFbStoreIds, connectedWaStoreIds } =
+    await getSuperadminOverviewMetrics(storeIds);
 
   const branchCountByStore = new Map(branchRows.map((row) => [row.storeId, toNumber(row.count)]));
   const activeMembersByStore = new Map<string, number>();
@@ -94,10 +43,8 @@ export default async function SettingsSuperadminOverviewPage() {
     (sum, membership) => sum + (activeMembersByStore.get(membership.storeId) ?? 0),
     0,
   );
-  const todaySales = toNumber(todaySalesRows[0]?.value);
-  const todayOrders = toNumber(todayOrdersRows[0]?.value);
-  const connectedFbStoreCount = new Set(fbRows.map((row) => row.storeId)).size;
-  const connectedWaStoreCount = new Set(waRows.map((row) => row.storeId)).size;
+  const connectedFbStoreCount = new Set(connectedFbStoreIds).size;
+  const connectedWaStoreCount = new Set(connectedWaStoreIds).size;
 
   const topStoresByMembers = [...memberships]
     .map((membership) => ({

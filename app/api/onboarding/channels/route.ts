@@ -2,8 +2,10 @@ import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { db } from "@/lib/db/client";
-import { stores } from "@/lib/db/schema";
+import {
+  getOnboardingStoreTypeFromPostgres,
+  logProductsOnboardingReadFallback,
+} from "@/lib/platform/postgres-products-onboarding";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import {
   connectOnboardingChannel,
@@ -18,6 +20,17 @@ const ONLINE_STORE_TYPE = "ONLINE_RETAIL" as const;
 const nonOnlineStoreMessage = "เชื่อมช่องทางได้เฉพาะร้านประเภท Online POS";
 
 async function getStoreType(storeId: string) {
+  try {
+    const postgresStoreType = await getOnboardingStoreTypeFromPostgres(storeId);
+    if (postgresStoreType !== undefined) {
+      return postgresStoreType;
+    }
+  } catch (error) {
+    logProductsOnboardingReadFallback("onboarding.channels.store-type", error);
+  }
+
+  const { db } = await import("@/lib/db/client");
+  const { stores } = await import("@/lib/db/schema");
   const [store] = await db
     .select({
       storeType: stores.storeType,

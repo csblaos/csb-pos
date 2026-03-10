@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { verifyPassword } from "@/lib/auth/password";
 import { db } from "@/lib/db/client";
+import { buildRequestContext } from "@/lib/http/request-context";
 import {
   auditEvents,
   inventoryMovements,
@@ -29,18 +30,32 @@ import {
   getOrderItemsForOrder,
 } from "@/lib/orders/queries";
 import {
+  cancelOrderInPostgres,
+  confirmOrderPaidInPostgres,
+  isPostgresCancelEnabled,
+  isPostgresConfirmPaidEnabled,
+  isPostgresMarkCodReturnedEnabled,
+  isPostgresMarkPackedEnabled,
+  isPostgresMarkPickedUpUnpaidEnabled,
+  isPostgresMarkShippedEnabled,
+  isPostgresSubmitForPaymentEnabled,
   isPostgresSubmitPaymentSlipEnabled,
   isPostgresUpdateShippingEnabled,
+  markOrderPackedInPostgres,
+  markOrderCodReturnedInPostgres,
+  markOrderPickedUpUnpaidInPostgres,
+  markOrderShippedInPostgres,
+  submitOrderForPaymentInPostgres,
   submitOrderPaymentSlipInPostgres,
   updateOrderShippingInPostgres,
 } from "@/lib/orders/postgres-write";
 import { updateOrderSchema } from "@/lib/orders/validation";
-import { getInventoryBalancesByStore } from "@/lib/inventory/queries";
+import { getInventoryBalancesByStore, getOrderStockStateForOrder } from "@/lib/inventory/queries";
 import { buildAuditEventValues, safeLogAuditEvent } from "@/server/services/audit.service";
 import { invalidateDashboardSummaryCache } from "@/server/services/dashboard.service";
 import {
   claimIdempotency,
-  getIdempotencyKey,
+  getIdempotencyKeyFromHeaders,
   hashRequestBody,
   markIdempotencySucceeded,
   safeMarkIdempotencyFailed,
@@ -239,6 +254,7 @@ export async function PATCH(
 ) {
   const fallbackIdempotencyAction = "order.update";
 
+  let requestContext = buildRequestContext(null);
   let auditContext: {
     storeId: string;
     userId: string;
@@ -253,7 +269,8 @@ export async function PATCH(
     const { session, storeId } = await enforcePermission("orders.view");
     const { orderId } = await context.params;
     const rawBody = await request.text();
-    const idempotencyKey = getIdempotencyKey(request);
+    requestContext = buildRequestContext(request);
+    const idempotencyKey = getIdempotencyKeyFromHeaders(request.headers);
     const requestHash = hashRequestBody(rawBody);
 
     const logActionFail = async (
@@ -273,7 +290,7 @@ export async function PATCH(
         result: "FAIL",
         reasonCode,
         metadata,
-        request,
+        requestContext,
       });
 
     let body: unknown;
@@ -446,7 +463,7 @@ export async function PATCH(
             shippingLabelStatus: nextShippingLabelStatus,
             shippingProvider: nextShippingProvider,
             shippingCost: shippingPayload.shippingCost,
-            request,
+            requestContext,
           });
 
           if (idempotencyRecordId) {
@@ -508,7 +525,7 @@ export async function PATCH(
               shippingProvider: nextShippingProvider,
               shippingCost: shippingPayload.shippingCost,
             },
-            request,
+            requestContext,
           }),
         );
 
@@ -526,40 +543,7 @@ export async function PATCH(
     }
 
     const orderItems = await getOrderItemsForOrder(order.id);
-    const getOrderStockState = async () => {
-      const movementRows = await db
-        .select({ type: inventoryMovements.type })
-        .from(inventoryMovements)
-        .where(
-          and(
-            eq(inventoryMovements.storeId, storeId),
-            eq(inventoryMovements.refType, "ORDER"),
-            eq(inventoryMovements.refId, order.id),
-          ),
-        );
-
-      let reserveCount = 0;
-      let releaseCount = 0;
-      let outCount = 0;
-      for (const row of movementRows) {
-        if (row.type === "RESERVE") {
-          reserveCount += 1;
-          continue;
-        }
-        if (row.type === "RELEASE") {
-          releaseCount += 1;
-          continue;
-        }
-        if (row.type === "OUT") {
-          outCount += 1;
-        }
-      }
-
-      return {
-        hasStockOutFromOrder: outCount > 0,
-        hasActiveReserve: reserveCount > releaseCount,
-      };
-    };
+    const getOrderStockState = () => getOrderStockStateForOrder(storeId, order.id);
 
     if (action === "submit_for_payment") {
       if (order.status !== "DRAFT") {
@@ -608,6 +592,50 @@ export async function PATCH(
         );
       }
 
+      if (isPostgresSubmitForPaymentEnabled()) {
+        try {
+          await submitOrderForPaymentInPostgres({
+            storeId,
+            orderId: order.id,
+            actorUserId: session.userId,
+            actorName: session.displayName,
+            actorRole: session.activeRoleName,
+            orderNo: order.orderNo,
+            paymentMethod: order.paymentMethod,
+            items: orderItems.map((item) => ({
+              productId: item.productId,
+              qtyBase: item.qtyBase,
+            })),
+            requestContext,
+          });
+
+          if (idempotencyRecordId) {
+            try {
+              await markIdempotencySucceeded({
+                recordId: idempotencyRecordId,
+                statusCode: 200,
+                body: { ok: true },
+              });
+            } catch (error) {
+              console.error(
+                `[orders.write.pg] idempotency mark failed action=submit_for_payment orderId=${order.id}: ${
+                  error instanceof Error ? error.message : "unknown"
+                }`,
+              );
+            }
+          }
+
+          await invalidateOrderCaches(storeId);
+          return NextResponse.json({ ok: true });
+        } catch (error) {
+          console.warn(
+            `[orders.write.pg] fallback to turso for submit_for_payment orderId=${order.id}: ${
+              error instanceof Error ? error.message : "unknown"
+            }`,
+          );
+        }
+      }
+
       await db.transaction(async (tx) => {
         if (orderItems.length > 0) {
           await tx.insert(inventoryMovements).values(
@@ -649,7 +677,7 @@ export async function PATCH(
               toStatus: "PENDING_PAYMENT",
               itemCount: orderItems.length,
             },
-            request,
+            requestContext,
           }),
         );
 
@@ -705,7 +733,7 @@ export async function PATCH(
             orderNo: order.orderNo,
             paymentSlipUrl,
             paymentProofSubmittedAt,
-            request,
+            requestContext,
           });
 
           if (idempotencyRecordId) {
@@ -759,7 +787,7 @@ export async function PATCH(
               orderNo: order.orderNo,
               status: order.status,
             },
-            request,
+            requestContext,
           }),
         );
 
@@ -875,6 +903,74 @@ export async function PATCH(
       const shouldOnlyUpdatePaymentAfterReceived =
         isPostPickupPendingPaymentConfirm ||
         (isStandardPendingPaymentConfirm && Boolean(orderStockState?.hasStockOutFromOrder));
+
+      if (isPostgresConfirmPaidEnabled()) {
+        try {
+          const codAmountToSave =
+            isCodSettlementAfterShipped
+              ? typeof confirmPaidPayload.codAmount === "number"
+                ? confirmPaidPayload.codAmount
+                : order.codAmount > 0
+                  ? order.codAmount
+                  : order.total
+              : null;
+
+          await confirmOrderPaidInPostgres({
+            storeId,
+            orderId: order.id,
+            actorUserId: session.userId,
+            actorName: session.displayName,
+            actorRole: session.activeRoleName,
+            orderNo: order.orderNo,
+            currentStatus: order.status,
+            currentPaymentStatus: order.paymentStatus,
+            currentPaymentMethod: order.paymentMethod,
+            currentPaymentAccountId: order.paymentAccountId,
+            effectivePaymentMethod,
+            effectivePaymentAccountId,
+            paymentSlipUrl: isInStoreCreditSettlement ? null : order.paymentSlipUrl,
+            paymentProofSubmittedAt: isInStoreCreditSettlement
+              ? null
+              : order.paymentProofSubmittedAt,
+            existingPaidAt: order.paidAt,
+            codAmountToSave,
+            isCodSettlementAfterShipped,
+            isPickupPaymentConfirm,
+            isPickupCompleteAfterPrepaid,
+            shouldOnlyUpdatePaymentAfterReceived,
+            items: orderItems.map((item) => ({
+              productId: item.productId,
+              qtyBase: item.qtyBase,
+            })),
+            requestContext,
+          });
+
+          if (idempotencyRecordId) {
+            try {
+              await markIdempotencySucceeded({
+                recordId: idempotencyRecordId,
+                statusCode: 200,
+                body: { ok: true },
+              });
+            } catch (error) {
+              console.error(
+                `[orders.write.pg] idempotency mark failed action=confirm_paid orderId=${order.id}: ${
+                  error instanceof Error ? error.message : "unknown"
+                }`,
+              );
+            }
+          }
+
+          await invalidateOrderCaches(storeId);
+          return NextResponse.json({ ok: true });
+        } catch (error) {
+          console.warn(
+            `[orders.write.pg] fallback to turso for confirm_paid orderId=${order.id}: ${
+              error instanceof Error ? error.message : "unknown"
+            }`,
+          );
+        }
+      }
 
       await db.transaction(async (tx) => {
         if (isCodSettlementAfterShipped) {
@@ -1000,7 +1096,7 @@ export async function PATCH(
                   ? confirmPaidPayload.codAmount
                   : undefined,
             },
-            request,
+            requestContext,
           }),
         );
 
@@ -1037,6 +1133,51 @@ export async function PATCH(
           paymentStatus: order.paymentStatus,
           orderNo: order.orderNo,
         });
+      }
+
+      if (isPostgresMarkPickedUpUnpaidEnabled()) {
+        try {
+          await markOrderPickedUpUnpaidInPostgres({
+            storeId,
+            orderId: order.id,
+            actorUserId: session.userId,
+            actorName: session.displayName,
+            actorRole: session.activeRoleName,
+            orderNo: order.orderNo,
+            currentStatus: order.status,
+            currentPaymentStatus: order.paymentStatus,
+            items: orderItems.map((item) => ({
+              productId: item.productId,
+              qtyBase: item.qtyBase,
+            })),
+            requestContext,
+          });
+
+          if (idempotencyRecordId) {
+            try {
+              await markIdempotencySucceeded({
+                recordId: idempotencyRecordId,
+                statusCode: 200,
+                body: { ok: true },
+              });
+            } catch (error) {
+              console.error(
+                `[orders.write.pg] idempotency mark failed action=mark_picked_up_unpaid orderId=${order.id}: ${
+                  error instanceof Error ? error.message : "unknown"
+                }`,
+              );
+            }
+          }
+
+          await invalidateOrderCaches(storeId);
+          return NextResponse.json({ ok: true });
+        } catch (error) {
+          console.warn(
+            `[orders.write.pg] fallback to turso for mark_picked_up_unpaid orderId=${order.id}: ${
+              error instanceof Error ? error.message : "unknown"
+            }`,
+          );
+        }
       }
 
       await db.transaction(async (tx) => {
@@ -1091,7 +1232,7 @@ export async function PATCH(
               paymentStatus: order.paymentStatus,
               stockOutItems: orderItems.length,
             },
-            request,
+            requestContext,
           }),
         );
 
@@ -1120,6 +1261,51 @@ export async function PATCH(
           status: order.status,
           orderNo: order.orderNo,
         });
+      }
+
+      if (isPostgresMarkPackedEnabled()) {
+        try {
+          await markOrderPackedInPostgres({
+            storeId,
+            orderId: order.id,
+            actorUserId: session.userId,
+            actorName: session.displayName,
+            actorRole: session.activeRoleName,
+            orderNo: order.orderNo,
+            currentStatus: order.status,
+            canPackCodFromPending,
+            items: orderItems.map((item) => ({
+              productId: item.productId,
+              qtyBase: item.qtyBase,
+            })),
+            requestContext,
+          });
+
+          if (idempotencyRecordId) {
+            try {
+              await markIdempotencySucceeded({
+                recordId: idempotencyRecordId,
+                statusCode: 200,
+                body: { ok: true },
+              });
+            } catch (error) {
+              console.error(
+                `[orders.write.pg] idempotency mark failed action=mark_packed orderId=${order.id}: ${
+                  error instanceof Error ? error.message : "unknown"
+                }`,
+              );
+            }
+          }
+
+          await invalidateOrderCaches(storeId);
+          return NextResponse.json({ ok: true });
+        } catch (error) {
+          console.warn(
+            `[orders.write.pg] fallback to turso for mark_packed orderId=${order.id}: ${
+              error instanceof Error ? error.message : "unknown"
+            }`,
+          );
+        }
       }
 
       await db.transaction(async (tx) => {
@@ -1171,7 +1357,7 @@ export async function PATCH(
               toStatus: "PACKED",
               stockOutItems: canPackCodFromPending ? orderItems.length : 0,
             },
-            request,
+            requestContext,
           }),
         );
 
@@ -1194,6 +1380,45 @@ export async function PATCH(
           status: order.status,
           orderNo: order.orderNo,
         });
+      }
+
+      if (isPostgresMarkShippedEnabled()) {
+        try {
+          await markOrderShippedInPostgres({
+            storeId,
+            orderId: order.id,
+            actorUserId: session.userId,
+            actorName: session.displayName,
+            actorRole: session.activeRoleName,
+            orderNo: order.orderNo,
+            requestContext,
+          });
+
+          if (idempotencyRecordId) {
+            try {
+              await markIdempotencySucceeded({
+                recordId: idempotencyRecordId,
+                statusCode: 200,
+                body: { ok: true },
+              });
+            } catch (error) {
+              console.error(
+                `[orders.write.pg] idempotency mark failed action=mark_shipped orderId=${order.id}: ${
+                  error instanceof Error ? error.message : "unknown"
+                }`,
+              );
+            }
+          }
+
+          await invalidateOrderCaches(storeId);
+          return NextResponse.json({ ok: true });
+        } catch (error) {
+          console.warn(
+            `[orders.write.pg] fallback to turso for mark_shipped orderId=${order.id}: ${
+              error instanceof Error ? error.message : "unknown"
+            }`,
+          );
+        }
       }
 
       await db.transaction(async (tx) => {
@@ -1220,7 +1445,7 @@ export async function PATCH(
               fromStatus: "PACKED",
               toStatus: "SHIPPED",
             },
-            request,
+            requestContext,
           }),
         );
 
@@ -1252,6 +1477,55 @@ export async function PATCH(
           paymentStatus: order.paymentStatus,
           orderNo: order.orderNo,
         });
+      }
+
+      if (isPostgresMarkCodReturnedEnabled()) {
+        try {
+          await markOrderCodReturnedInPostgres({
+            storeId,
+            orderId: order.id,
+            actorUserId: session.userId,
+            actorName: session.displayName,
+            actorRole: session.activeRoleName,
+            orderNo: order.orderNo,
+            currentPaymentStatus: order.paymentStatus,
+            currentShippingCost: order.shippingCost,
+            currentCodFee: order.codFee,
+            normalizedCodFee:
+              typeof codReturnPayload.codFee === "number" ? codReturnPayload.codFee : 0,
+            normalizedCodReturnNote: codReturnPayload.codReturnNote?.trim() || null,
+            items: orderItems.map((item) => ({
+              productId: item.productId,
+              qtyBase: item.qtyBase,
+            })),
+            requestContext,
+          });
+
+          if (idempotencyRecordId) {
+            try {
+              await markIdempotencySucceeded({
+                recordId: idempotencyRecordId,
+                statusCode: 200,
+                body: { ok: true },
+              });
+            } catch (error) {
+              console.error(
+                `[orders.write.pg] idempotency mark failed action=mark_cod_returned orderId=${order.id}: ${
+                  error instanceof Error ? error.message : "unknown"
+                }`,
+              );
+            }
+          }
+
+          await invalidateOrderCaches(storeId);
+          return NextResponse.json({ ok: true });
+        } catch (error) {
+          console.warn(
+            `[orders.write.pg] fallback to turso for mark_cod_returned orderId=${order.id}: ${
+              error instanceof Error ? error.message : "unknown"
+            }`,
+          );
+        }
       }
 
       await db.transaction(async (tx) => {
@@ -1312,7 +1586,7 @@ export async function PATCH(
               codReturnNote: normalizedCodReturnNote,
               shippingCostTotal: nextShippingCost,
             },
-            request,
+            requestContext,
           }),
         );
 
@@ -1409,6 +1683,60 @@ export async function PATCH(
         ? order.paymentStatus
         : "FAILED";
 
+    if (isPostgresCancelEnabled()) {
+      try {
+        await cancelOrderInPostgres({
+          storeId,
+          orderId: order.id,
+          actorUserId: session.userId,
+          actorName: session.displayName,
+          actorRole: session.activeRoleName,
+          orderNo: order.orderNo,
+          currentStatus: order.status,
+          currentPaymentStatus: order.paymentStatus,
+          nextPaymentStatus,
+          cancelReason,
+          approverUserId: approver.userId,
+          approverName: approver.name,
+          approverEmail: approver.email,
+          approverRole: approver.roleName,
+          approvalMode: approver.approvalMode,
+          shouldReleaseReservedOnCancel,
+          shouldReturnStockOnCancel,
+          items: orderItems.map((item) => ({
+            productId: item.productId,
+            qtyBase: item.qtyBase,
+          })),
+          requestContext,
+        });
+
+        if (idempotencyRecordId) {
+          try {
+            await markIdempotencySucceeded({
+              recordId: idempotencyRecordId,
+              statusCode: 200,
+              body: { ok: true },
+            });
+          } catch (error) {
+            console.error(
+              `[orders.write.pg] idempotency mark failed action=cancel orderId=${order.id}: ${
+                error instanceof Error ? error.message : "unknown"
+              }`,
+            );
+          }
+        }
+
+        await invalidateOrderCaches(storeId);
+        return NextResponse.json({ ok: true });
+      } catch (error) {
+        console.warn(
+          `[orders.write.pg] fallback to turso for cancel orderId=${order.id}: ${
+            error instanceof Error ? error.message : "unknown"
+          }`,
+        );
+      }
+    }
+
     await db.transaction(async (tx) => {
       if (shouldReleaseReservedOnCancel && orderItems.length > 0) {
         await tx.insert(inventoryMovements).values(
@@ -1469,7 +1797,7 @@ export async function PATCH(
             stockReleaseItems,
             stockReturnItems,
           },
-          request,
+          requestContext,
         }),
       );
 
@@ -1514,7 +1842,7 @@ export async function PATCH(
         metadata: {
           message: error instanceof Error ? error.message : "unknown",
         },
-        request,
+        requestContext,
       });
     }
 

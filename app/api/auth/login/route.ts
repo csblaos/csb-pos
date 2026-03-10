@@ -5,7 +5,6 @@ import { z } from "zod";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { buildSessionForUser, getUserMembershipFlags } from "@/lib/auth/session-db";
 import { createSessionCookie, SessionStoreUnavailableError } from "@/lib/auth/session";
-import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
 import { getUserPermissions } from "@/lib/rbac/access";
 import { getStorefrontEntryRoute } from "@/lib/storefront/routing";
@@ -30,7 +29,10 @@ const blockedLoginResponse = (status: BlockedAccountStatus, message: string) =>
     next: toAccountStatusRoute(status),
   });
 
+const getTursoDb = async () => (await import("@/lib/db/client")).db;
+
 export async function POST(request: Request) {
+  const db = await getTursoDb();
   const payload = loginSchema.safeParse(await request.json());
   if (!payload.success) {
     return NextResponse.json({ message: "ข้อมูลเข้าสู่ระบบไม่ถูกต้อง" }, { status: 400 });

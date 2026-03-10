@@ -6,6 +6,250 @@
 
 ## Changed (ล่าสุด)
 
+- เพิ่ม PostgreSQL foundation สำหรับ `product CRUD + variant persistence`
+  - เพิ่ม helper write ใหม่ที่ [lib/platform/postgres-products-write.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/platform/postgres-products-write.ts)
+  - เพิ่ม migration [postgres/migrations/0007_products_variant_write_foundation.sql](/Users/csl-dev/Desktop/alex/csb-pos/postgres/migrations/0007_products_variant_write_foundation.sql)
+  - เพิ่ม scripts:
+    - `npm run db:backfill:postgres:product-variants-foundation`
+    - `npm run db:compare:postgres:product-variants-foundation`
+    - `npm run smoke:postgres:products-write`
+  - เพิ่ม env flag `POSTGRES_PRODUCTS_WRITE_ENABLED=0` ใน [.env.example](/Users/csl-dev/Desktop/alex/csb-pos/.env.example) และ [.env.local](/Users/csl-dev/Desktop/alex/csb-pos/.env.local)
+  - ต่อ PostgreSQL write path แบบ fallback-safe แล้วใน:
+    - [app/api/products/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/products/route.ts)
+    - [app/api/products/[productId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/products/[productId]/route.ts)
+  - scope รอบนี้ครอบ:
+    - create product
+    - update product data + variant persistence
+    - set active
+    - update cost + audit
+    - product image url update/remove
+  - ขยาย PostgreSQL read prep เพิ่มใน:
+    - [app/api/products/models/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/products/models/route.ts)
+    - [app/api/products/search/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/products/search/route.ts)
+  - ถอด top-level Turso import ออกจาก:
+    - [app/api/products/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/products/route.ts)
+    - [app/api/products/[productId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/products/[productId]/route.ts)
+    - [lib/products/variant-persistence.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/products/variant-persistence.ts)
+  - re-audit import graph แล้ว top-level imports ของ `@/lib/db/client` ใน `app/lib/server` ลดจาก `65` เหลือ `62` ไฟล์
+
+- เพิ่ม rollout gate + execution checklist สำหรับ `products/units/onboarding` low-risk write slice
+  - เพิ่ม script [scripts/smoke-postgres-products-units-onboarding-write-gate.mjs](/Users/csl-dev/Desktop/alex/csb-pos/scripts/smoke-postgres-products-units-onboarding-write-gate.mjs) และคำสั่ง `npm run smoke:postgres:products-units-onboarding-write-gate`
+  - เพิ่ม runbook ปฏิบัติจริงที่ [docs/postgres-products-units-onboarding-write-rollout-execution.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-products-units-onboarding-write-rollout-execution.md)
+  - ขยาย [docs/postgres-staging-rollout.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-staging-rollout.md) ให้มี section `Products/Units/Onboarding Write Rollout`
+  - เพิ่มไฟล์นี้เข้า [docs/CONTEXT_INDEX.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/CONTEXT_INDEX.md) และ [AI_CONTEXT.md](/Users/csl-dev/Desktop/alex/csb-pos/AI_CONTEXT.md) แล้ว
+
+- เพิ่ม PostgreSQL low-risk write foundation สำหรับ `products/units/onboarding`
+  - เพิ่ม helper write ใหม่ที่ [lib/platform/postgres-products-onboarding-write.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/platform/postgres-products-onboarding-write.ts)
+  - เพิ่ม env flag `POSTGRES_PRODUCTS_ONBOARDING_WRITE_ENABLED=0` ใน [.env.example](/Users/csl-dev/Desktop/alex/csb-pos/.env.example) และ [.env.local](/Users/csl-dev/Desktop/alex/csb-pos/.env.local)
+  - เพิ่ม smoke script [scripts/smoke-postgres-products-units-onboarding-write.mjs](/Users/csl-dev/Desktop/alex/csb-pos/scripts/smoke-postgres-products-units-onboarding-write.mjs) และคำสั่ง `npm run smoke:postgres:products-units-onboarding-write`
+  - รันกับ Aiven จริงแล้วผ่านแบบ rollback
+  - ต่อ PostgreSQL write path แบบ fallback-safe แล้วใน:
+    - [app/api/units/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/units/route.ts)
+    - [app/api/units/[unitId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/units/[unitId]/route.ts)
+    - [app/api/products/categories/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/products/categories/route.ts)
+    - [server/services/onboarding-channels.service.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/services/onboarding-channels.service.ts)
+  - scope รอบนี้ครอบ:
+    - units create/update/delete
+    - product categories create/update/delete
+    - onboarding channel connect
+  - ยังไม่ครอบ product CRUD หลัก, variant persistence, และ onboarding store create
+  - re-audit import graph แล้ว top-level imports ของ `@/lib/db/client` ใน `app/lib/server` ลดจาก `66` เหลือ `65` ไฟล์
+
+- เพิ่ม rollout gate + execution checklist สำหรับ `products/units/onboarding` read slice
+  - เพิ่ม script [scripts/smoke-postgres-products-units-onboarding-read-gate.mjs](/Users/csl-dev/Desktop/alex/csb-pos/scripts/smoke-postgres-products-units-onboarding-read-gate.mjs) และคำสั่ง `npm run smoke:postgres:products-units-onboarding-read-gate`
+  - เพิ่ม runbook ปฏิบัติจริงที่ [docs/postgres-products-units-onboarding-read-rollout-execution.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-products-units-onboarding-read-rollout-execution.md)
+  - ขยาย [docs/postgres-staging-rollout.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-staging-rollout.md) ให้มี section `Products/Units/Onboarding Read Rollout`
+  - เพิ่มไฟล์นี้เข้า [docs/CONTEXT_INDEX.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/CONTEXT_INDEX.md) และ [AI_CONTEXT.md](/Users/csl-dev/Desktop/alex/csb-pos/AI_CONTEXT.md) แล้ว
+
+- เพิ่ม PostgreSQL foundation สำหรับ `products/units/onboarding` read slice
+  - เพิ่ม helper query-first ใหม่ที่ [lib/platform/postgres-products-onboarding.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/platform/postgres-products-onboarding.ts)
+  - เพิ่ม migration [postgres/migrations/0006_products_units_onboarding_foundation.sql](/Users/csl-dev/Desktop/alex/csb-pos/postgres/migrations/0006_products_units_onboarding_foundation.sql) ครอบ `product_categories`, `product_models`, และ `product_units`
+  - เพิ่ม scripts:
+    - `npm run db:backfill:postgres:products-units-onboarding-read`
+    - `npm run db:compare:postgres:products-units-onboarding-read`
+  - รันกับ Aiven จริงแล้ว:
+    - `npm run db:migrate:postgres` apply `0006_products_units_onboarding_foundation.sql`
+    - `npm run db:backfill:postgres:products-units-onboarding-read` ผ่าน (`product_categories=3`, `product_models=4`, `product_units=12`)
+    - `npm run db:compare:postgres:products-units-onboarding-read` ผ่าน (`stores=6`, `product_categories=3`, `product_models=4`, `product_units=12`)
+  - เพิ่ม env flag `POSTGRES_PRODUCTS_ONBOARDING_READ_ENABLED=0` ใน [.env.example](/Users/csl-dev/Desktop/alex/csb-pos/.env.example) และ [.env.local](/Users/csl-dev/Desktop/alex/csb-pos/.env.local)
+  - refactor read path ให้หยุด import Turso ตรงแล้วใน:
+    - [app/(app)/products/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/products/page.tsx)
+    - [lib/products/service.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/products/service.ts)
+    - [app/api/products/categories/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/products/categories/route.ts)
+    - [app/api/units/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/units/route.ts)
+    - [app/api/onboarding/channels/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/onboarding/channels/route.ts)
+    - [server/repositories/onboarding-channels.repo.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/repositories/onboarding-channels.repo.ts)
+  - re-audit import graph แล้ว top-level imports ของ `@/lib/db/client` ใน `app/lib/server` ลดจาก `71` เหลือ `66` ไฟล์
+
+- เพิ่ม rollout gate + execution checklist สำหรับ `settings/system-admin` read slice
+  - เพิ่ม script [scripts/smoke-postgres-settings-system-admin-read-gate.mjs](/Users/csl-dev/Desktop/alex/csb-pos/scripts/smoke-postgres-settings-system-admin-read-gate.mjs) และคำสั่ง `npm run smoke:postgres:settings-system-admin-read-gate`
+  - เพิ่ม runbook ปฏิบัติจริงที่ [docs/postgres-settings-system-admin-read-rollout-execution.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-settings-system-admin-read-rollout-execution.md)
+  - ขยาย [docs/postgres-staging-rollout.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-staging-rollout.md) ให้มี section `Settings/System-Admin Read Rollout`
+  - เพิ่มไฟล์นี้เข้า [docs/CONTEXT_INDEX.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/CONTEXT_INDEX.md) และ [AI_CONTEXT.md](/Users/csl-dev/Desktop/alex/csb-pos/AI_CONTEXT.md) แล้ว
+
+- เพิ่ม PostgreSQL foundation สำหรับ `settings/system-admin` read slice
+  - เพิ่ม helper query-first ใหม่ที่ [lib/platform/postgres-settings-admin.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/platform/postgres-settings-admin.ts)
+  - เพิ่ม migration [postgres/migrations/0005_settings_system_admin_foundation.sql](/Users/csl-dev/Desktop/alex/csb-pos/postgres/migrations/0005_settings_system_admin_foundation.sql) ครอบ `fb_connections` และ `wa_connections`
+  - เพิ่ม scripts:
+    - `npm run db:backfill:postgres:settings-system-admin-read`
+    - `npm run db:compare:postgres:settings-system-admin-read`
+  - รันกับ Aiven จริงแล้ว:
+    - `npm run db:migrate:postgres` apply `0005_settings_system_admin_foundation.sql`
+    - `npm run db:backfill:postgres:settings-system-admin-read` ผ่าน (`fb_connections=5`, `wa_connections=5`)
+    - `npm run db:compare:postgres:settings-system-admin-read` ผ่าน (`superadmins=3`, `policyUsers=4`)
+  - เพิ่ม env flag `POSTGRES_SETTINGS_SYSTEM_ADMIN_READ_ENABLED=0` ใน [.env.example](/Users/csl-dev/Desktop/alex/csb-pos/.env.example) และ [.env.local](/Users/csl-dev/Desktop/alex/csb-pos/.env.local)
+  - refactor read path ให้หยุด import Turso ตรงในก้อนสำคัญแล้ว:
+    - [lib/system-admin/superadmins.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/system-admin/superadmins.ts)
+    - [lib/system-admin/dashboard.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/system-admin/dashboard.ts)
+    - [lib/auth/store-creation.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/auth/store-creation.ts)
+    - [lib/superadmin/home-dashboard.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/superadmin/home-dashboard.ts)
+    - [lib/superadmin/overview.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/superadmin/overview.ts)
+    - [lib/superadmin/global-config.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/superadmin/global-config.ts)
+    - [app/(app)/settings/superadmin/overview/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/settings/superadmin/overview/page.tsx)
+    - [app/(app)/settings/superadmin/global-config/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/settings/superadmin/global-config/page.tsx)
+  - re-audit import graph แล้ว top-level imports ของ `@/lib/db/client` ใน `app/lib/server` ลดจาก `77` เหลือ `71` ไฟล์
+
+- เพิ่ม rollout gate + execution checklist สำหรับ `auth/session + RBAC + app shell`
+  - เพิ่ม script [scripts/smoke-postgres-auth-rbac-read-gate.mjs](/Users/csl-dev/Desktop/alex/csb-pos/scripts/smoke-postgres-auth-rbac-read-gate.mjs) และคำสั่ง `npm run smoke:postgres:auth-rbac-read-gate`
+  - เพิ่ม runbook ปฏิบัติจริงที่ [docs/postgres-auth-rbac-read-rollout-execution.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-auth-rbac-read-rollout-execution.md)
+  - ขยาย [docs/postgres-staging-rollout.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-staging-rollout.md) ให้มี section `Auth/RBAC Read Rollout`
+  - เพิ่มไฟล์นี้เข้า [docs/CONTEXT_INDEX.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/CONTEXT_INDEX.md) และ [AI_CONTEXT.md](/Users/csl-dev/Desktop/alex/csb-pos/AI_CONTEXT.md) แล้ว
+
+- เพิ่ม PostgreSQL foundation สำหรับ `auth/session + RBAC + app shell`
+  - เพิ่ม helper query-first ใหม่ที่ [lib/platform/postgres-auth-rbac.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/platform/postgres-auth-rbac.ts)
+  - เพิ่ม migration [postgres/migrations/0004_auth_rbac_foundation.sql](/Users/csl-dev/Desktop/alex/csb-pos/postgres/migrations/0004_auth_rbac_foundation.sql)
+  - เพิ่ม scripts:
+    - `npm run db:backfill:postgres:auth-rbac-read`
+    - `npm run db:compare:postgres:auth-rbac-read`
+  - รันกับ Aiven จริงแล้ว:
+    - `npm run db:migrate:postgres` apply `0004_auth_rbac_foundation.sql`
+    - `npm run db:backfill:postgres:auth-rbac-read` ผ่าน
+    - `npm run db:compare:postgres:auth-rbac-read` ผ่าน
+  - ปริมาณข้อมูลที่ backfill รอบนี้:
+    - `system_config=1`
+    - `permissions=95`
+    - `roles=24`
+    - `store_members=11`
+    - `store_branches=8`
+    - `store_member_branches=0`
+    - `role_permissions=894`
+  - เพิ่ม env flag `POSTGRES_AUTH_RBAC_READ_ENABLED=0` ใน [.env.example](/Users/csl-dev/Desktop/alex/csb-pos/.env.example) และ [.env.local](/Users/csl-dev/Desktop/alex/csb-pos/.env.local)
+  - route/helper ที่เปลี่ยนให้พึ่ง PostgreSQL path ได้แล้ว และถอด top-level Turso import ออกจาก app shell/auth flow:
+    - [app/(app)/layout.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/layout.tsx)
+    - [app/api/auth/login/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/auth/login/route.ts)
+    - [app/api/auth/signup/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/auth/signup/route.ts)
+    - [lib/auth/session.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/auth/session.ts)
+    - [lib/auth/session-db.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/auth/session-db.ts)
+    - [lib/auth/system-admin.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/auth/system-admin.ts)
+    - [lib/system-config/policy.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/system-config/policy.ts)
+    - [lib/rbac/access.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/rbac/access.ts)
+    - [lib/rbac/queries.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/rbac/queries.ts)
+    - [lib/rbac/catalog.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/rbac/catalog.ts)
+    - [lib/branches/access.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/branches/access.ts)
+  - re-audit import graph แล้ว top-level imports ของ `@/lib/db/client` ใน `app/lib/server` ลดจาก `91` เหลือ `77` ไฟล์
+
+- เพิ่ม runtime dependency audit ใหม่ที่ [docs/postgres-turso-runtime-dependency-audit.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-turso-runtime-dependency-audit.md)
+  - ใช้ `rg` audit จริงแล้วพบ runtime files ที่ยัง import `@/lib/db/client` อยู่ `91` ไฟล์
+  - ยืนยันว่า root cause ของ log `ENOTFOUND ... turso.io` ระหว่าง `next build` ยังมาจาก [lib/db/client.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/client.ts) ที่ init client + ยิง health probe ทันทีเมื่อมี import แรก
+  - แยก dependency เป็น 3 bucket:
+    - `dual-path / ready-for-removal-queue`: orders, purchase, inventory, reports
+    - `still Turso-primary`: auth/session, RBAC, app shell, settings/system-admin, products/units/onboarding
+    - `tooling-only`: drizzle config, backfill/compare/seed/repair scripts
+  - สรุปว่าก้อนที่ควรย้ายก่อนเพื่อถอน Turso runtime จริงไม่ใช่ fallback ของ orders ก่อน แต่คือ `auth/session + RBAC + app shell`
+- เชื่อม audit นี้เข้า [docs/postgres-turso-drizzle-retirement-plan.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-turso-drizzle-retirement-plan.md), [AI_CONTEXT.md](/Users/csl-dev/Desktop/alex/csb-pos/AI_CONTEXT.md), และ [docs/CONTEXT_INDEX.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/CONTEXT_INDEX.md) แล้ว
+
+- ขยาย phase `RequestContext + audit/idempotency decoupling` ต่อไปยัง flow สำคัญอีกชุด:
+  - [app/api/orders/cod-reconcile/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/orders/cod-reconcile/route.ts)
+  - [server/services/order-shipment.service.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/services/order-shipment.service.ts)
+  - [app/api/orders/[orderId]/shipments/label/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/orders/[orderId]/shipments/label/route.ts)
+  - [app/api/orders/[orderId]/shipments/upload-label/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/orders/[orderId]/shipments/upload-label/route.ts)
+  - purchase sub-routes:
+    - [app/api/stock/purchase-orders/[poId]/settle/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stock/purchase-orders/[poId]/settle/route.ts)
+    - [app/api/stock/purchase-orders/[poId]/apply-extra-cost/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stock/purchase-orders/[poId]/apply-extra-cost/route.ts)
+    - [app/api/stock/purchase-orders/[poId]/finalize-rate/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stock/purchase-orders/[poId]/finalize-rate/route.ts)
+    - [app/api/stock/purchase-orders/[poId]/payments/[paymentId]/reverse/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stock/purchase-orders/[poId]/payments/[paymentId]/reverse/route.ts)
+- route กลุ่มนี้ map `Request -> RequestContext` ที่ต้น route แล้ว และเปลี่ยน idempotency header parsing ไปใช้ `getIdempotencyKeyFromHeaders(...)`
+- [app/api/orders/[orderId]/send-qr/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/orders/[orderId]/send-qr/route.ts) กับ [app/api/orders/[orderId]/send-shipping/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/orders/[orderId]/send-shipping/route.ts) ถูกตรวจแล้ว แต่ยังไม่ต้องแก้ใน phase นี้เพราะ route ไม่ได้ส่ง `Request` ลง service/audit/idempotency path
+
+- ขยาย phase `RequestContext + audit/idempotency decoupling` จาก `orders` ไป `stock/purchase` แล้ว:
+  - ปรับ [server/services/stock.service.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/services/stock.service.ts) และ [server/services/purchase.service.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/services/purchase.service.ts) ให้รับ `requestContext` ใน audit context
+  - ปรับ [lib/inventory/postgres-write.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/inventory/postgres-write.ts) และ [lib/purchases/postgres-write.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/purchases/postgres-write.ts) ให้ส่ง `requestContext` ลง audit values ได้
+  - route ที่ map `Request -> RequestContext` แล้วมี [app/api/stock/movements/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stock/movements/route.ts), [app/api/stock/purchase-orders/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stock/purchase-orders/route.ts), [app/api/stock/purchase-orders/[poId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stock/purchase-orders/[poId]/route.ts)
+  - `idempotency` ของ route กลุ่มนี้เปลี่ยนไปใช้ `getIdempotencyKeyFromHeaders(...)` แล้ว
+- อัปเดต [AI_CONTEXT.md](/Users/csl-dev/Desktop/alex/csb-pos/AI_CONTEXT.md) ให้สะท้อนสถานะล่าสุดของ `RequestContext` rollout แล้ว
+
+- เริ่มลงโค้ด phase `RequestContext + audit/idempotency decoupling` แล้ว:
+  - เพิ่ม helper [lib/http/request-context.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/http/request-context.ts) สำหรับ map headers/request -> `RequestContext`
+  - ปรับ [server/services/audit.service.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/services/audit.service.ts) ให้รองรับ `requestContext` โดยยัง backward compatible กับ `request`
+  - ปรับ [server/services/idempotency.service.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/services/idempotency.service.ts) ให้มี `getIdempotencyKeyFromHeaders(...)` เพื่อแยก header parsing ออกจาก core logic
+  - pilot ใช้จริงแล้วใน [app/api/orders/[orderId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/orders/[orderId]/route.ts) และ [lib/orders/postgres-write.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/orders/postgres-write.ts)
+- อัปเดต [AI_CONTEXT.md](/Users/csl-dev/Desktop/alex/csb-pos/AI_CONTEXT.md) ให้สะท้อนสถานะ Express-readiness ล่าสุดแล้ว
+
+- เพิ่มเอกสาร [docs/express-readiness-plan.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/express-readiness-plan.md) สำหรับเตรียมย้าย API จาก Next.js ไป Express + TypeScript:
+  - audit จุดที่ยังผูก `Request` / Next transport อยู่
+  - target boundary แบบ `transport adapter -> service -> repository`
+  - ลำดับ refactor ที่แนะนำ โดยเริ่มจาก `RequestContext`, `audit`, และ `idempotency`
+- เพิ่ม ADR-023 ใน [docs/DECISIONS.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/DECISIONS.md) ว่าควรแยก `RequestContext` ออกจาก service ก่อนย้าย transport จริง
+- เพิ่มไฟล์นี้เข้า [docs/CONTEXT_INDEX.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/CONTEXT_INDEX.md), [AI_CONTEXT.md](/Users/csl-dev/Desktop/alex/csb-pos/AI_CONTEXT.md), และเชื่อมจาก [docs/postgresql-sequelize-migration.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgresql-sequelize-migration.md) แล้ว
+
+- เพิ่มเอกสาร [docs/postgres-turso-drizzle-retirement-plan.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-turso-drizzle-retirement-plan.md) สำหรับ phase ถอน Turso/Drizzle หลังจบ observe/fallback removal:
+  - ลำดับถอน runtime dependency -> repositories -> env/ops docs -> migration tooling -> Turso infra
+  - validation commands และ rollback rules ของแต่ละ wave
+  - ปิดท้ายด้วย next phase ไปสู่ `Express readiness plan`
+- เพิ่ม ADR-022 ใน [docs/DECISIONS.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/DECISIONS.md) ว่าการถอน Turso/Drizzle ต้องทำทีละโดเมนหลังผ่านเกณฑ์ `zero fallback`
+- เพิ่มไฟล์นี้เข้า [docs/CONTEXT_INDEX.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/CONTEXT_INDEX.md), [AI_CONTEXT.md](/Users/csl-dev/Desktop/alex/csb-pos/AI_CONTEXT.md), และเชื่อมจาก [docs/postgresql-sequelize-migration.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgresql-sequelize-migration.md) แล้ว
+
+- เพิ่มเอกสาร [docs/postgres-all-postgres-observe-fallback-removal.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-all-postgres-observe-fallback-removal.md) สำหรับ phase หลังเปิด PostgreSQL runtime เกือบครบ:
+  - เกณฑ์ `zero fallback`
+  - สิ่งที่ต้อง observe ใน logs / parity / business UAT
+  - ลำดับถอด fallback ของ `reports -> purchase -> inventory -> orders -> write paths`
+  - rollback rules ระหว่างถอด fallback ทีละโดเมน
+- เพิ่มไฟล์นี้เข้า [docs/CONTEXT_INDEX.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/CONTEXT_INDEX.md) และ [AI_CONTEXT.md](/Users/csl-dev/Desktop/alex/csb-pos/AI_CONTEXT.md) แล้ว
+
+- เพิ่มเอกสาร [docs/postgres-stock-movement-rollout-execution.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-stock-movement-rollout-execution.md) สำหรับ stock movement rollout บน staging แบบลงมือทำจริง:
+  - preflight commands
+  - Wave 1 execution สำหรับ `POSTGRES_STOCK_WRITE_MOVEMENT_ENABLED=1`
+  - canary flows ของ manual `IN` / `OUT` / `ADJUST`
+  - compare/log review และ rollback rules
+- เพิ่มไฟล์นี้เข้า [docs/CONTEXT_INDEX.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/CONTEXT_INDEX.md) และ [AI_CONTEXT.md](/Users/csl-dev/Desktop/alex/csb-pos/AI_CONTEXT.md) แล้ว
+
+- เพิ่มเอกสาร [docs/postgres-orders-write-rollout-execution.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-orders-write-rollout-execution.md) สำหรับ orders write rollout บน staging แบบลงมือทำจริง:
+  - แยก wave ตามความเสี่ยงของ create / fulfillment / return-cancel-pickup / high-risk payment
+  - มี canary steps, compare commands, log review, และ rollback rules ต่อ wave
+- เพิ่มไฟล์นี้เข้า [docs/CONTEXT_INDEX.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/CONTEXT_INDEX.md) และ [AI_CONTEXT.md](/Users/csl-dev/Desktop/alex/csb-pos/AI_CONTEXT.md) แล้ว
+
+- เพิ่มเอกสาร [docs/postgres-inventory-read-rollout-execution.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-inventory-read-rollout-execution.md) สำหรับ inventory read rollout บน staging แบบลงมือทำจริง:
+  - preflight
+  - canary flows ของ `/stock` และ `/orders/[orderId]`
+  - stock/order/purchase UAT matrix
+  - rollback rules
+- เพิ่มไฟล์นี้เข้า [docs/CONTEXT_INDEX.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/CONTEXT_INDEX.md) และ [AI_CONTEXT.md](/Users/csl-dev/Desktop/alex/csb-pos/AI_CONTEXT.md) แล้ว
+
+- เพิ่มเอกสาร [docs/postgres-purchase-rollout-execution.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-purchase-rollout-execution.md) สำหรับ rollout purchase runtime บน staging แบบลงมือทำจริง:
+  - preflight commands
+  - Wave 1 / Wave 2 execution steps
+  - UAT matrix
+  - log review
+  - rollback rules
+- เพิ่มไฟล์นี้เข้า [docs/CONTEXT_INDEX.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/CONTEXT_INDEX.md) และ [AI_CONTEXT.md](/Users/csl-dev/Desktop/alex/csb-pos/AI_CONTEXT.md) แล้ว
+
+- เพิ่มเอกสาร [docs/postgres-full-cutover-checklist.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-full-cutover-checklist.md) เป็น master checklist สำหรับ:
+  - สถานะ runtime ปัจจุบันว่าอะไรเปิด PostgreSQL แล้ว
+  - อะไรยังใช้ Turso อยู่จริง
+  - ลำดับ rollout จนถึง remove fallback และ retire Turso
+- เพิ่มไฟล์นี้เข้า [docs/CONTEXT_INDEX.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/CONTEXT_INDEX.md) และ [AI_CONTEXT.md](/Users/csl-dev/Desktop/alex/csb-pos/AI_CONTEXT.md) แล้ว
+
+- เพิ่ม gate script `npm run smoke:postgres:reports-read-gate` ผ่าน `scripts/smoke-postgres-reports-read-gate.mjs` เพื่อใช้เป็น preflight ก่อนเปิด `POSTGRES_REPORTS_READ_ENABLED=1` บน staging
+- ขยาย runbook `docs/postgres-staging-rollout.md` ให้มี section `Reports Read Rollout` ครบทั้ง preflight, canary enable, manual UAT, และ rollback rules ของ `/reports`, AP summary/statement, และ CSV export
+- ขยาย `docs/postgres-cutover-plan.md` ให้ใช้ `smoke:postgres:reports-read-gate` เป็น pre-cutover command และเพิ่ม UAT ของ report export/AP statement
+- รัน `npm run smoke:postgres:reports-read-gate` ผ่านแล้วกับฐานจริง (Aiven + Turso)
+
+- เพิ่ม PostgreSQL read path สำหรับ reports/AP aggregation ใน `lib/reports/queries.ts` ผ่าน flag `POSTGRES_REPORTS_READ_ENABLED`
+- เพิ่ม helper `getReportStoreCurrency` แล้วให้ `server/services/reports.service.ts` และ `server/services/purchase-ap.service.ts` ใช้ตัวเดียวกัน เพื่อให้ `/reports`, AP summary/statement และ CSV export ไม่ต้องกลับไปอ่าน `stores.currency` จาก Turso เมื่อเปิด flag
+- เพิ่ม script `npm run db:compare:postgres:reports-read` ผ่าน `scripts/compare-postgres-reports-read.mjs` สำหรับเทียบ parity ของ `/reports` overview และ `outstanding PO/AP` ระหว่าง Turso กับ PostgreSQL
+- รัน parity-check reports ผ่านแล้ว: `reports overview` และ `outstanding rows` ตรงกัน (`stores=1`)
+- `.env.local` ของเครื่องนี้เปิด `POSTGRES_REPORTS_READ_ENABLED=1` แล้ว เพื่อให้ local `/reports`, AP summary/statement และ CSV export ใช้ PostgreSQL read path จริงระหว่างช่วง observe
+
 - วาง foundation สำหรับ migration ไป `Aiven PostgreSQL + Sequelize query-first`:
   - ติดตั้ง dependency `sequelize`, `pg`, `pg-hstore`
   - เพิ่ม `lib/db/sequelize.ts` สำหรับ singleton, pool, SSL config, และ connection probe
@@ -15,8 +259,17 @@
   - เพิ่ม script `npm run db:check:postgres` ผ่าน `scripts/check-postgres.mjs`
   - เพิ่ม script `npm run db:migrate:postgres` ผ่าน `scripts/migrate-postgres.mjs`
   - เพิ่ม script `npm run db:backfill:postgres:orders-read` ผ่าน `scripts/backfill-postgres-orders-read.mjs`
+  - เพิ่ม script `npm run db:backfill:postgres:inventory-movements` ผ่าน `scripts/backfill-postgres-inventory-movements.mjs`
   - เพิ่ม script `npm run db:compare:postgres:orders-read` ผ่าน `scripts/compare-postgres-orders-read.mjs`
+  - เพิ่ม script `npm run db:compare:postgres:inventory` ผ่าน `scripts/compare-postgres-inventory-parity.mjs`
   - เพิ่ม script `npm run smoke:postgres:update-shipping` ผ่าน `scripts/smoke-postgres-update-shipping.mjs`
+  - เพิ่ม script `npm run smoke:postgres:cancel` ผ่าน `scripts/smoke-postgres-cancel-order.mjs`
+  - เพิ่ม script `npm run smoke:postgres:confirm-paid` ผ่าน `scripts/smoke-postgres-confirm-paid.mjs`
+  - เพิ่ม script `npm run smoke:postgres:mark-cod-returned` ผ่าน `scripts/smoke-postgres-mark-cod-returned.mjs`
+  - เพิ่ม script `npm run smoke:postgres:mark-packed` ผ่าน `scripts/smoke-postgres-mark-packed.mjs`
+  - เพิ่ม script `npm run smoke:postgres:mark-picked-up-unpaid` ผ่าน `scripts/smoke-postgres-mark-picked-up-unpaid.mjs`
+  - เพิ่ม script `npm run smoke:postgres:mark-shipped` ผ่าน `scripts/smoke-postgres-mark-shipped.mjs`
+  - เพิ่ม script `npm run smoke:postgres:submit-for-payment` ผ่าน `scripts/smoke-postgres-submit-for-payment.mjs`
   - เพิ่ม script `npm run smoke:postgres:submit-payment-slip` ผ่าน `scripts/smoke-postgres-submit-payment-slip.mjs`
   - เพิ่ม `scripts/load-local-env.mjs` เพื่อให้ script PostgreSQL โหลด `.env` / `.env.local` ได้เองโดยไม่ต้อง `source` ใน shell ก่อนรัน
   - เติม placeholder env สำหรับ Aiven PostgreSQL ใน `.env.local` แล้ว โดยยังคง Turso env เดิมไว้ระหว่าง migration
@@ -31,8 +284,57 @@
   - รัน parity-check ผ่านแล้ว: `QR accounts`, `orders list` ทุก tab และ `order detail` ทั้ง 72 ออเดอร์ของ `store_demo_main` ตรงกันระหว่างสองฐาน
   - เพิ่ม PostgreSQL read path ให้ `getActiveQrPaymentAccountsForStore` แล้ว ทำให้หน้า `/orders/[orderId]` วิ่งผ่าน PostgreSQL ครบทั้ง order + QR accounts เมื่อเปิด flag
   - เปิด `POSTGRES_ORDERS_READ_ENABLED=1` ใน `.env.local` ของเครื่องนี้แล้วเพื่อเริ่มใช้งาน PostgreSQL orders read path จริง
+  - เพิ่ม PostgreSQL read helper ใน `lib/inventory/queries.ts` สำหรับ inventory balances และ order stock state เมื่อเปิด `POSTGRES_INVENTORY_READ_ENABLED=1`
+  - เพิ่ม backfill script `scripts/backfill-postgres-inventory-movements.mjs` แบบ upsert/re-run safe สำหรับ `inventory_movements`
+  - เพิ่ม compare script `scripts/compare-postgres-inventory-parity.mjs` สำหรับเทียบ parity ของ inventory balances ต่อ store และ order stock state ต่อ order
+  - คง `POSTGRES_INVENTORY_READ_ENABLED=0` ไว้ก่อนใน `.env.local` เพราะ stock writes หลักของระบบยังไม่ได้ dual-write ไป PostgreSQL ครบทุก flow
+  - เพิ่ม PostgreSQL write path สำหรับ `POST /api/stock/movements` ผ่าน `lib/inventory/postgres-write.ts` และเพิ่ม smoke script `npm run smoke:postgres:stock-movement`
+  - service `postStockMovement` ยังใช้ permission/product/unit conversion/qty validation เดิม แล้วแยกเฉพาะ movement+audit write ไป PostgreSQL เมื่อเปิด `POSTGRES_STOCK_WRITE_MOVEMENT_ENABLED=1`
+  - `.env.local` ของเครื่องนี้ยังคง `POSTGRES_STOCK_WRITE_MOVEMENT_ENABLED=0` ไว้ก่อน ระหว่างรอ rollout บน staging และ phase PO receive
+  - เพิ่ม PostgreSQL migration `postgres/migrations/0003_purchase_orders_foundation.sql` สำหรับ `purchase_orders`, `purchase_order_items`, และ `purchase_order_payments`
+  - เพิ่ม PostgreSQL read helper `lib/purchases/queries.ts` สำหรับ purchase list, purchase detail, และ pending-rate queue
+  - `server/services/purchase.service.ts` รองรับ PostgreSQL read path แล้วสำหรับ `getPurchaseOrderList`, `getPurchaseOrderListPage`, `getPurchaseOrderDetail`, และ `getPendingExchangeRateQueue` เมื่อเปิด `POSTGRES_PURCHASE_READ_ENABLED=1`
+  - เพิ่ม script `npm run db:backfill:postgres:purchase-read` และ `npm run db:compare:postgres:purchase-read`
+  - เพิ่ม script `npm run smoke:postgres:purchase-suite` สำหรับใช้เป็น pre-rollout gate ของ purchase slice บน staging
+  - เพิ่ม script `npm run smoke:postgres:inventory-read-gate` สำหรับใช้เป็น pre-rollout gate ก่อนเปิด `POSTGRES_INVENTORY_READ_ENABLED=1`
+  - เพิ่ม script `npm run smoke:postgres:cutover-gate` สำหรับใช้เป็น pre-cutover gate ของ inventory/reporting
+  - รัน backfill purchase baseline เข้า Aiven สำเร็จแล้ว: `purchase_orders=9`, `purchase_order_items=9`, `purchase_order_payments=1`
+  - รัน parity-check purchase read ผ่านแล้ว: `purchase list`, `purchase detail`, และ `pending exchange-rate queue` ตรงกัน (`stores=1`, `purchaseOrders=9`)
+  - เพิ่ม PostgreSQL write path สำหรับ `POST /api/stock/purchase-orders` เฉพาะ branch `receiveImmediately=true` ผ่าน `lib/purchases/postgres-write.ts`
+  - เพิ่ม PostgreSQL write path สำหรับ `PATCH /api/stock/purchase-orders/[poId]` เฉพาะ transition ไป `RECEIVED` ผ่าน `lib/purchases/postgres-write.ts`
+  - เพิ่ม smoke scripts `npm run smoke:postgres:po-create-received` และ `npm run smoke:postgres:po-status-received`
+  - apply migration `0003_purchase_orders_foundation.sql` เข้า Aiven แล้ว และ smoke PO receive ทั้งสองตัวผ่านแบบ rollback
+  - `.env.local` ของเครื่องนี้ยังคง `POSTGRES_PURCHASE_READ_ENABLED=0`, `POSTGRES_PURCHASE_WRITE_CREATE_RECEIVED_ENABLED=0`, และ `POSTGRES_PURCHASE_WRITE_RECEIVE_STATUS_ENABLED=0` ไว้ก่อน เพื่อรอเปิด read/write purchase พร้อมกันบน staging และกัน UI stale ระหว่างสองฐาน
+  - `docs/postgres-staging-rollout.md` ถูกขยายให้ครอบ purchase rollout แล้ว: มี preflight, wave เปิด flags, UAT, และ rollback rules ของ purchase slice
+  - `docs/postgres-staging-rollout.md` ถูกขยายต่อให้ครอบ inventory read rollout แล้ว: มี gate รวมของ orders/purchase/inventory, canary UAT, และ rollback rules ก่อนเปิด `POSTGRES_INVENTORY_READ_ENABLED=1`
+  - เพิ่ม `docs/postgres-cutover-plan.md` สำหรับวาง phase cutover ของ inventory/reporting หลัง inventory read rollout ผ่านแล้ว และเพิ่ม ADR-021 ยืนยันว่าไม่ทำ big-bang cutover
+  - เพิ่ม PostgreSQL write path สำหรับ `POST /api/orders` ผ่าน `lib/orders/postgres-write.ts` และเพิ่ม smoke script `npm run smoke:postgres:create-order`
+  - route `POST /api/orders` ยังใช้ validation/catalog/stock-check เดิมใน route แต่แยก transaction write ไป PostgreSQL เมื่อเปิด `POSTGRES_ORDERS_WRITE_CREATE_ENABLED=1`
+  - เพิ่ม guard เช็ก `orderNo` ซ้ำฝั่ง PostgreSQL เพราะ generator เดิมยังอ้างอิง Turso ระหว่างช่วง migration
   - เพิ่ม PostgreSQL write path สำหรับ `PATCH /api/orders/[orderId]` action `update_shipping` ผ่าน `lib/orders/postgres-write.ts` และเปิด `POSTGRES_ORDERS_WRITE_UPDATE_SHIPPING_ENABLED=1` ใน `.env.local` ของเครื่องนี้แล้ว
   - ถ้า PostgreSQL write path ของ `update_shipping` fail ระบบจะ fallback กลับ Turso path เดิม; ส่วน idempotency ยัง mark สำเร็จใน Turso หลัง PostgreSQL commit เพื่อเลี่ยงการย้ายหลายตารางพร้อมกันใน phase นี้
+  - เพิ่ม PostgreSQL migration `postgres/migrations/0002_inventory_movements_foundation.sql` เพื่อรองรับ stock reserve/out path ของ orders write
+  - เพิ่ม PostgreSQL write path สำหรับ `PATCH /api/orders/[orderId]` action `submit_for_payment` ผ่าน `lib/orders/postgres-write.ts`
+  - คง `POSTGRES_ORDERS_WRITE_SUBMIT_FOR_PAYMENT_ENABLED=0` ไว้ก่อนใน `.env.local` เพราะตอนนี้ stock balance/reserve parity หลักยังอ่านจาก Turso อยู่บางจุด จึงยังไม่ควรเปิด path นี้จริงทันที
+  - เพิ่ม PostgreSQL write path สำหรับ `PATCH /api/orders/[orderId]` action `confirm_paid` ผ่าน `lib/orders/postgres-write.ts` และเพิ่ม smoke script `npm run smoke:postgres:confirm-paid`
+  - คง `POSTGRES_ORDERS_WRITE_CONFIRM_PAID_ENABLED=0` ไว้ก่อนใน `.env.local` เพราะ movement producers อื่น เช่น `cancel` และ `mark_picked_up_unpaid` ยังไม่ได้ dual-write ไป PostgreSQL ครบ
+  - เพิ่ม PostgreSQL write path สำหรับ `PATCH /api/orders/[orderId]` action `mark_picked_up_unpaid` ผ่าน `lib/orders/postgres-write.ts` และเพิ่ม smoke script `npm run smoke:postgres:mark-picked-up-unpaid`
+  - คง `POSTGRES_ORDERS_WRITE_MARK_PICKED_UP_UNPAID_ENABLED=0` ไว้ก่อนใน `.env.local` เพราะ movement producers อื่น เช่น `cancel` ยังไม่ได้ dual-write ไป PostgreSQL ครบ
+  - เพิ่ม PostgreSQL write path สำหรับ `PATCH /api/orders/[orderId]` action `cancel` ผ่าน `lib/orders/postgres-write.ts` และเพิ่ม smoke script `npm run smoke:postgres:cancel`
+  - คง `POSTGRES_ORDERS_WRITE_CANCEL_ENABLED=0` ไว้ก่อนใน `.env.local` เพราะยังมี movement producer ฝั่ง order/inventory อื่น เช่น `mark_cod_returned` ที่ยังไม่ได้ dual-write ไป PostgreSQL ครบ
+  - เพิ่ม PostgreSQL write path สำหรับ `PATCH /api/orders/[orderId]` action `mark_cod_returned` ผ่าน `lib/orders/postgres-write.ts` และเพิ่ม smoke script `npm run smoke:postgres:mark-cod-returned`
+  - คง `POSTGRES_ORDERS_WRITE_MARK_COD_RETURNED_ENABLED=0` ไว้ก่อนใน `.env.local` ระหว่างที่ยังไม่ได้ประเมินเปิดกลุ่ม order write flags บน staging พร้อมกัน
+  - เพิ่ม PostgreSQL write path สำหรับ `PATCH /api/orders/[orderId]` action `mark_packed` ผ่าน `lib/orders/postgres-write.ts` และเพิ่ม smoke script `npm run smoke:postgres:mark-packed`
+  - เพิ่ม PostgreSQL write path สำหรับ `PATCH /api/orders/[orderId]` action `mark_shipped` ผ่าน `lib/orders/postgres-write.ts` และเพิ่ม smoke script `npm run smoke:postgres:mark-shipped`
+  - เพิ่ม smoke suite `npm run smoke:postgres:orders-write-suite` สำหรับรัน order write smokes ทั้งชุดก่อนเปิด flags บน staging
+  - เพิ่ม runbook `docs/postgres-staging-rollout.md` สำหรับ preflight, wave rollout, manual UAT, และ rollback rules ของ PostgreSQL staging rollout
+  - `.env.local` ของเครื่องนี้ยังคง `POSTGRES_ORDERS_WRITE_CREATE_ENABLED=0` ไว้ก่อน ระหว่างรอ rollout บน staging
+  - คง `POSTGRES_ORDERS_WRITE_MARK_PACKED_ENABLED=0` และ `POSTGRES_ORDERS_WRITE_MARK_SHIPPED_ENABLED=0` ไว้ก่อนใน `.env.local` ระหว่างรอแผนเปิดกลุ่ม order write flags บน staging
+  - ทำ audit เพิ่มแล้วว่า movement producers ที่ยังค้างบน Turso หลังจบ order-route write migration คือ:
+    - `POST /api/stock/purchase-orders` เฉพาะ `receiveImmediately=true`
+    - `PATCH /api/stock/purchase-orders/[poId]` เฉพาะ transition ไป `RECEIVED`
+  - เพิ่มเอกสาร `docs/postgres-inventory-producers-audit.md` เพื่อใช้เป็น source of truth สำหรับลำดับ migration ถัดไป
+  - หลัง purchase read parity ผ่านแล้ว phase ถัดไปคือ rollout purchase flags บน staging (`POSTGRES_PURCHASE_READ_ENABLED` + สอง purchase write flags) แบบเป็น wave ก่อนค่อยประเมินเปิด `POSTGRES_INVENTORY_READ_ENABLED=1`
   - เพิ่ม PostgreSQL write path สำหรับ `PATCH /api/orders/[orderId]` action `submit_payment_slip` ผ่าน `lib/orders/postgres-write.ts` และเปิด `POSTGRES_ORDERS_WRITE_SUBMIT_PAYMENT_SLIP_ENABLED=1` ใน `.env.local` ของเครื่องนี้แล้ว
   - `next.config.ts` เพิ่ม `serverExternalPackages: ["sequelize", "pg", "pg-hstore"]` เพื่อให้ build ฝั่ง server ของ Next ไม่ bundle dependency migration ชุดนี้และลด warning จาก Sequelize
   - เพิ่มเอกสาร `docs/postgresql-sequelize-migration.md`

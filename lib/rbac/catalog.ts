@@ -1,4 +1,3 @@
-import { db } from "@/lib/db/client";
 import { permissions } from "@/lib/db/schema";
 import {
   defaultPermissionCatalog,
@@ -7,6 +6,7 @@ import {
 } from "@/lib/rbac/defaults";
 
 export async function ensurePermissionCatalog() {
+  const { db } = await import("@/lib/db/client");
   await db
     .insert(permissions)
     .values(

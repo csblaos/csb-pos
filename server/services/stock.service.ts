@@ -1,7 +1,9 @@
 import "server-only";
 
 import { redisDelete, redisGetJson, redisSetJson } from "@/lib/cache/redis";
+import type { RequestContext } from "@/lib/http/request-context";
 import { hasPermission } from "@/lib/rbac/access";
+import { createStockMovementInPostgres, isPostgresStockMovementWriteEnabled } from "@/lib/inventory/postgres-write";
 import type { StockMovementInput } from "@/lib/inventory/validation";
 import {
   createPerfScope,
@@ -168,6 +170,7 @@ export async function postStockMovement(params: {
     actorName: string | null;
     actorRole: string | null;
     request?: Request;
+    requestContext?: RequestContext;
   };
   idempotency?: {
     recordId: string;
@@ -218,6 +221,78 @@ export async function postStockMovement(params: {
           ? -qtyBaseAbs
           : qtyBaseAbs;
 
+      if (isPostgresStockMovementWriteEnabled()) {
+        try {
+          const result = await scope.step("repo.writeAndAudit.pg", async () =>
+            createStockMovementInPostgres({
+              storeId,
+              productId: payload.productId,
+              type: payload.movementType,
+              qtyBase,
+              note: payload.note?.trim() ? payload.note.trim() : null,
+              actorUserId: sessionUserId,
+              actorName: params.audit?.actorName ?? null,
+              actorRole: params.audit?.actorRole ?? null,
+              qty: payload.qty,
+              unitId: payload.unitId,
+              adjustMode: payload.adjustMode,
+              requestContext: params.audit?.requestContext,
+              request: params.audit?.request,
+            }),
+          );
+
+          if (params.idempotency) {
+            try {
+              await markIdempotencySucceeded({
+                recordId: params.idempotency.recordId,
+                statusCode: 200,
+                body: { ok: true, balance: result.balance },
+              });
+            } catch (error) {
+              console.error(
+                `[stock.write.pg] idempotency mark failed action=stock.movement.create storeId=${storeId}: ${
+                  error instanceof Error ? error.message : "unknown"
+                }`,
+              );
+            }
+          }
+
+          await scope.step("cache.invalidate", async () => {
+            const [stockCacheResult, dashboardCacheResult] = await Promise.allSettled([
+              invalidateStockOverviewCache(storeId),
+              invalidateDashboardSummaryCache(storeId),
+            ]);
+
+            if (
+              stockCacheResult.status === "rejected" ||
+              dashboardCacheResult.status === "rejected"
+            ) {
+              console.error(
+                `[stock] cache invalidate failed storeId=${storeId} movementId=${result.movementId}`,
+                {
+                  stockError:
+                    stockCacheResult.status === "rejected"
+                      ? stockCacheResult.reason
+                      : null,
+                  dashboardError:
+                    dashboardCacheResult.status === "rejected"
+                      ? dashboardCacheResult.reason
+                      : null,
+                },
+              );
+            }
+          });
+
+          return result;
+        } catch (error) {
+          console.warn(
+            `[stock.write.pg] fallback to turso for stock.movement.create storeId=${storeId} productId=${payload.productId}: ${
+              error instanceof Error ? error.message : "unknown"
+            }`,
+          );
+        }
+      }
+
       const { movementId, balance } = await scope.step(
         "repo.writeAndAuditTx",
         async () =>
@@ -256,6 +331,7 @@ export async function postStockMovement(params: {
                     unitId: payload.unitId,
                     adjustMode: payload.adjustMode ?? null,
                   },
+                  requestContext: params.audit.requestContext,
                   request: params.audit.request,
                 }),
               );

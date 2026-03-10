@@ -1,10 +1,7 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
-
-import { db } from "@/lib/db/client";
-import { stores } from "@/lib/db/schema";
 import {
+  getReportStoreCurrency,
   getOutstandingPurchaseRows,
   type PurchaseOutstandingRow,
 } from "@/lib/reports/queries";
@@ -211,12 +208,7 @@ function passStatementFilter(
 }
 
 async function getStoreCurrency(storeId: string): Promise<"LAK" | "THB" | "USD"> {
-  const [storeRow] = await db
-    .select({ currency: stores.currency })
-    .from(stores)
-    .where(eq(stores.id, storeId))
-    .limit(1);
-  return (storeRow?.currency ?? "LAK") as "LAK" | "THB" | "USD";
+  return getReportStoreCurrency(storeId);
 }
 
 export async function getPurchaseApSupplierSummary(params: {

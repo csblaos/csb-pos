@@ -1,16 +1,27 @@
 import { and, asc, desc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 
-import { db } from "@/lib/db/client";
-import { getInventoryBalancesByStoreForProducts } from "@/lib/inventory/queries";
 import {
   auditEvents,
   productCategories,
   productModels,
   productUnits,
   products,
+  stores,
   units,
 } from "@/lib/db/schema";
+import {
+  getStoreProductSummaryCountsFromPostgres,
+  getStoreProductThresholdsFromPostgres,
+  getNextVariantSortOrderByModelNameFromPostgres,
+  listCategoriesFromPostgres,
+  listStoreProductModelNamesFromPostgres,
+  listStoreProductsFromPostgres,
+  listStoreProductsPageFromPostgres,
+  listVariantLabelsByModelNameFromPostgres,
+  listUnitsFromPostgres,
+  logProductsOnboardingReadFallback,
+} from "@/lib/platform/postgres-products-onboarding";
 import {
   parseVariantOptions,
   type ProductVariantOption,
@@ -118,7 +129,19 @@ type ProductRowWithConversion = {
   conversionPricePerUnit: number | null;
 };
 
+const getTursoDb = async () => (await import("@/lib/db/client")).db;
+
 export async function listUnits(storeId: string): Promise<UnitOption[]> {
+  try {
+    const postgresRows = await listUnitsFromPostgres(storeId);
+    if (postgresRows) {
+      return postgresRows;
+    }
+  } catch (error) {
+    logProductsOnboardingReadFallback("products.units.list", error);
+  }
+
+  const db = await getTursoDb();
   const rows = await db
     .select({
       id: units.id,
@@ -233,6 +256,7 @@ async function getLatestCostTrackingByProductIds(
 ): Promise<Map<string, ProductCostTracking>> {
   if (productIds.length === 0) return new Map();
 
+  const db = await getTursoDb();
   const rows = await db
     .select({
       entityId: auditEvents.entityId,
@@ -330,8 +354,10 @@ async function listStoreProductsByIds(
 ): Promise<ProductListItem[]> {
   if (productIds.length === 0) return [];
 
+  const db = await getTursoDb();
   const baseUnits = alias(units, "base_units");
   const conversionUnits = alias(units, "conversion_units");
+  const { getInventoryBalancesByStoreForProducts } = await import("@/lib/inventory/queries");
 
   const rows = await db
     .select({
@@ -393,6 +419,16 @@ export async function listStoreProducts(
   storeId: string,
   search?: string,
 ): Promise<ProductListItem[]> {
+  try {
+    const postgresItems = await listStoreProductsFromPostgres(storeId, search);
+    if (postgresItems) {
+      return postgresItems;
+    }
+  } catch (error) {
+    logProductsOnboardingReadFallback("products.list", error);
+  }
+
+  const db = await getTursoDb();
   const whereClause = buildProductsWhere({ storeId, search });
   const idRows = await db
     .select({ id: products.id })
@@ -427,9 +463,27 @@ export async function listStoreProductsPage({
   page?: number;
   pageSize?: number;
 }): Promise<ProductPageResult> {
+  try {
+    const postgresPage = await listStoreProductsPageFromPostgres({
+      storeId,
+      search,
+      categoryId,
+      status,
+      sort,
+      page,
+      pageSize,
+    });
+    if (postgresPage) {
+      return postgresPage;
+    }
+  } catch (error) {
+    logProductsOnboardingReadFallback("products.page.list", error);
+  }
+
   const safePage = Math.max(1, Math.trunc(page));
   const safePageSize = Math.min(100, Math.max(1, Math.trunc(pageSize)));
   const offset = (safePage - 1) * safePageSize;
+  const db = await getTursoDb();
 
   const whereClause = buildProductsWhere({
     storeId,
@@ -502,6 +556,16 @@ export async function listStoreProductsPage({
 export async function getStoreProductSummaryCounts(
   storeId: string,
 ): Promise<ProductSummaryCounts> {
+  try {
+    const postgresCounts = await getStoreProductSummaryCountsFromPostgres(storeId);
+    if (postgresCounts) {
+      return postgresCounts;
+    }
+  } catch (error) {
+    logProductsOnboardingReadFallback("products.summary-counts", error);
+  }
+
+  const db = await getTursoDb();
   const [row] = await db
     .select({
       total: sql<number>`count(*)`,
@@ -529,8 +593,22 @@ export async function listStoreProductModelNames({
   search?: string;
   limit?: number;
 }): Promise<string[]> {
+  try {
+    const postgresRows = await listStoreProductModelNamesFromPostgres({
+      storeId,
+      search,
+      limit,
+    });
+    if (postgresRows) {
+      return postgresRows;
+    }
+  } catch (error) {
+    logProductsOnboardingReadFallback("products.models.list", error);
+  }
+
   const safeLimit = Math.min(30, Math.max(1, Math.trunc(limit)));
   const keyword = search?.trim();
+  const db = await getTursoDb();
 
   const whereClause = keyword
     ? and(eq(productModels.storeId, storeId), like(productModels.name, `%${keyword}%`))
@@ -563,8 +641,21 @@ export async function getNextVariantSortOrderByModelName({
   storeId: string;
   modelName: string;
 }): Promise<number> {
+  try {
+    const postgresValue = await getNextVariantSortOrderByModelNameFromPostgres({
+      storeId,
+      modelName,
+    });
+    if (postgresValue !== undefined) {
+      return postgresValue;
+    }
+  } catch (error) {
+    logProductsOnboardingReadFallback("products.models.next-sort-order", error);
+  }
+
   const normalizedModelName = modelName.trim();
   if (!normalizedModelName) return 0;
+  const db = await getTursoDb();
 
   const [row] = await db
     .select({
@@ -599,11 +690,26 @@ export async function listVariantLabelsByModelName({
   search?: string;
   limit?: number;
 }): Promise<string[]> {
+  try {
+    const postgresRows = await listVariantLabelsByModelNameFromPostgres({
+      storeId,
+      modelName,
+      search,
+      limit,
+    });
+    if (postgresRows) {
+      return postgresRows;
+    }
+  } catch (error) {
+    logProductsOnboardingReadFallback("products.models.variant-labels", error);
+  }
+
   const normalizedModelName = modelName.trim();
   if (!normalizedModelName) return [];
 
   const safeLimit = Math.min(30, Math.max(1, Math.trunc(limit)));
   const keyword = search?.trim();
+  const db = await getTursoDb();
 
   let whereClause = and(
     eq(productModels.storeId, storeId),
@@ -645,7 +751,45 @@ export type CategoryItem = {
   productCount: number;
 };
 
+export async function getStoreProductThresholds(
+  storeId: string,
+): Promise<{ outStockThreshold: number; lowStockThreshold: number }> {
+  try {
+    const postgresThresholds = await getStoreProductThresholdsFromPostgres(storeId);
+    if (postgresThresholds) {
+      return postgresThresholds;
+    }
+  } catch (error) {
+    logProductsOnboardingReadFallback("products.thresholds", error);
+  }
+
+  const db = await getTursoDb();
+  const [storeRow] = await db
+    .select({
+      outStockThreshold: stores.outStockThreshold,
+      lowStockThreshold: stores.lowStockThreshold,
+    })
+    .from(stores)
+    .where(eq(stores.id, storeId))
+    .limit(1);
+
+  return {
+    outStockThreshold: storeRow?.outStockThreshold ?? 0,
+    lowStockThreshold: storeRow?.lowStockThreshold ?? 10,
+  };
+}
+
 export async function listCategories(storeId: string): Promise<CategoryItem[]> {
+  try {
+    const postgresRows = await listCategoriesFromPostgres(storeId);
+    if (postgresRows) {
+      return postgresRows;
+    }
+  } catch (error) {
+    logProductsOnboardingReadFallback("products.categories.list", error);
+  }
+
+  const db = await getTursoDb();
   const rows = await db
     .select({
       id: productCategories.id,

@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { and, eq, inArray, isNotNull, or, sql } from "drizzle-orm";
 import { ChevronRight, Gauge, Settings2, ShieldCheck, Store } from "lucide-react";
 import { redirect } from "next/navigation";
 
@@ -7,13 +6,12 @@ import { SuperadminPaymentPolicyConfig } from "@/components/app/superadmin-payme
 import { getSession } from "@/lib/auth/session";
 import { listActiveMemberships } from "@/lib/auth/session-db";
 import { getGlobalBranchPolicy } from "@/lib/branches/policy";
-import { db } from "@/lib/db/client";
-import { storeMembers, stores, users } from "@/lib/db/schema";
 import {
   getGlobalPaymentPolicy,
   getGlobalSessionPolicy,
   getGlobalStoreLogoPolicy,
 } from "@/lib/system-config/policy";
+import { getSuperadminGlobalConfigOverview } from "@/lib/superadmin/global-config";
 
 export default async function SettingsSuperadminGlobalConfigPage() {
   const session = await getSession();
@@ -33,79 +31,20 @@ export default async function SettingsSuperadminGlobalConfigPage() {
     globalSessionPolicy,
     globalPaymentPolicy,
     globalStoreLogoPolicy,
-    storeOverrideCountRows,
-    superadminOverrideCountRows,
-    storeOverrideRows,
-    superadminOverrideRows,
+    overview,
   ] = await Promise.all([
     getGlobalBranchPolicy(),
     getGlobalSessionPolicy(),
     getGlobalPaymentPolicy(),
     getGlobalStoreLogoPolicy(),
-    db
-      .select({ value: sql<number>`count(*)` })
-      .from(stores)
-      .where(and(inArray(stores.id, storeIds), isNotNull(stores.maxBranchesOverride))),
-    db
-      .select({ value: sql<number>`count(distinct ${users.id})` })
-      .from(storeMembers)
-      .innerJoin(users, eq(storeMembers.userId, users.id))
-      .where(
-        and(
-          inArray(storeMembers.storeId, storeIds),
-          eq(users.systemRole, "SUPERADMIN"),
-          or(
-            isNotNull(users.canCreateBranches),
-            isNotNull(users.maxBranchesPerStore),
-            isNotNull(users.sessionLimit),
-          ),
-        ),
-      ),
-    db
-      .select({
-        id: stores.id,
-        name: stores.name,
-        maxBranchesOverride: stores.maxBranchesOverride,
-      })
-      .from(stores)
-      .where(and(inArray(stores.id, storeIds), isNotNull(stores.maxBranchesOverride)))
-      .orderBy(stores.name)
-      .limit(30),
-    db
-      .select({
-        userId: users.id,
-        name: users.name,
-        email: users.email,
-        canCreateBranches: users.canCreateBranches,
-        maxBranchesPerStore: users.maxBranchesPerStore,
-        sessionLimit: users.sessionLimit,
-      })
-      .from(storeMembers)
-      .innerJoin(users, eq(storeMembers.userId, users.id))
-      .where(
-        and(
-          inArray(storeMembers.storeId, storeIds),
-          eq(users.systemRole, "SUPERADMIN"),
-          or(
-            isNotNull(users.canCreateBranches),
-            isNotNull(users.maxBranchesPerStore),
-            isNotNull(users.sessionLimit),
-          ),
-        ),
-      )
-      .groupBy(
-        users.id,
-        users.name,
-        users.email,
-        users.canCreateBranches,
-        users.maxBranchesPerStore,
-        users.sessionLimit,
-      )
-      .orderBy(users.name)
-      .limit(50),
+    getSuperadminGlobalConfigOverview(storeIds),
   ]);
-  const storeOverrideCount = Number(storeOverrideCountRows[0]?.value ?? 0);
-  const superadminOverrideCount = Number(superadminOverrideCountRows[0]?.value ?? 0);
+  const {
+    storeOverrideCount,
+    superadminOverrideCount,
+    storeOverrideRows,
+    superadminOverrideRows,
+  } = overview;
 
   return (
     <section className="space-y-5">

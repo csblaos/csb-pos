@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { db } from "@/lib/db/client";
 import { orders } from "@/lib/db/schema";
+import { buildRequestContext } from "@/lib/http/request-context";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import {
   isOrderShippingLabelR2Configured,
@@ -83,11 +84,13 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ orderId: string }> },
 ) {
+  let requestContext = buildRequestContext(null);
   let auditContext: UploadAuditContext | null = null;
 
   try {
     const { session, storeId } = await enforcePermission("orders.update");
     const { orderId } = await context.params;
+    requestContext = buildRequestContext(request);
     auditContext = {
       storeId,
       userId: session.userId,
@@ -108,7 +111,7 @@ export async function POST(
         entityId: orderId,
         result: "FAIL",
         reasonCode: "R2_NOT_CONFIGURED",
-        request,
+        requestContext,
       });
 
       return NextResponse.json(
@@ -130,7 +133,7 @@ export async function POST(
         entityId: orderId,
         result: "FAIL",
         reasonCode: "UNSUPPORTED_MEDIA_TYPE",
-        request,
+        requestContext,
       });
 
       return NextResponse.json(
@@ -161,7 +164,7 @@ export async function POST(
         entityId: orderId,
         result: "FAIL",
         reasonCode: "ORDER_NOT_FOUND",
-        request,
+        requestContext,
       });
       return NextResponse.json({ message: "ไม่พบออเดอร์" }, { status: 404 });
     }
@@ -182,7 +185,7 @@ export async function POST(
           orderNo: targetOrder.orderNo,
           status: targetOrder.status,
         },
-        request,
+        requestContext,
       });
       return NextResponse.json({ message: "ไม่สามารถอัปโหลดให้กับออเดอร์ที่ยกเลิกแล้ว" }, { status: 400 });
     }
@@ -208,7 +211,7 @@ export async function POST(
         result: "FAIL",
         reasonCode: "FILE_MISSING",
         metadata: { source },
-        request,
+        requestContext,
       });
       return NextResponse.json({ message: "กรุณาเลือกไฟล์รูปภาพ" }, { status: 400 });
     }
@@ -235,7 +238,7 @@ export async function POST(
         fileSize: fileValue.size,
         labelUrl: upload.url,
       },
-      request,
+      requestContext,
     });
 
     return NextResponse.json({
@@ -270,7 +273,7 @@ export async function POST(
         metadata: {
           message: error instanceof Error ? error.message : "unknown",
         },
-        request,
+        requestContext,
       });
     }
 

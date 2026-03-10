@@ -16,6 +16,22 @@
 10. `docs/orders-system-design.md`
 11. `docs/product-variants-plan.md`
 12. `docs/postgresql-sequelize-migration.md`
+13. `docs/postgres-staging-rollout.md`
+14. `docs/postgres-inventory-producers-audit.md`
+15. `docs/postgres-cutover-plan.md`
+16. `docs/postgres-full-cutover-checklist.md`
+17. `docs/postgres-purchase-rollout-execution.md`
+18. `docs/postgres-inventory-read-rollout-execution.md`
+19. `docs/postgres-auth-rbac-read-rollout-execution.md`
+20. `docs/postgres-settings-system-admin-read-rollout-execution.md`
+21. `docs/postgres-products-units-onboarding-read-rollout-execution.md`
+22. `docs/postgres-products-units-onboarding-write-rollout-execution.md`
+23. `docs/postgres-orders-write-rollout-execution.md`
+24. `docs/postgres-stock-movement-rollout-execution.md`
+25. `docs/postgres-all-postgres-observe-fallback-removal.md`
+26. `docs/postgres-turso-drizzle-retirement-plan.md`
+27. `docs/postgres-turso-runtime-dependency-audit.md`
+28. `docs/express-readiness-plan.md`
 
 ## What Each File Is For
 
@@ -43,6 +59,38 @@
   - แผนโครงสร้างสินค้าแบบ Variant (DB + UX + rollout phases)
 - `docs/postgresql-sequelize-migration.md`
   - แผนย้ายไป `PostgreSQL + Sequelize.query(...)` และออกแบบให้ย้ายไป Express ได้ง่าย
+- `docs/postgres-staging-rollout.md`
+  - runbook เปิด PostgreSQL read/write flags บน staging แบบเป็น wave พร้อม preflight/rollback checklist
+- `docs/postgres-inventory-producers-audit.md`
+  - inventory movement producers ที่ยังค้างบน Turso และลำดับ migration หลังจบ order-route rollout
+- `docs/postgres-cutover-plan.md`
+  - แผน cutover ของ inventory/reporting หลังผ่าน staging rollout แล้ว
+- `docs/postgres-full-cutover-checklist.md`
+  - master checklist ของสถานะ PostgreSQL vs Turso ปัจจุบัน และลำดับเปิด flags จนถึงถอด fallback/retire Turso
+- `docs/postgres-purchase-rollout-execution.md`
+  - checklist ปฏิบัติจริงสำหรับเปิด purchase runtime บน staging แบบ wave-by-wave พร้อม UAT/log review/rollback
+- `docs/postgres-inventory-read-rollout-execution.md`
+  - checklist ปฏิบัติจริงสำหรับเปิด inventory read truth บน staging พร้อม canary flows, stock/order UAT, และ rollback
+- `docs/postgres-auth-rbac-read-rollout-execution.md`
+  - checklist ปฏิบัติจริงสำหรับเปิด auth/session + RBAC + app shell read path บน staging ผ่าน `POSTGRES_AUTH_RBAC_READ_ENABLED`
+- `docs/postgres-settings-system-admin-read-rollout-execution.md`
+  - checklist ปฏิบัติจริงสำหรับเปิด settings/system-admin read path บน staging ผ่าน `POSTGRES_SETTINGS_SYSTEM_ADMIN_READ_ENABLED`
+- `docs/postgres-products-units-onboarding-read-rollout-execution.md`
+  - checklist ปฏิบัติจริงสำหรับเปิด products page, units/categories, และ onboarding read path บน staging ผ่าน `POSTGRES_PRODUCTS_ONBOARDING_READ_ENABLED`
+- `docs/postgres-products-units-onboarding-write-rollout-execution.md`
+  - checklist ปฏิบัติจริงสำหรับเปิด units/categories/onboarding low-risk write path บน staging ผ่าน `POSTGRES_PRODUCTS_ONBOARDING_WRITE_ENABLED`
+- `docs/postgres-orders-write-rollout-execution.md`
+  - checklist ปฏิบัติจริงสำหรับเปิด order lifecycle writes บน staging แบบ wave-by-wave พร้อม UAT, compare, และ rollback
+- `docs/postgres-stock-movement-rollout-execution.md`
+  - checklist ปฏิบัติจริงสำหรับเปิด manual stock movement writes บน staging พร้อม UAT, compare, และ rollback
+- `docs/postgres-all-postgres-observe-fallback-removal.md`
+  - runbook สำหรับช่วง observe หลังเปิด PostgreSQL runtime เกือบครบ และลำดับถอด fallback/Turso paths ทีละโดเมน
+- `docs/postgres-turso-drizzle-retirement-plan.md`
+  - แผนถอน Turso/Drizzle ออกจาก runtime, repositories, env, และ ops docs หลังจบ phase observe/fallback removal
+- `docs/postgres-turso-runtime-dependency-audit.md`
+  - audit ว่า runtime path ไหนยัง import/initialize Turso อยู่จริง, แยก temporary blockers กับกลุ่มที่พร้อมเข้า queue ถอดหลังเปิด PostgreSQL ครบ
+- `docs/express-readiness-plan.md`
+  - แผนเตรียม boundary สำหรับย้าย API จาก Next.js ไป Express + TypeScript แบบค่อยเป็นค่อยไป
 
 ## Maintenance Rules
 

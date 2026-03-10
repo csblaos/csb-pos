@@ -2,8 +2,11 @@ import "server-only";
 
 import { and, eq, isNull, sql } from "drizzle-orm";
 
-import { db } from "@/lib/db/client";
 import { storeMembers, stores, users } from "@/lib/db/schema";
+import {
+  getSystemAdminDashboardStatsFromPostgres,
+  logSettingsSystemAdminReadFallback,
+} from "@/lib/platform/postgres-settings-admin";
 
 export type SystemAdminDashboardStats = {
   totalClients: number;
@@ -16,6 +19,16 @@ export type SystemAdminDashboardStats = {
 };
 
 export async function getSystemAdminDashboardStats(): Promise<SystemAdminDashboardStats> {
+  try {
+    const postgresStats = await getSystemAdminDashboardStatsFromPostgres();
+    if (postgresStats) {
+      return postgresStats;
+    }
+  } catch (error) {
+    logSettingsSystemAdminReadFallback("system-admin.dashboard", error);
+  }
+
+  const { db } = await import("@/lib/db/client");
   const [
     clientRow,
     storeRow,

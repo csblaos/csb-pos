@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { buildRequestContext } from "@/lib/http/request-context";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { safeLogAuditEvent } from "@/server/services/audit.service";
 import {
   claimIdempotency,
-  getIdempotencyKey,
+  getIdempotencyKeyFromHeaders,
   hashRequestBody,
   safeMarkIdempotencyFailed,
 } from "@/server/services/idempotency.service";
@@ -24,6 +25,7 @@ export async function POST(
   context: { params: Promise<{ orderId: string }> },
 ) {
   const action = "order.create_shipping_label";
+  let requestContext = buildRequestContext(null);
   let idempotencyRecordId: string | null = null;
   let auditContext:
     | {
@@ -38,6 +40,7 @@ export async function POST(
   try {
     const { session, storeId } = await enforcePermission("orders.ship");
     const { orderId } = await context.params;
+    requestContext = buildRequestContext(request);
     auditContext = {
       storeId,
       userId: session.userId,
@@ -46,7 +49,7 @@ export async function POST(
       orderId,
     };
     const rawBody = await request.text();
-    const idempotencyKey = getIdempotencyKey(request);
+    const idempotencyKey = getIdempotencyKeyFromHeaders(request.headers);
     const requestHash = hashRequestBody(rawBody);
 
     let body: unknown;
@@ -129,7 +132,7 @@ export async function POST(
         metadata: {
           issues: payload.error.issues.map((issue) => issue.path.join(".")).slice(0, 5),
         },
-        request,
+        requestContext,
       });
       return NextResponse.json(
         { message: "ข้อมูลการสร้างป้ายจัดส่งไม่ถูกต้อง" },
@@ -145,7 +148,7 @@ export async function POST(
       audit: {
         actorName: session.displayName,
         actorRole: session.activeRoleName,
-        request,
+        requestContext,
       },
       idempotency: idempotencyRecordId
         ? {
@@ -183,7 +186,7 @@ export async function POST(
           metadata: {
             message: error.message,
           },
-          request,
+          requestContext,
         });
       }
       return NextResponse.json({ message: error.message }, { status: error.status });
@@ -212,7 +215,7 @@ export async function POST(
         metadata: {
           message: error instanceof Error ? error.message : "unknown",
         },
-        request,
+        requestContext,
       });
     }
 

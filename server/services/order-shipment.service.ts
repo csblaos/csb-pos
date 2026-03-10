@@ -2,6 +2,7 @@ import "server-only";
 
 import { db } from "@/lib/db/client";
 import { auditEvents } from "@/lib/db/schema";
+import type { RequestContext } from "@/lib/http/request-context";
 import { buildAuditEventValues } from "@/server/services/audit.service";
 import { markIdempotencySucceeded } from "@/server/services/idempotency.service";
 import {
@@ -19,6 +20,7 @@ type ShipmentAuditContext = {
   actorName: string | null;
   actorRole: string | null;
   request?: Request;
+  requestContext?: RequestContext;
 };
 
 type ShipmentIdempotencyContext = {
@@ -134,6 +136,7 @@ export async function createOrderShipmentLabel(params: {
             providerRequestId: reusedPayload.shipment.providerRequestId,
             reused: true,
           },
+          requestContext: params.audit.requestContext,
           request: params.audit.request,
         }),
       );
@@ -228,6 +231,7 @@ export async function createOrderShipmentLabel(params: {
             providerRequestId: providerResult.providerRequestId,
             reused: false,
           },
+          requestContext: params.audit.requestContext,
           request: params.audit.request,
         }),
       );

@@ -2,6 +2,72 @@
 
 ไฟล์นี้บันทึก "ทำไม" ของการออกแบบสำคัญ เพื่อให้ AI/คนทำงานต่อไม่เดาเอง
 
+## ADR-023: เตรียมย้ายไป Express โดยแยก RequestContext ออกจาก Service ก่อนย้าย Transport
+
+- Date: March 10, 2026
+- Status: Accepted
+- Decision:
+  - จะไม่ย้ายจาก Next route ไป Express แบบ big-bang
+  - ให้ refactor โดยแยก `RequestContext` / transport adapter ออกจาก service/use-case ก่อน
+  - service/repository ใหม่ห้ามพึ่ง `NextRequest` / `NextResponse` โดยตรง
+- Reason:
+  - จุดผูกกับ framework ตอนนี้กระจุกใน request parsing, audit, idempotency, และ error mapping
+  - ถ้าแยก concerns เหล่านี้ก่อน จะย้ายแต่ละ domain ไป Express ได้แบบ reuse business logic เดิม
+- Consequence:
+  - ต้องมีแผนแยก transport boundary แยกต่างหาก (`docs/express-readiness-plan.md`)
+  - phase ถัดไปควรเริ่มจาก `RequestContext + audit/idempotency decoupling` ไม่ใช่เริ่มย้าย route ไป Express ทันที
+
+## ADR-022: ถอน Turso/Drizzle แบบทีละโดเมนหลัง Zero-Fallback เท่านั้น
+
+- Date: March 10, 2026
+- Status: Accepted
+- Decision:
+  - หลัง PostgreSQL runtime เปิดครบแล้ว จะยังไม่ถอน Turso/Drizzle ทันที
+  - ต้องผ่าน phase observe/fallback removal ก่อน และใช้เกณฑ์ `zero fallback` ต่อโดเมนเป็นตัวตัดสิน
+  - ลำดับถอนที่ยอมรับคือ `reports -> purchase -> inventory -> orders -> write/runtime dependencies`
+- Reason:
+  - แม้ PostgreSQL paths จะพร้อมแล้ว แต่การถอด fallback และ runtime dependency เร็วเกินไปจะทำให้ rollback ยากและอาจมี hidden dependency ที่ยังไม่ถูกพบ
+  - การถอนทีละโดเมนช่วยแยก blast radius และทำให้ compare/smoke/UAT ชี้ต้นเหตุได้ง่ายกว่า
+- Consequence:
+  - ต้องมี runbook retirement แยก (`docs/postgres-turso-drizzle-retirement-plan.md`)
+  - ทีมต้อง audit imports, env, และ repository usage จริงก่อนเริ่มถอน Turso/Drizzle
+  - phase `Express readiness` จะถูกเลื่อนไปหลัง runtime retirement สำเร็จแล้ว
+
+## ADR-021: Inventory/Reporting Cutover ใช้ Shadow-Compare + Canary ก่อนลดบทบาท Turso
+
+- Date: March 10, 2026
+- Status: Accepted
+- Decision:
+  - หลัง `orders write`, `purchase read/write`, และ `inventory read` พร้อมบน PostgreSQL แล้ว ให้ cutover inventory/reporting แบบเป็น wave ไม่ทำ big-bang
+  - ใช้ compare scripts + smoke gates เป็นเงื่อนไขก่อนเปิด `POSTGRES_INVENTORY_READ_ENABLED=1` และก่อนย้าย report paths
+  - ยังไม่ถอด Turso/Drizzle ทันทีหลัง inventory read เปิด แต่ลดบทบาทเหลือ fallback/legacy path ก่อน
+- Reason:
+  - inventory/reporting เป็นก้อนที่กระทบ stock truth และตัวเลขธุรกิจโดยตรง ถ้า cutover พร้อมกันหลายโดเมนจะ rollback ยากมาก
+  - การคง Turso เป็น fallback ชั่วคราวช่วยลด blast radius และเปิดทางให้ observe parity ภายใต้ traffic จริง
+  - reports เป็น consumer หลักถัดไปของ order/purchase/inventory aggregates จึงควรย้ายหลัง inventory read นิ่งแล้ว
+- Consequence:
+  - ต้องมี runbook cutover แยกจาก staging rollout (`docs/postgres-cutover-plan.md`)
+  - ทีมต้องใช้ gate script รวม (`npm run smoke:postgres:cutover-gate`) ก่อนขยับเข้าสู่ phase report migration/cutover
+  - การ decommission Turso/Drizzle จะถูกเลื่อนไปหลัง inventory/reporting parity และ canary usage ผ่านแล้ว
+
+## ADR-020: PostgreSQL Rollout บน Staging ใช้ Feature-Flag Waves ก่อนเปิด Inventory Reads
+
+- Date: March 10, 2026
+- Status: Accepted
+- Decision:
+  - การเปิด PostgreSQL path บน staging ให้เปิดเป็น wave ตามความเสี่ยงของ action ไม่เปิดพร้อมกันทั้งหมด
+  - `orders read` เปิดก่อน, ตามด้วย low-risk writes, fulfillment writes, return/cancel writes, และ payment writes
+  - คง `POSTGRES_INVENTORY_READ_ENABLED=0` ไว้จนกว่า movement producers นอก `PATCH /api/orders/[orderId]` จะ dual-write ครบ
+  - ใช้ smoke suite รวม (`npm run smoke:postgres:orders-write-suite`) และ parity compares เป็น gate ก่อนเปิด flag แต่ละ wave
+- Reason:
+  - order lifecycle ของระบบนี้แตะทั้ง state transition, stock movement, audit, และ idempotency จึงไม่ควรเปิดทุก path พร้อมกันในสภาพแวดล้อมที่มี traffic จริง
+  - inventory reads จะ stale ทันทีถ้ายังมี movement producers บางก้อนเขียนเข้า Turso อย่างเดียว
+  - wave rollout ทำให้ isolate blast radius และ rollback เฉพาะกลุ่ม action ที่เพิ่งเปิดได้ง่าย
+- Consequence:
+  - ทีมต้องรักษา discipline เรื่อง preflight (`db:compare`, smoke suite, lint, build) ก่อนเปลี่ยน env flags
+  - ต้องมี staging runbook ที่เป็น source of truth เดียวสำหรับลำดับเปิด flags และ rollback rules
+  - phase ถัดไปหลัง order-route rollout ต้องโฟกัสย้าย stock/purchase movement producers ต่อเพื่อปลดล็อก inventory reads บน PostgreSQL
+
 ## ADR-019: PostgreSQL Migration ใช้ Sequelize แบบ Query-First แทน ORM Model-First
 
 - Date: March 9, 2026

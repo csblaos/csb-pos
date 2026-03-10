@@ -3,8 +3,18 @@ import { randomUUID } from "node:crypto";
 import { and, eq, inArray, or } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { db } from "@/lib/db/client";
 import { auditEvents, productUnits, products, units } from "@/lib/db/schema";
+import { buildRequestContext } from "@/lib/http/request-context";
+import { getStoreProductByIdDirectFromPostgres } from "@/lib/platform/postgres-products-onboarding";
+import {
+  isPostgresProductsWriteEnabled,
+  logProductsWriteFallback,
+  removeProductImageInPostgres,
+  setProductActiveInPostgres,
+  updateProductCostInPostgres,
+  updateProductImageInPostgres,
+  updateProductInPostgres,
+} from "@/lib/platform/postgres-products-write";
 import {
   RBACError,
   enforcePermission,
@@ -12,7 +22,6 @@ import {
   toRBACErrorResponse,
 } from "@/lib/rbac/access";
 import { normalizeProductPayload, updateProductSchema } from "@/lib/products/validation";
-import { buildAuditEventValues } from "@/server/services/audit.service";
 import {
   deleteProductImageFromR2,
   isProductImageR2Configured,
@@ -23,6 +32,8 @@ import {
   buildVariantColumns,
   isVariantCombinationUniqueError,
 } from "@/lib/products/variant-persistence";
+
+const getTursoDb = async () => (await import("@/lib/db/client")).db;
 
 export async function PATCH(
   request: Request,
@@ -35,6 +46,8 @@ export async function PATCH(
     if (contentType.includes("multipart/form-data")) {
       const { storeId } = await enforcePermission("products.update");
       const { productId } = await context.params;
+      const postgresWriteEnabled = isPostgresProductsWriteEnabled();
+      const db = postgresWriteEnabled ? null : await getTursoDb();
 
       if (!isProductImageR2Configured()) {
         return NextResponse.json(
@@ -43,11 +56,15 @@ export async function PATCH(
         );
       }
 
-      const [targetProduct] = await db
-        .select({ id: products.id, name: products.name, imageUrl: products.imageUrl })
-        .from(products)
-        .where(and(eq(products.id, productId), eq(products.storeId, storeId)))
-        .limit(1);
+      const targetProduct = postgresWriteEnabled
+        ? await getStoreProductByIdDirectFromPostgres(storeId, productId)
+        : (
+            await db!
+              .select({ id: products.id, name: products.name, imageUrl: products.imageUrl })
+              .from(products)
+              .where(and(eq(products.id, productId), eq(products.storeId, storeId)))
+              .limit(1)
+          )[0];
 
       if (!targetProduct) {
         return NextResponse.json({ message: "ไม่พบสินค้า" }, { status: 404 });
@@ -109,10 +126,31 @@ export async function PATCH(
         }
       }
 
-      await db
-        .update(products)
-        .set({ imageUrl: imageKey })
-        .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
+      if (isPostgresProductsWriteEnabled()) {
+        try {
+          const result = await updateProductImageInPostgres({
+            storeId,
+            productId,
+            imageUrl: imageKey,
+          });
+
+          if (!result.ok) {
+            return NextResponse.json({ message: "ไม่พบสินค้า" }, { status: 404 });
+          }
+        } catch (error) {
+          logProductsWriteFallback("products.image.upload", error);
+          const fallbackDb = await getTursoDb();
+          await fallbackDb
+            .update(products)
+            .set({ imageUrl: imageKey })
+            .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
+        }
+      } else {
+        await db!
+          .update(products)
+          .set({ imageUrl: imageKey })
+          .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
+      }
 
       return NextResponse.json({ ok: true, imageUrl: resolveProductImageUrl(imageKey) });
     }
@@ -137,20 +175,42 @@ export async function PATCH(
         throw new RBACError(403, "ไม่มีสิทธิ์ปิดใช้งานสินค้า");
       }
 
-      const [targetProduct] = await db
-        .select({ id: products.id })
-        .from(products)
-        .where(and(eq(products.id, productId), eq(products.storeId, storeId)))
-        .limit(1);
+      if (isPostgresProductsWriteEnabled()) {
+        try {
+          const result = await setProductActiveInPostgres({
+            storeId,
+            productId,
+            active: parsed.data.active,
+          });
 
-      if (!targetProduct) {
-        return NextResponse.json({ message: "ไม่พบสินค้า" }, { status: 404 });
+          if (!result.ok) {
+            return NextResponse.json({ message: "ไม่พบสินค้า" }, { status: 404 });
+          }
+        } catch (error) {
+          logProductsWriteFallback("products.set_active", error);
+          const db = await getTursoDb();
+          await db
+            .update(products)
+            .set({ active: parsed.data.active })
+            .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
+        }
+      } else {
+        const db = await getTursoDb();
+        const [targetProduct] = await db
+          .select({ id: products.id })
+          .from(products)
+          .where(and(eq(products.id, productId), eq(products.storeId, storeId)))
+          .limit(1);
+
+        if (!targetProduct) {
+          return NextResponse.json({ message: "ไม่พบสินค้า" }, { status: 404 });
+        }
+
+        await db
+          .update(products)
+          .set({ active: parsed.data.active })
+          .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
       }
-
-      await db
-        .update(products)
-        .set({ active: parsed.data.active })
-        .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
 
       return NextResponse.json({ ok: true });
     }
@@ -167,55 +227,134 @@ export async function PATCH(
         throw new RBACError(403, "ไม่มีสิทธิ์แก้ไขต้นทุนสินค้า");
       }
 
-      const [targetProduct] = await db
-        .select({ id: products.id, costBase: products.costBase, name: products.name })
-        .from(products)
-        .where(and(eq(products.id, productId), eq(products.storeId, storeId)))
-        .limit(1);
-
-      if (!targetProduct) {
-        return NextResponse.json({ message: "ไม่พบสินค้า" }, { status: 404 });
-      }
-
       const nextCostBase = parsed.data.costBase;
       const reason = parsed.data.reason;
-      if (nextCostBase === targetProduct.costBase) {
-        return NextResponse.json({ ok: true, unchanged: true });
-      }
 
-      await db.transaction(async (tx) => {
-        await tx
-          .update(products)
-          .set({ costBase: nextCostBase })
-          .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
-
-        await tx.insert(auditEvents).values(
-          buildAuditEventValues({
-            scope: "STORE",
+      if (isPostgresProductsWriteEnabled()) {
+        try {
+          const result = await updateProductCostInPostgres({
             storeId,
+            productId,
+            nextCostBase,
+            reason,
             actorUserId: session.userId,
             actorName: session.displayName,
             actorRole: session.activeRoleName,
-            action: "product.cost.manual_update",
-            entityType: "product",
-            entityId: productId,
-            metadata: {
-              source: "MANUAL",
-              productName: targetProduct.name,
-              reason,
-              previousCostBase: targetProduct.costBase,
-              nextCostBase,
-            },
-            before: {
-              costBase: targetProduct.costBase,
-            },
-            after: {
-              costBase: nextCostBase,
-            },
-            request,
-          }),
-        );
-      });
+            requestContext: buildRequestContext(request),
+          });
+
+          if (!result.ok) {
+            return NextResponse.json({ message: "ไม่พบสินค้า" }, { status: 404 });
+          }
+
+          if (result.unchanged) {
+            return NextResponse.json({ ok: true, unchanged: true });
+          }
+        } catch (error) {
+          logProductsWriteFallback("products.update_cost", error);
+          const db = await getTursoDb();
+          const [targetProduct] = await db
+            .select({ id: products.id, costBase: products.costBase, name: products.name })
+            .from(products)
+            .where(and(eq(products.id, productId), eq(products.storeId, storeId)))
+            .limit(1);
+
+          if (!targetProduct) {
+            return NextResponse.json({ message: "ไม่พบสินค้า" }, { status: 404 });
+          }
+
+          if (nextCostBase === targetProduct.costBase) {
+            return NextResponse.json({ ok: true, unchanged: true });
+          }
+
+          const { buildAuditEventValues } = await import("@/server/services/audit.service");
+
+          await db.transaction(async (tx) => {
+            await tx
+              .update(products)
+              .set({ costBase: nextCostBase })
+              .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
+
+            await tx.insert(auditEvents).values(
+              buildAuditEventValues({
+                scope: "STORE",
+                storeId,
+                actorUserId: session.userId,
+                actorName: session.displayName,
+                actorRole: session.activeRoleName,
+                action: "product.cost.manual_update",
+                entityType: "product",
+                entityId: productId,
+                metadata: {
+                  source: "MANUAL",
+                  productName: targetProduct.name,
+                  reason,
+                  previousCostBase: targetProduct.costBase,
+                  nextCostBase,
+                },
+                before: {
+                  costBase: targetProduct.costBase,
+                },
+                after: {
+                  costBase: nextCostBase,
+                },
+                requestContext: buildRequestContext(request),
+              }),
+            );
+          });
+        }
+      } else {
+        const db = await getTursoDb();
+        const [targetProduct] = await db
+          .select({ id: products.id, costBase: products.costBase, name: products.name })
+          .from(products)
+          .where(and(eq(products.id, productId), eq(products.storeId, storeId)))
+          .limit(1);
+
+        if (!targetProduct) {
+          return NextResponse.json({ message: "ไม่พบสินค้า" }, { status: 404 });
+        }
+
+        if (nextCostBase === targetProduct.costBase) {
+          return NextResponse.json({ ok: true, unchanged: true });
+        }
+
+        const { buildAuditEventValues } = await import("@/server/services/audit.service");
+
+        await db.transaction(async (tx) => {
+          await tx
+            .update(products)
+            .set({ costBase: nextCostBase })
+            .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
+
+          await tx.insert(auditEvents).values(
+            buildAuditEventValues({
+              scope: "STORE",
+              storeId,
+              actorUserId: session.userId,
+              actorName: session.displayName,
+              actorRole: session.activeRoleName,
+              action: "product.cost.manual_update",
+              entityType: "product",
+              entityId: productId,
+              metadata: {
+                source: "MANUAL",
+                productName: targetProduct.name,
+                reason,
+                previousCostBase: targetProduct.costBase,
+                nextCostBase,
+              },
+              before: {
+                costBase: targetProduct.costBase,
+              },
+              after: {
+                costBase: nextCostBase,
+              },
+              requestContext: buildRequestContext(request),
+            }),
+          );
+        });
+      }
 
       return NextResponse.json({ ok: true });
     }
@@ -223,12 +362,17 @@ export async function PATCH(
     // ── remove_image ──
     if (parsed.data.action === "remove_image") {
       const { storeId } = await enforcePermission("products.update");
-
-      const [targetProduct] = await db
-        .select({ id: products.id, imageUrl: products.imageUrl })
-        .from(products)
-        .where(and(eq(products.id, productId), eq(products.storeId, storeId)))
-        .limit(1);
+      const postgresWriteEnabled = isPostgresProductsWriteEnabled();
+      const db = postgresWriteEnabled ? null : await getTursoDb();
+      const targetProduct = postgresWriteEnabled
+        ? await getStoreProductByIdDirectFromPostgres(storeId, productId)
+        : (
+            await db!
+              .select({ id: products.id, imageUrl: products.imageUrl })
+              .from(products)
+              .where(and(eq(products.id, productId), eq(products.storeId, storeId)))
+              .limit(1)
+          )[0];
 
       if (!targetProduct) {
         return NextResponse.json({ message: "ไม่พบสินค้า" }, { status: 404 });
@@ -242,10 +386,30 @@ export async function PATCH(
         }
       }
 
-      await db
-        .update(products)
-        .set({ imageUrl: null })
-        .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
+      if (isPostgresProductsWriteEnabled()) {
+        try {
+          const result = await removeProductImageInPostgres({
+            storeId,
+            productId,
+          });
+
+          if (!result.ok) {
+            return NextResponse.json({ message: "ไม่พบสินค้า" }, { status: 404 });
+          }
+        } catch (error) {
+          logProductsWriteFallback("products.remove_image", error);
+          const fallbackDb = await getTursoDb();
+          await fallbackDb
+            .update(products)
+            .set({ imageUrl: null })
+            .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
+        }
+      } else {
+        await db!
+          .update(products)
+          .set({ imageUrl: null })
+          .where(and(eq(products.id, productId), eq(products.storeId, storeId)));
+      }
 
       return NextResponse.json({ ok: true });
     }
@@ -253,6 +417,53 @@ export async function PATCH(
     // ── update (full product data) ──
     const { storeId } = await enforcePermission("products.update");
 
+    const payload = normalizeProductPayload(parsed.data.data);
+
+    if (isPostgresProductsWriteEnabled()) {
+      try {
+        const result = await updateProductInPostgres({
+          storeId,
+          productId,
+          payload,
+        });
+
+        if (!result.ok) {
+          if (result.error === "NOT_FOUND") {
+            return NextResponse.json({ message: "ไม่พบสินค้า" }, { status: 404 });
+          }
+
+          if (result.error === "CONFLICT_SKU") {
+            return NextResponse.json({ message: "SKU นี้มีอยู่แล้วในร้าน" }, { status: 409 });
+          }
+
+          if (result.error === "INVALID_UNIT") {
+            return NextResponse.json({ message: "พบหน่วยสินค้าที่ไม่ถูกต้อง" }, { status: 400 });
+          }
+
+          if (result.error === "INVALID_CATEGORY") {
+            return NextResponse.json({ message: "พบหมวดหมู่สินค้าที่ไม่ถูกต้อง" }, { status: 400 });
+          }
+
+          if (result.error === "VARIANT_CONFLICT") {
+            return NextResponse.json(
+              {
+                message:
+                  "Variant นี้ซ้ำกับสินค้าใน Model เดียวกัน กรุณาเปลี่ยนตัวเลือก/ชื่อ Variant",
+              },
+              { status: 409 },
+            );
+          }
+
+          return NextResponse.json({ message: "บันทึกสินค้าไม่สำเร็จ" }, { status: 400 });
+        }
+
+        return NextResponse.json({ ok: true, product: result.product });
+      } catch (error) {
+        logProductsWriteFallback("products.update", error);
+      }
+    }
+
+    const db = await getTursoDb();
     const [targetProduct] = await db
       .select({ id: products.id })
       .from(products)
@@ -262,8 +473,6 @@ export async function PATCH(
     if (!targetProduct) {
       return NextResponse.json({ message: "ไม่พบสินค้า" }, { status: 404 });
     }
-
-    const payload = normalizeProductPayload(parsed.data.data);
 
     const [existingSku] = await db
       .select({ id: products.id })

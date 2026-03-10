@@ -1,10 +1,17 @@
 import { and, eq, or, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { db } from "@/lib/db/client";
 import { orderItems, orders, productUnits, products, units } from "@/lib/db/schema";
+import {
+  deleteUnitInPostgres,
+  isPostgresProductsOnboardingWriteEnabled,
+  logProductsOnboardingWriteFallback,
+  updateUnitInPostgres,
+} from "@/lib/platform/postgres-products-onboarding-write";
 import { RBACError, enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { createUnitSchema, normalizeUnitPayload } from "@/lib/products/validation";
+
+const getTursoDb = async () => (await import("@/lib/db/client")).db;
 
 export async function PATCH(
   request: Request,
@@ -12,6 +19,7 @@ export async function PATCH(
 ) {
   try {
     const { storeId } = await enforcePermission("units.update");
+    const db = await getTursoDb();
 
     const parsed = createUnitSchema.safeParse(await request.json());
     if (!parsed.success) {
@@ -20,6 +28,34 @@ export async function PATCH(
 
     const { unitId } = await context.params;
     const payload = normalizeUnitPayload(parsed.data);
+
+    if (isPostgresProductsOnboardingWriteEnabled()) {
+      try {
+        const result = await updateUnitInPostgres({
+          storeId,
+          unitId,
+          code: payload.code,
+          nameTh: payload.nameTh,
+        });
+
+        if (!result.ok) {
+          if (result.error === "NOT_FOUND") {
+            return NextResponse.json({ message: "ไม่พบหน่วยสินค้า" }, { status: 404 });
+          }
+          if (result.error === "SYSTEM_SCOPE") {
+            throw new RBACError(403, "ไม่สามารถแก้ไขหน่วยมาตรฐานของระบบ");
+          }
+          return NextResponse.json({ message: "รหัสหน่วยนี้มีอยู่แล้ว" }, { status: 409 });
+        }
+
+        return NextResponse.json({
+          ok: true,
+          unit: result.unit,
+        });
+      } catch (error) {
+        logProductsOnboardingWriteFallback("units.update", error);
+      }
+    }
 
     const [targetUnit] = await db
       .select({ id: units.id, scope: units.scope, storeId: units.storeId })
@@ -99,6 +135,37 @@ export async function DELETE(
   try {
     const { storeId } = await enforcePermission("units.delete");
     const { unitId } = await context.params;
+    const db = await getTursoDb();
+
+    if (isPostgresProductsOnboardingWriteEnabled()) {
+      try {
+        const result = await deleteUnitInPostgres({
+          storeId,
+          unitId,
+        });
+
+        if (!result.ok) {
+          if (result.error === "NOT_FOUND") {
+            return NextResponse.json({ message: "ไม่พบหน่วยสินค้า" }, { status: 404 });
+          }
+          if (result.error === "SYSTEM_SCOPE") {
+            throw new RBACError(403, "ไม่สามารถลบหน่วยมาตรฐานของระบบ");
+          }
+          return NextResponse.json(
+            {
+              message:
+                "ลบหน่วยนี้ไม่ได้ เพราะยังถูกใช้งานอยู่ในสินค้า/รายการขาย กรุณาแก้ไขข้อมูลที่เกี่ยวข้องก่อน",
+              usage: result.usage,
+            },
+            { status: 409 },
+          );
+        }
+
+        return NextResponse.json({ ok: true });
+      } catch (error) {
+        logProductsOnboardingWriteFallback("units.delete", error);
+      }
+    }
 
     const [targetUnit] = await db
       .select({ id: units.id, scope: units.scope, storeId: units.storeId, code: units.code })

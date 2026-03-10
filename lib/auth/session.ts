@@ -15,8 +15,11 @@ import {
   verifySessionTokenClaims,
 } from "@/lib/auth/session-token";
 import { sessionSchema, type AppSession } from "@/lib/auth/session-types";
-import { db } from "@/lib/db/client";
 import { users } from "@/lib/db/schema";
+import {
+  getUserSessionLimitOverrideFromPostgres,
+  logAuthRbacReadFallback,
+} from "@/lib/platform/postgres-auth-rbac";
 import { getGlobalSessionPolicy } from "@/lib/system-config/policy";
 
 export type { AppSession } from "@/lib/auth/session-types";
@@ -104,6 +107,8 @@ const normalizeActiveSessionRefs = (rawValue: unknown): ActiveSessionRef[] => {
   return [...dedup.values()].sort((a, b) => a.issuedAt - b.issuedAt);
 };
 
+const getTursoDb = async () => (await import("@/lib/db/client")).db;
+
 const readActiveSessionRefs = async (userId: string) => {
   const raw = await redisGetJson<unknown>(userActiveSessionsCacheKey(userId));
   return normalizeActiveSessionRefs(raw);
@@ -132,6 +137,16 @@ const pruneMissingActiveSessionRefs = async (refs: ActiveSessionRef[]) => {
 };
 
 const getUserSessionLimitOverride = async (userId: string) => {
+  try {
+    const postgresOverride = await getUserSessionLimitOverrideFromPostgres(userId);
+    if (postgresOverride !== undefined) {
+      return postgresOverride;
+    }
+  } catch (error) {
+    logAuthRbacReadFallback("session.user-session-limit", error);
+  }
+
+  const db = await getTursoDb();
   const [row] = await db
     .select({ sessionLimit: users.sessionLimit })
     .from(users)

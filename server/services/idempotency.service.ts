@@ -6,6 +6,7 @@ import { and, eq, sql } from "drizzle-orm";
 
 import { db } from "@/lib/db/client";
 import { idempotencyRequests } from "@/lib/db/schema";
+import type { HeaderReader } from "@/lib/http/request-context";
 
 type IdempotencyTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type IdempotencyExecutor = typeof db | IdempotencyTx;
@@ -37,10 +38,10 @@ const parseStoredBody = (value: string | null): unknown => {
   }
 };
 
-export function getIdempotencyKey(request: Request): string | null {
+export function getIdempotencyKeyFromHeaders(headers: HeaderReader): string | null {
   const raw =
-    request.headers.get("idempotency-key") ??
-    request.headers.get("x-idempotency-key");
+    headers.get("idempotency-key") ??
+    headers.get("x-idempotency-key");
 
   if (!raw) {
     return null;
@@ -52,6 +53,10 @@ export function getIdempotencyKey(request: Request): string | null {
   }
 
   return key.slice(0, IDEMPOTENCY_KEY_MAX_LEN);
+}
+
+export function getIdempotencyKey(request: Request): string | null {
+  return getIdempotencyKeyFromHeaders(request.headers);
 }
 
 export function hashRequestBody(rawBody: string): string {

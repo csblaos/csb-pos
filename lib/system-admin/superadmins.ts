@@ -2,8 +2,11 @@ import "server-only";
 
 import { and, asc, eq, sql } from "drizzle-orm";
 
-import { db } from "@/lib/db/client";
 import { roles, storeMembers, users } from "@/lib/db/schema";
+import {
+  listSuperadminsFromPostgres,
+  logSettingsSystemAdminReadFallback,
+} from "@/lib/platform/postgres-settings-admin";
 
 export type SuperadminItem = {
   userId: string;
@@ -18,6 +21,16 @@ export type SuperadminItem = {
 };
 
 export async function listSuperadmins(): Promise<SuperadminItem[]> {
+  try {
+    const postgresRows = await listSuperadminsFromPostgres();
+    if (postgresRows) {
+      return postgresRows;
+    }
+  } catch (error) {
+    logSettingsSystemAdminReadFallback("system-admin.superadmins", error);
+  }
+
+  const { db } = await import("@/lib/db/client");
   const rows = await db
     .select({
       userId: users.id,

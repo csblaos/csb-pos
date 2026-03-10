@@ -3,8 +3,13 @@ import { unstable_cache } from "next/cache";
 import { cache } from "react";
 
 import { getSession } from "@/lib/auth/session";
-import { db } from "@/lib/db/client";
 import { permissions, rolePermissions, roles, storeMembers } from "@/lib/db/schema";
+import {
+  getAllPermissionKeysFromPostgres,
+  getMembershipFromPostgres,
+  getRolePermissionKeysFromPostgres,
+  logAuthRbacReadFallback,
+} from "@/lib/platform/postgres-auth-rbac";
 
 export const OWNER_PERMISSION_WILDCARD = "*";
 
@@ -32,7 +37,19 @@ const userIdFromIdentity = (user: UserIdentity) => {
   return userId;
 };
 
+const getTursoDb = async () => (await import("@/lib/db/client")).db;
+
 async function getMembership(userId: string, storeId: string) {
+  try {
+    const postgresMembership = await getMembershipFromPostgres(userId, storeId);
+    if (postgresMembership !== undefined) {
+      return postgresMembership ?? null;
+    }
+  } catch (error) {
+    logAuthRbacReadFallback("rbac.membership", error);
+  }
+
+  const db = await getTursoDb();
   const [membership] = await db
     .select({
       roleId: roles.id,
@@ -56,6 +73,16 @@ async function getMembership(userId: string, storeId: string) {
 const getMembershipForRequest = cache(getMembership);
 
 async function getAllPermissionKeys() {
+  try {
+    const postgresPermissionKeys = await getAllPermissionKeysFromPostgres();
+    if (postgresPermissionKeys !== undefined) {
+      return postgresPermissionKeys;
+    }
+  } catch (error) {
+    logAuthRbacReadFallback("rbac.permission-keys", error);
+  }
+
+  const db = await getTursoDb();
   const allPermissionRows = await db.select({ key: permissions.key }).from(permissions);
   return allPermissionRows.map((permission) => permission.key);
 }
@@ -67,6 +94,16 @@ const getAllPermissionKeysCached = unstable_cache(
 );
 
 async function getRolePermissionKeys(roleId: string) {
+  try {
+    const postgresPermissionKeys = await getRolePermissionKeysFromPostgres(roleId);
+    if (postgresPermissionKeys !== undefined) {
+      return postgresPermissionKeys;
+    }
+  } catch (error) {
+    logAuthRbacReadFallback("rbac.role-permission-keys", error);
+  }
+
+  const db = await getTursoDb();
   const permissionRows = await db
     .select({ key: permissions.key })
     .from(rolePermissions)

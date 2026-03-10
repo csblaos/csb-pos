@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { RequestContext } from "@/lib/http/request-context";
 import type {
   ApplyPurchaseOrderExtraCostInput,
   CreatePurchaseOrderInput,
@@ -9,6 +10,13 @@ import type {
   UpdatePurchaseOrderInput,
   UpdatePOStatusInput,
 } from "@/lib/purchases/validation";
+import {
+  getPendingExchangeRateQueueFromPostgres,
+  getPurchaseOrderDetailFromPostgres,
+  listPurchaseOrdersFromPostgres,
+  listPurchaseOrdersPagedFromPostgres,
+  logPurchaseReadFallback,
+} from "@/lib/purchases/queries";
 import {
   getNextPoNumber,
   getLatestPurchaseOrderPaymentEntry,
@@ -52,6 +60,7 @@ type PurchaseAuditContext = {
   actorName: string | null;
   actorRole: string | null;
   request?: Request;
+  requestContext?: RequestContext;
 };
 
 type PurchaseIdempotencyContext = {
@@ -94,6 +103,15 @@ function derivePoPaymentStatus(
  * ──────────────────────────────────────────────── */
 
 export async function getPurchaseOrderList(storeId: string) {
+  try {
+    const purchaseOrders = await listPurchaseOrdersFromPostgres(storeId);
+    if (purchaseOrders) {
+      return purchaseOrders;
+    }
+  } catch (error) {
+    logPurchaseReadFallback("getPurchaseOrderList", error);
+  }
+
   return listPurchaseOrders(storeId);
 }
 
@@ -102,6 +120,15 @@ export async function getPurchaseOrderListPage(
   limit: number,
   offset: number,
 ) {
+  try {
+    const purchaseOrders = await listPurchaseOrdersPagedFromPostgres(storeId, limit, offset);
+    if (purchaseOrders) {
+      return purchaseOrders;
+    }
+  } catch (error) {
+    logPurchaseReadFallback("getPurchaseOrderListPage", error);
+  }
+
   return listPurchaseOrdersPaged(storeId, limit, offset);
 }
 
@@ -113,6 +140,15 @@ export async function getPendingExchangeRateQueue(params: {
   receivedTo?: string;
   limit?: number;
 }) {
+  try {
+    const queue = await getPendingExchangeRateQueueFromPostgres(params);
+    if (queue) {
+      return queue;
+    }
+  } catch (error) {
+    logPurchaseReadFallback("getPendingExchangeRateQueue", error);
+  }
+
   return listPendingExchangeRateQueue(params);
 }
 
@@ -124,7 +160,18 @@ export async function getPurchaseOrderDetail(
   poId: string,
   storeId: string,
 ): Promise<PurchaseOrderView> {
-  const po = await getPurchaseOrderById(poId, storeId);
+  let po: PurchaseOrderView | null = null;
+
+  try {
+    po = await getPurchaseOrderDetailFromPostgres(poId, storeId);
+  } catch (error) {
+    logPurchaseReadFallback("getPurchaseOrderDetail", error);
+  }
+
+  if (!po) {
+    po = await getPurchaseOrderById(poId, storeId);
+  }
+
   if (!po) {
     throw new PurchaseServiceError(404, "ไม่พบใบสั่งซื้อ");
   }
@@ -258,6 +305,7 @@ export async function createPurchaseOrder(params: {
             receiveImmediately: payload.receiveImmediately,
             itemCount: payload.items.length,
           },
+          requestContext: audit.requestContext,
           request: audit.request,
         }),
       );
@@ -436,6 +484,7 @@ export async function updatePurchaseOrderStatusFlow(params: {
             poNumber: po.poNumber,
             status: payload.status,
           },
+          requestContext: audit.requestContext,
           request: audit.request,
         }),
       );
@@ -558,6 +607,7 @@ export async function finalizePurchaseOrderExchangeRateFlow(params: {
             nextRate,
             note: payload.note || null,
           },
+          requestContext: audit.requestContext,
           request: audit.request,
         }),
       );
@@ -677,6 +727,7 @@ export async function settlePurchaseOrderPaymentFlow(params: {
             outstandingAfter: outstandingBefore - amountBase,
             paymentReference: payload.paymentReference?.trim() || null,
           },
+          requestContext: audit.requestContext,
           request: audit.request,
         }),
       );
@@ -813,6 +864,7 @@ export async function applyPurchaseOrderExtraCostFlow(params: {
             totalPaidBase: po.totalPaidBase,
             nextGrandTotalBase,
           },
+          requestContext: audit.requestContext,
           request: audit.request,
         }),
       );
@@ -930,6 +982,7 @@ export async function reversePurchaseOrderPaymentFlow(params: {
             reversedAmountBase: targetPayment.amountBase,
             note: payload.note?.trim() || null,
           },
+          requestContext: audit.requestContext,
           request: audit.request,
         }),
       );
@@ -1139,6 +1192,7 @@ export async function updatePurchaseOrderFlow(params: {
             poNumber: po.poNumber,
             updatedFields: Object.keys(payload),
           },
+          requestContext: audit.requestContext,
           request: audit.request,
         }),
       );

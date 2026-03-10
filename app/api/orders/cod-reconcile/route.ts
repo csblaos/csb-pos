@@ -4,13 +4,14 @@ import { z } from "zod";
 
 import { db } from "@/lib/db/client";
 import { auditEvents, orders } from "@/lib/db/schema";
+import { buildRequestContext } from "@/lib/http/request-context";
 import { listPendingCodReconcile } from "@/lib/orders/queries";
 import { enforcePermission, hasPermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { buildAuditEventValues } from "@/server/services/audit.service";
 import { invalidateDashboardSummaryCache } from "@/server/services/dashboard.service";
 import {
   claimIdempotency,
-  getIdempotencyKey,
+  getIdempotencyKeyFromHeaders,
   hashRequestBody,
   markIdempotencySucceeded,
   safeMarkIdempotencyFailed,
@@ -107,17 +108,19 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const idempotencyAction = "order.cod_reconcile.bulk_settle";
+  let requestContext = buildRequestContext(null);
   let idempotencyRecordId: string | null = null;
 
   try {
     const { storeId, session } = await enforcePermission("orders.view");
+    requestContext = buildRequestContext(request);
     const canMarkPaid = await hasPermission({ userId: session.userId }, storeId, "orders.mark_paid");
     if (!canMarkPaid) {
       return NextResponse.json({ message: "ไม่มีสิทธิ์ปิดยอด COD" }, { status: 403 });
     }
 
     const rawBody = await request.text();
-    const idempotencyKey = getIdempotencyKey(request);
+    const idempotencyKey = getIdempotencyKeyFromHeaders(request.headers);
     const requestHash = hashRequestBody(rawBody);
     let body: unknown;
 
@@ -294,7 +297,7 @@ export async function POST(request: Request) {
               codAmount,
               codFee,
             },
-            request,
+            requestContext,
           }),
         );
 

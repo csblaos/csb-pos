@@ -4,10 +4,18 @@ import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { db } from "@/lib/db/client";
 import { productCategories } from "@/lib/db/schema";
+import {
+  createCategoryInPostgres,
+  deleteCategoryInPostgres,
+  isPostgresProductsOnboardingWriteEnabled,
+  logProductsOnboardingWriteFallback,
+  updateCategoryInPostgres,
+} from "@/lib/platform/postgres-products-onboarding-write";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { listCategories } from "@/lib/products/service";
+
+const getTursoDb = async () => (await import("@/lib/db/client")).db;
 
 const createCategorySchema = z.object({
   name: z.string().trim().min(1, "กรุณากรอกชื่อหมวดหมู่").max(120),
@@ -37,6 +45,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const { storeId } = await enforcePermission("products.create");
+    const db = await getTursoDb();
 
     const parsed = createCategorySchema.safeParse(await request.json());
     if (!parsed.success) {
@@ -47,6 +56,27 @@ export async function POST(request: Request) {
     }
 
     const name = parsed.data.name.trim();
+
+    if (isPostgresProductsOnboardingWriteEnabled()) {
+      try {
+        const result = await createCategoryInPostgres({
+          storeId,
+          name,
+          sortOrder: parsed.data.sortOrder,
+        });
+
+        if (!result.ok) {
+          return NextResponse.json(
+            { message: "ชื่อหมวดหมู่นี้มีอยู่แล้ว" },
+            { status: 409 },
+          );
+        }
+
+        return NextResponse.json({ ok: true, categories: result.categories }, { status: 201 });
+      } catch (error) {
+        logProductsOnboardingWriteFallback("categories.create", error);
+      }
+    }
 
     // Check duplicate name
     const [existing] = await db
@@ -85,6 +115,7 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const { storeId } = await enforcePermission("products.update");
+    const db = await getTursoDb();
 
     const parsed = updateCategorySchema.safeParse(await request.json());
     if (!parsed.success) {
@@ -95,6 +126,35 @@ export async function PATCH(request: Request) {
     }
 
     const { id, name, sortOrder } = parsed.data;
+
+    if (isPostgresProductsOnboardingWriteEnabled()) {
+      try {
+        const result = await updateCategoryInPostgres({
+          storeId,
+          id,
+          name: name?.trim(),
+          sortOrder,
+        });
+
+        if (!result.ok) {
+          if (result.error === "NOT_FOUND") {
+            return NextResponse.json(
+              { message: "ไม่พบหมวดหมู่" },
+              { status: 404 },
+            );
+          }
+
+          return NextResponse.json(
+            { message: "ชื่อหมวดหมู่นี้มีอยู่แล้ว" },
+            { status: 409 },
+          );
+        }
+
+        return NextResponse.json({ ok: true, categories: result.categories });
+      } catch (error) {
+        logProductsOnboardingWriteFallback("categories.update", error);
+      }
+    }
 
     const [target] = await db
       .select({ id: productCategories.id })
@@ -161,6 +221,7 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const { storeId } = await enforcePermission("products.delete");
+    const db = await getTursoDb();
 
     const parsed = deleteCategorySchema.safeParse(await request.json());
     if (!parsed.success) {
@@ -168,6 +229,22 @@ export async function DELETE(request: Request) {
         { message: "ข้อมูลไม่ถูกต้อง" },
         { status: 400 },
       );
+    }
+
+    if (isPostgresProductsOnboardingWriteEnabled()) {
+      try {
+        const result = await deleteCategoryInPostgres({
+          storeId,
+          id: parsed.data.id,
+        });
+
+        return NextResponse.json({
+          ok: true,
+          categories: result.ok ? result.categories : [],
+        });
+      } catch (error) {
+        logProductsOnboardingWriteFallback("categories.delete", error);
+      }
     }
 
     await db
