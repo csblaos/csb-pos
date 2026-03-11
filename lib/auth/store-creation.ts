@@ -1,12 +1,6 @@
 import "server-only";
-
-import { and, eq, sql } from "drizzle-orm";
-
-import { roles, storeMembers, users } from "@/lib/db/schema";
-import {
-  getStoreCreationPolicyFromPostgres,
-  logSettingsSystemAdminReadFallback,
-} from "@/lib/platform/postgres-settings-admin";
+import { queryOne } from "@/lib/db/query";
+import { getStoreCreationPolicyFromPostgres } from "@/lib/platform/postgres-settings-admin";
 
 export type StoreCreationPolicy = {
   systemRole: "USER" | "SUPERADMIN" | "SYSTEM_ADMIN";
@@ -22,54 +16,11 @@ export type StoreCreationAccess = {
 };
 
 export async function getStoreCreationPolicy(userId: string): Promise<StoreCreationPolicy> {
-  try {
-    const postgresPolicy = await getStoreCreationPolicyFromPostgres(userId);
-    if (postgresPolicy) {
-      return postgresPolicy;
-    }
-  } catch (error) {
-    logSettingsSystemAdminReadFallback("system-admin.store-creation-policy", error);
+  const postgresPolicy = await getStoreCreationPolicyFromPostgres(userId);
+  if (postgresPolicy) {
+    return postgresPolicy;
   }
-
-  const { db } = await import("@/lib/db/client");
-  const [userRow, membershipRow] = await Promise.all([
-    db
-      .select({
-        systemRole: users.systemRole,
-        canCreateStores: users.canCreateStores,
-        maxStores: users.maxStores,
-      })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1),
-    db
-      .select({
-        membershipCount: sql<number>`count(*)`,
-        activeOwnerStoreCount: sql<number>`
-          coalesce(sum(case
-            when ${storeMembers.status} = 'ACTIVE' and ${roles.name} = 'Owner' then 1
-            else 0
-          end), 0)
-        `,
-      })
-      .from(storeMembers)
-      .innerJoin(roles, eq(storeMembers.roleId, roles.id))
-      .where(eq(storeMembers.userId, userId)),
-  ]);
-
-  return {
-    systemRole: userRow[0]?.systemRole ?? "USER",
-    canCreateStores:
-      typeof userRow[0]?.canCreateStores === "boolean"
-        ? userRow[0].canCreateStores
-        : null,
-    maxStores:
-      typeof userRow[0]?.maxStores === "number" && userRow[0].maxStores > 0
-        ? userRow[0].maxStores
-        : null,
-    hasAnyMembership: Number(membershipRow[0]?.membershipCount ?? 0) > 0,
-    activeOwnerStoreCount: Number(membershipRow[0]?.activeOwnerStoreCount ?? 0),
-  };
+  throw new Error("POSTGRES_SETTINGS_SYSTEM_ADMIN_READ_ENABLED is required for store creation policy");
 }
 
 export function evaluateStoreCreationAccess(policy: StoreCreationPolicy): StoreCreationAccess {
@@ -108,18 +59,22 @@ export async function canUserCreateStore(userId: string): Promise<StoreCreationA
 }
 
 export async function countStoresByOwner(userId: string) {
-  const { db } = await import("@/lib/db/client");
-  const [row] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(storeMembers)
-    .innerJoin(roles, eq(storeMembers.roleId, roles.id))
-    .where(
-      and(
-        eq(storeMembers.userId, userId),
-        eq(storeMembers.status, "ACTIVE"),
-        eq(roles.name, "Owner"),
-      ),
-    );
+  const row = await queryOne<{ count: number | string | null }>(
+    `
+      select count(*)::int as "count"
+      from store_members sm
+      inner join roles r
+        on sm.role_id = r.id
+       and sm.store_id = r.store_id
+      where
+        sm.user_id = :userId
+        and sm.status = 'ACTIVE'
+        and r.name = 'Owner'
+    `,
+    {
+      replacements: { userId },
+    },
+  );
 
   return Number(row?.count ?? 0);
 }

@@ -12,13 +12,11 @@ import {
   Store,
   Users,
 } from "lucide-react";
-import { and, eq, inArray, sql } from "drizzle-orm";
 import { redirect } from "next/navigation";
 
 import { getSession } from "@/lib/auth/session";
 import { listActiveMemberships } from "@/lib/auth/session-db";
-import { db } from "@/lib/db/client";
-import { fbConnections, storeBranches, storeMembers, stores, waConnections } from "@/lib/db/schema";
+import { queryMany } from "@/lib/db/query";
 
 const toNumber = (value: unknown) => Number(value ?? 0);
 
@@ -34,42 +32,60 @@ export default async function SettingsSuperadminStoresPage() {
   }
 
   const storeIds = memberships.map((membership) => membership.storeId);
-
   const [storeRows, branchRows, memberRows, fbErrorRows, waErrorRows] = await Promise.all([
-    db
-      .select({
-        id: stores.id,
-        name: stores.name,
-        storeType: stores.storeType,
-      })
-      .from(stores)
-      .where(inArray(stores.id, storeIds)),
-    db
-      .select({ storeId: storeBranches.storeId, count: sql<number>`count(*)` })
-      .from(storeBranches)
-      .where(inArray(storeBranches.storeId, storeIds))
-      .groupBy(storeBranches.storeId),
-    db
-      .select({
-        storeId: storeMembers.storeId,
-        status: storeMembers.status,
-        count: sql<number>`count(*)`,
-      })
-      .from(storeMembers)
-      .where(inArray(storeMembers.storeId, storeIds))
-      .groupBy(storeMembers.storeId, storeMembers.status),
-    db
-      .select({ storeId: fbConnections.storeId })
-      .from(fbConnections)
-      .where(
-        and(inArray(fbConnections.storeId, storeIds), eq(fbConnections.status, "ERROR")),
-      ),
-    db
-      .select({ storeId: waConnections.storeId })
-      .from(waConnections)
-      .where(
-        and(inArray(waConnections.storeId, storeIds), eq(waConnections.status, "ERROR")),
-      ),
+    queryMany<{
+      id: string;
+      name: string;
+      storeType: "ONLINE_RETAIL" | "RESTAURANT" | "CAFE" | "OTHER";
+    }>(
+      `
+        select
+          id,
+          name,
+          store_type as "storeType"
+        from stores
+        where id in (:storeIds)
+      `,
+      { replacements: { storeIds } },
+    ),
+    queryMany<{ storeId: string; count: number | string }>(
+      `
+        select store_id as "storeId", count(*) as "count"
+        from store_branches
+        where store_id in (:storeIds)
+        group by store_id
+      `,
+      { replacements: { storeIds } },
+    ),
+    queryMany<{
+      storeId: string;
+      status: "ACTIVE" | "INVITED" | "SUSPENDED";
+      count: number | string;
+    }>(
+      `
+        select store_id as "storeId", status, count(*) as "count"
+        from store_members
+        where store_id in (:storeIds)
+        group by store_id, status
+      `,
+      { replacements: { storeIds } },
+    ),
+    queryMany<{ storeId: string }>(
+      `
+        select store_id as "storeId"
+        from fb_connections
+        where store_id in (:storeIds) and status = 'ERROR'
+      `,
+      { replacements: { storeIds } },
+    ),
+    queryMany<{ storeId: string }>(
+      `
+        select store_id as "storeId"
+        from wa_connections
+        where store_id in (:storeIds) and status = 'ERROR'
+      `,
+      { replacements: { storeIds } },
+    ),
   ]);
 
   const branchCountByStore = new Map(branchRows.map((row) => [row.storeId, toNumber(row.count)]));

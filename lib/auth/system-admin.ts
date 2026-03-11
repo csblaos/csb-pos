@@ -1,13 +1,7 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
-
 import { getSession } from "@/lib/auth/session";
-import { users } from "@/lib/db/schema";
-import {
-  getUserSystemRoleFromPostgres,
-  logAuthRbacReadFallback,
-} from "@/lib/platform/postgres-auth-rbac";
+import { getUserSystemRoleFromPostgres } from "@/lib/platform/postgres-auth-rbac";
 
 export type SystemRole = "USER" | "SUPERADMIN" | "SYSTEM_ADMIN";
 
@@ -20,34 +14,12 @@ export class SystemAdminAccessError extends Error {
   }
 }
 
-const getTursoDb = async () => (await import("@/lib/db/client")).db;
-
 export async function getUserSystemRole(userId: string): Promise<SystemRole> {
-  try {
-    const postgresRole = await getUserSystemRoleFromPostgres(userId);
-    if (postgresRole !== undefined) {
-      return postgresRole;
-    }
-  } catch (error) {
-    logAuthRbacReadFallback("auth.system-role", error);
+  const postgresRole = await getUserSystemRoleFromPostgres(userId);
+  if (postgresRole !== undefined) {
+    return postgresRole;
   }
-
-  const db = await getTursoDb();
-  const [row] = await db
-    .select({ systemRole: users.systemRole })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-
-  if (
-    row?.systemRole === "SUPERADMIN" ||
-    row?.systemRole === "SYSTEM_ADMIN" ||
-    row?.systemRole === "USER"
-  ) {
-    return row.systemRole;
-  }
-
-  return "USER";
+  throw new Error("POSTGRES_AUTH_RBAC_READ_ENABLED is required for getUserSystemRole");
 }
 
 export async function getCurrentUserSystemRole() {

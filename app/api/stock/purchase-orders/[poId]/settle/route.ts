@@ -1,10 +1,8 @@
-import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { db } from "@/lib/db/client";
-import { stores } from "@/lib/db/schema";
 import { buildRequestContext } from "@/lib/http/request-context";
 import { settlePurchaseOrderSchema } from "@/lib/purchases/validation";
+import { getReportStoreCurrency } from "@/lib/reports/queries";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { safeLogAuditEvent } from "@/server/services/audit.service";
 import {
@@ -146,17 +144,11 @@ export async function POST(request: Request, { params }: RouteParams) {
       return NextResponse.json({ message: firstError }, { status: 400 });
     }
 
-    const [storeRow] = await db
-      .select({ currency: stores.currency })
-      .from(stores)
-      .where(eq(stores.id, storeId))
-      .limit(1);
-
     const po = await settlePurchaseOrderPaymentFlow({
       poId,
       storeId,
       userId: session.userId,
-      storeCurrency: storeRow?.currency ?? "LAK",
+      storeCurrency: await getReportStoreCurrency(storeId),
       payload: parsed.data,
       audit: {
         actorName: session.displayName,

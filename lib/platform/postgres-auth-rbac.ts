@@ -58,6 +58,14 @@ type MembershipStatusRow = {
   status: "ACTIVE" | "INVITED" | "SUSPENDED";
 };
 
+type CancelApproverRow = {
+  userId: string;
+  name: string | null;
+  email: string | null;
+  passwordHash: string;
+  roleName: string | null;
+};
+
 type StoreShellProfileRow = {
   name: string;
   logoUrl: string | null;
@@ -638,4 +646,43 @@ export async function getMemberBranchAccessFromPostgres(userId: string, storeId:
     mode: "SELECTED" as const,
     branchIds,
   };
+}
+
+export async function findActiveCancelApproverByEmailFromPostgres(
+  storeId: string,
+  email: string,
+) {
+  const pg = await getPostgresAuthRbacContext();
+  if (!pg) {
+    return undefined;
+  }
+
+  const row = await pg.queryOne<CancelApproverRow>(
+    `
+      select
+        u.id as "userId",
+        u.name,
+        u.email,
+        u.password_hash as "passwordHash",
+        r.name as "roleName"
+      from users u
+      inner join store_members sm
+        on sm.user_id = u.id
+       and sm.store_id = :storeId
+       and sm.status = 'ACTIVE'
+      inner join roles r
+        on sm.role_id = r.id
+       and sm.store_id = r.store_id
+      where lower(u.email) = lower(:email)
+      limit 1
+    `,
+    {
+      replacements: {
+        storeId,
+        email,
+      },
+    },
+  );
+
+  return row ?? null;
 }

@@ -1,16 +1,14 @@
 import Link from "next/link";
-import { asc, eq } from "drizzle-orm";
-import { alias } from "drizzle-orm/sqlite-core";
 import { ChevronRight, Users } from "lucide-react";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { UsersManagement } from "@/components/app/users-management";
 import { ensureMainBranchExists } from "@/lib/branches/access";
-import { db } from "@/lib/db/client";
-import { roles, storeBranches, storeMembers, users } from "@/lib/db/schema";
 import { getSession } from "@/lib/auth/session";
 import { getUserSystemRole } from "@/lib/auth/system-admin";
+import { queryMany } from "@/lib/db/query";
+import { listStoreBranchesFromPostgres } from "@/lib/platform/postgres-auth-rbac";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 import { getGlobalSessionPolicy } from "@/lib/system-config/policy";
 
@@ -53,45 +51,72 @@ async function UsersManagementContent({
   canUpdate: boolean;
   canLinkExisting: boolean;
 }) {
-  const userCreators = alias(users, "user_creators");
-  const memberAdders = alias(users, "member_adders");
   await ensureMainBranchExists(storeId);
 
   const [members, roleOptions, branches, globalSessionPolicy] = await Promise.all([
-    db
-      .select({
-        userId: users.id,
-        email: users.email,
-        name: users.name,
-        systemRole: users.systemRole,
-        mustChangePassword: users.mustChangePassword,
-        sessionLimit: users.sessionLimit,
-        createdByUserId: users.createdBy,
-        createdByName: userCreators.name,
-        roleId: roles.id,
-        roleName: roles.name,
-        status: storeMembers.status,
-        joinedAt: storeMembers.createdAt,
-        addedByUserId: storeMembers.addedBy,
-        addedByName: memberAdders.name,
-      })
-      .from(storeMembers)
-      .innerJoin(users, eq(storeMembers.userId, users.id))
-      .innerJoin(roles, eq(storeMembers.roleId, roles.id))
-      .leftJoin(userCreators, eq(users.createdBy, userCreators.id))
-      .leftJoin(memberAdders, eq(storeMembers.addedBy, memberAdders.id))
-      .where(eq(storeMembers.storeId, storeId))
-      .orderBy(asc(users.name)),
-    db
-      .select({ id: roles.id, name: roles.name })
-      .from(roles)
-      .where(eq(roles.storeId, storeId))
-      .orderBy(asc(roles.name)),
-    db
-      .select({ id: storeBranches.id, name: storeBranches.name, code: storeBranches.code })
-      .from(storeBranches)
-      .where(eq(storeBranches.storeId, storeId))
-      .orderBy(asc(storeBranches.createdAt), asc(storeBranches.name)),
+    queryMany<{
+      userId: string;
+      email: string;
+      name: string;
+      systemRole: "USER" | "SUPERADMIN" | "SYSTEM_ADMIN";
+      mustChangePassword: boolean;
+      sessionLimit: number | string | null;
+      createdByUserId: string | null;
+      createdByName: string | null;
+      roleId: string;
+      roleName: string;
+      status: "ACTIVE" | "INVITED" | "SUSPENDED";
+      joinedAt: string;
+      addedByUserId: string | null;
+      addedByName: string | null;
+    }>(
+      `
+        select
+          u.id as "userId",
+          u.email,
+          u.name,
+          u.system_role as "systemRole",
+          u.must_change_password as "mustChangePassword",
+          u.session_limit as "sessionLimit",
+          u.created_by as "createdByUserId",
+          creator.name as "createdByName",
+          r.id as "roleId",
+          r.name as "roleName",
+          sm.status as "status",
+          sm.created_at as "joinedAt",
+          sm.added_by as "addedByUserId",
+          adder.name as "addedByName"
+        from store_members sm
+        inner join users u on sm.user_id = u.id
+        inner join roles r on sm.role_id = r.id and sm.store_id = r.store_id
+        left join users creator on u.created_by = creator.id
+        left join users adder on sm.added_by = adder.id
+        where sm.store_id = :storeId
+        order by u.name asc
+      `,
+      { replacements: { storeId } },
+    ).then((rows) =>
+      rows.map((row) => ({
+        ...row,
+        mustChangePassword: row.mustChangePassword === true,
+        sessionLimit:
+          typeof row.sessionLimit === "number"
+            ? row.sessionLimit
+            : typeof row.sessionLimit === "string" && row.sessionLimit.trim().length > 0
+              ? Number(row.sessionLimit)
+              : null,
+      })),
+    ),
+    queryMany<{ id: string; name: string }>(
+      `
+        select id, name
+        from roles
+        where store_id = :storeId
+        order by name asc
+      `,
+      { replacements: { storeId } },
+    ),
+    listStoreBranchesFromPostgres(storeId).then((rows) => rows ?? []),
     getGlobalSessionPolicy(),
   ]);
 

@@ -4,7 +4,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { db } from "@/lib/db/client";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { shippingProviders } from "@/lib/db/schema";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 
@@ -104,6 +104,7 @@ const resolveUniqueProviderCode = async (
   requestedCode: string,
   excludeId?: string,
 ) => {
+  const db = await getTursoDb();
   const safeCode = requestedCode.trim().toUpperCase() || "PROVIDER";
   const maxCodeLength = 40;
   const baseCode = safeCode.slice(0, maxCodeLength);
@@ -147,6 +148,7 @@ const toSchemaOutdatedResponse = () =>
 export async function GET() {
   try {
     const { storeId } = await enforcePermission("settings.view");
+    const db = await getTursoDb();
 
     let rows: Array<{
       id: string;
@@ -203,6 +205,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const { storeId } = await enforcePermission("stores.update");
+    const db = await getTursoDb();
     const parsed = createShippingProviderSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json({ message: "ข้อมูลผู้ให้บริการขนส่งไม่ถูกต้อง" }, { status: 400 });
@@ -281,6 +284,7 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const { storeId } = await enforcePermission("stores.update");
+    const db = await getTursoDb();
     const parsed = updateShippingProviderSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json({ message: "ข้อมูลผู้ให้บริการขนส่งไม่ถูกต้อง" }, { status: 400 });
@@ -364,6 +368,7 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const { storeId } = await enforcePermission("stores.update");
+    const db = await getTursoDb();
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id")?.trim() ?? "";
     if (!id) {

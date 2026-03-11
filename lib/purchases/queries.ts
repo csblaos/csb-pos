@@ -95,29 +95,20 @@ type PendingExchangeRateQueueRow = {
   totalPaidBase: number | string;
 };
 
-const getPostgresPurchaseReadContext = async (): Promise<PostgresPurchaseReadContext | null> => {
-  if (process.env.POSTGRES_PURCHASE_READ_ENABLED !== "1") {
-    return null;
-  }
-
+const getPostgresPurchaseReadContext = async (): Promise<PostgresPurchaseReadContext> => {
   const [{ queryMany, queryOne }, { isPostgresConfigured }] = await Promise.all([
     import("@/lib/db/query"),
     import("@/lib/db/sequelize"),
   ]);
 
   if (!isPostgresConfigured()) {
-    return null;
+    throw new Error("PostgreSQL purchase read path is not configured");
   }
 
   return {
     queryMany,
     queryOne,
   };
-};
-
-export const logPurchaseReadFallback = (operation: string, error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.warn(`[purchase.read.pg] fallback to turso for ${operation}: ${message}`);
 };
 
 const toNumber = (value: number | string | null | undefined) => Number(value ?? 0);
@@ -160,10 +151,6 @@ export const listPurchaseOrdersPagedFromPostgres = async (
   offset: number,
 ) => {
   const pg = await getPostgresPurchaseReadContext();
-  if (!pg) {
-    return null;
-  }
-
   const rows = await pg.queryMany<PurchaseOrderListRow>(
     `
       select
@@ -224,10 +211,6 @@ export const listPurchaseOrdersPagedFromPostgres = async (
 
 export const listPurchaseOrdersFromPostgres = async (storeId: string) => {
   const pg = await getPostgresPurchaseReadContext();
-  if (!pg) {
-    return null;
-  }
-
   const rows = await pg.queryMany<PurchaseOrderListRow>(
     `
       select
@@ -285,10 +268,6 @@ export const getPurchaseOrderDetailFromPostgres = async (
   storeId: string,
 ): Promise<PurchaseOrderView | null> => {
   const pg = await getPostgresPurchaseReadContext();
-  if (!pg) {
-    return null;
-  }
-
   const po = await pg.queryOne<PurchaseOrderBaseRow>(
     `
       select
@@ -462,12 +441,8 @@ export const getPendingExchangeRateQueueFromPostgres = async (params: {
   receivedFrom?: string;
   receivedTo?: string;
   limit?: number;
-}): Promise<PendingExchangeRateQueueItem[] | null> => {
+}): Promise<PendingExchangeRateQueueItem[]> => {
   const pg = await getPostgresPurchaseReadContext();
-  if (!pg) {
-    return null;
-  }
-
   const { storeId, storeCurrency, supplierQuery, receivedFrom, receivedTo } = params;
   const limit = Math.min(200, Math.max(10, params.limit ?? 50));
   const hasSupplier = Boolean(supplierQuery?.trim());

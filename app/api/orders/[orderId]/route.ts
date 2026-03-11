@@ -1,18 +1,9 @@
-import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { verifyPassword } from "@/lib/auth/password";
-import { db } from "@/lib/db/client";
 import { buildRequestContext } from "@/lib/http/request-context";
-import {
-  auditEvents,
-  inventoryMovements,
-  orders,
-  roles,
-  storePaymentAccounts,
-  storeMembers,
-  users,
-} from "@/lib/db/schema";
+import { findActiveCancelApproverByEmailFromPostgres } from "@/lib/platform/postgres-auth-rbac";
+import { findActiveLaoQrPaymentAccountFromPostgres } from "@/lib/platform/postgres-store-settings";
 import {
   RBACError,
   enforcePermission,
@@ -32,15 +23,6 @@ import {
 import {
   cancelOrderInPostgres,
   confirmOrderPaidInPostgres,
-  isPostgresCancelEnabled,
-  isPostgresConfirmPaidEnabled,
-  isPostgresMarkCodReturnedEnabled,
-  isPostgresMarkPackedEnabled,
-  isPostgresMarkPickedUpUnpaidEnabled,
-  isPostgresMarkShippedEnabled,
-  isPostgresSubmitForPaymentEnabled,
-  isPostgresSubmitPaymentSlipEnabled,
-  isPostgresUpdateShippingEnabled,
   markOrderPackedInPostgres,
   markOrderCodReturnedInPostgres,
   markOrderPickedUpUnpaidInPostgres,
@@ -51,7 +33,7 @@ import {
 } from "@/lib/orders/postgres-write";
 import { updateOrderSchema } from "@/lib/orders/validation";
 import { getInventoryBalancesByStore, getOrderStockStateForOrder } from "@/lib/inventory/queries";
-import { buildAuditEventValues, safeLogAuditEvent } from "@/server/services/audit.service";
+import { safeLogAuditEvent } from "@/server/services/audit.service";
 import { invalidateDashboardSummaryCache } from "@/server/services/dashboard.service";
 import {
   claimIdempotency,
@@ -63,7 +45,6 @@ import {
 import { invalidateReportsOverviewCache } from "@/server/services/reports.service";
 import { invalidateStockOverviewCache } from "@/server/services/stock.service";
 
-const nowIso = () => new Date().toISOString();
 const CANCEL_APPROVER_ROLES = new Set(["Owner", "Manager"]);
 
 const verifyCancelApprover = async (
@@ -72,38 +53,13 @@ const verifyCancelApprover = async (
   approvalPassword: string,
 ) => {
   const approvalEmail = approvalEmailRaw.trim().toLowerCase();
-  const [approver] = await db
-    .select({
-      userId: users.id,
-      name: users.name,
-      email: users.email,
-      passwordHash: users.passwordHash,
-      roleName: roles.name,
-    })
-    .from(users)
-    .innerJoin(
-      storeMembers,
-      and(
-        eq(storeMembers.userId, users.id),
-        eq(storeMembers.storeId, storeId),
-        eq(storeMembers.status, "ACTIVE"),
-      ),
-    )
-    .innerJoin(
-      roles,
-      and(
-        eq(storeMembers.roleId, roles.id),
-        eq(storeMembers.storeId, roles.storeId),
-      ),
-    )
-    .where(eq(users.email, approvalEmail))
-    .limit(1);
+  const approver = await findActiveCancelApproverByEmailFromPostgres(storeId, approvalEmail);
 
   if (!approver) {
     throw new RBACError(401, "ข้อมูลผู้อนุมัติไม่ถูกต้อง");
   }
 
-  if (!CANCEL_APPROVER_ROLES.has(approver.roleName)) {
+  if (!approver.roleName || !CANCEL_APPROVER_ROLES.has(approver.roleName)) {
     throw new RBACError(403, "ผู้อนุมัติต้องเป็น Owner หรือ Manager");
   }
 
@@ -448,96 +404,38 @@ export async function PATCH(
           ? "MANUAL"
           : order.shippingProvider;
 
-      if (isPostgresUpdateShippingEnabled()) {
+      await updateOrderShippingInPostgres({
+        storeId,
+        orderId: order.id,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        orderNo: order.orderNo,
+        shippingCarrier: shippingPayload.shippingCarrier?.trim() || null,
+        trackingNo: shippingPayload.trackingNo?.trim() || null,
+        shippingLabelUrl: nextShippingLabelUrl,
+        shippingLabelStatus: nextShippingLabelStatus,
+        shippingProvider: nextShippingProvider,
+        shippingCost: shippingPayload.shippingCost,
+        requestContext,
+      });
+
+      if (idempotencyRecordId) {
         try {
-          await updateOrderShippingInPostgres({
-            storeId,
-            orderId: order.id,
-            actorUserId: session.userId,
-            actorName: session.displayName,
-            actorRole: session.activeRoleName,
-            orderNo: order.orderNo,
-            shippingCarrier: shippingPayload.shippingCarrier?.trim() || null,
-            trackingNo: shippingPayload.trackingNo?.trim() || null,
-            shippingLabelUrl: nextShippingLabelUrl,
-            shippingLabelStatus: nextShippingLabelStatus,
-            shippingProvider: nextShippingProvider,
-            shippingCost: shippingPayload.shippingCost,
-            requestContext,
+          await markIdempotencySucceeded({
+            recordId: idempotencyRecordId,
+            statusCode: 200,
+            body: { ok: true },
           });
-
-          if (idempotencyRecordId) {
-            try {
-              await markIdempotencySucceeded({
-                recordId: idempotencyRecordId,
-                statusCode: 200,
-                body: { ok: true },
-              });
-            } catch (error) {
-              console.error(
-                `[orders.write.pg] idempotency mark failed action=update_shipping orderId=${order.id}: ${
-                  error instanceof Error ? error.message : "unknown"
-                }`,
-              );
-            }
-          }
-
-          await invalidateOrderCaches(storeId);
-          return NextResponse.json({ ok: true });
         } catch (error) {
-          console.warn(
-            `[orders.write.pg] fallback to turso for update_shipping orderId=${order.id}: ${
+          console.error(
+            `[orders.write.pg] idempotency mark failed action=update_shipping orderId=${order.id}: ${
               error instanceof Error ? error.message : "unknown"
             }`,
           );
         }
       }
 
-      await db.transaction(async (tx) => {
-        await tx
-          .update(orders)
-          .set({
-            shippingCarrier: shippingPayload.shippingCarrier?.trim() || null,
-            trackingNo: shippingPayload.trackingNo?.trim() || null,
-            shippingLabelUrl: nextShippingLabelUrl,
-            shippingLabelStatus: nextShippingLabelStatus,
-            shippingProvider: nextShippingProvider,
-            shippingCost: shippingPayload.shippingCost,
-          })
-          .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
-
-        await tx.insert(auditEvents).values(
-          buildAuditEventValues({
-            scope: "STORE",
-            storeId,
-            actorUserId: session.userId,
-            actorName: session.displayName,
-            actorRole: session.activeRoleName,
-            action: "order.update_shipping",
-            entityType: "order",
-            entityId: order.id,
-            metadata: {
-              orderNo: order.orderNo,
-              shippingCarrier: shippingPayload.shippingCarrier?.trim() || null,
-              trackingNo: shippingPayload.trackingNo?.trim() || null,
-              shippingLabelUrl: nextShippingLabelUrl,
-              shippingLabelStatus: nextShippingLabelStatus,
-              shippingProvider: nextShippingProvider,
-              shippingCost: shippingPayload.shippingCost,
-            },
-            requestContext,
-          }),
-        );
-
-        if (idempotencyRecordId) {
-          await markIdempotencySucceeded({
-            recordId: idempotencyRecordId,
-            statusCode: 200,
-            body: { ok: true },
-            tx,
-          });
-        }
-      });
       await invalidateOrderCaches(storeId);
       return NextResponse.json({ ok: true });
     }
@@ -592,104 +490,37 @@ export async function PATCH(
         );
       }
 
-      if (isPostgresSubmitForPaymentEnabled()) {
+      await submitOrderForPaymentInPostgres({
+        storeId,
+        orderId: order.id,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        orderNo: order.orderNo,
+        paymentMethod: order.paymentMethod,
+        items: orderItems.map((item) => ({
+          productId: item.productId,
+          qtyBase: item.qtyBase,
+        })),
+        requestContext,
+      });
+
+      if (idempotencyRecordId) {
         try {
-          await submitOrderForPaymentInPostgres({
-            storeId,
-            orderId: order.id,
-            actorUserId: session.userId,
-            actorName: session.displayName,
-            actorRole: session.activeRoleName,
-            orderNo: order.orderNo,
-            paymentMethod: order.paymentMethod,
-            items: orderItems.map((item) => ({
-              productId: item.productId,
-              qtyBase: item.qtyBase,
-            })),
-            requestContext,
+          await markIdempotencySucceeded({
+            recordId: idempotencyRecordId,
+            statusCode: 200,
+            body: { ok: true },
           });
-
-          if (idempotencyRecordId) {
-            try {
-              await markIdempotencySucceeded({
-                recordId: idempotencyRecordId,
-                statusCode: 200,
-                body: { ok: true },
-              });
-            } catch (error) {
-              console.error(
-                `[orders.write.pg] idempotency mark failed action=submit_for_payment orderId=${order.id}: ${
-                  error instanceof Error ? error.message : "unknown"
-                }`,
-              );
-            }
-          }
-
-          await invalidateOrderCaches(storeId);
-          return NextResponse.json({ ok: true });
         } catch (error) {
-          console.warn(
-            `[orders.write.pg] fallback to turso for submit_for_payment orderId=${order.id}: ${
+          console.error(
+            `[orders.write.pg] idempotency mark failed action=submit_for_payment orderId=${order.id}: ${
               error instanceof Error ? error.message : "unknown"
             }`,
           );
         }
       }
 
-      await db.transaction(async (tx) => {
-        if (orderItems.length > 0) {
-          await tx.insert(inventoryMovements).values(
-            orderItems.map((item) => ({
-              storeId,
-              productId: item.productId,
-              type: "RESERVE" as const,
-              qtyBase: item.qtyBase,
-              refType: "ORDER" as const,
-              refId: order.id,
-              note: `จองสต็อกสำหรับออเดอร์ ${order.orderNo}`,
-              createdBy: session.userId,
-            })),
-          );
-        }
-
-        await tx
-          .update(orders)
-          .set({
-            status: "PENDING_PAYMENT",
-            paymentStatus:
-              order.paymentMethod === "COD" ? "COD_PENDING_SETTLEMENT" : "UNPAID",
-          })
-          .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
-
-        await tx.insert(auditEvents).values(
-          buildAuditEventValues({
-            scope: "STORE",
-            storeId,
-            actorUserId: session.userId,
-            actorName: session.displayName,
-            actorRole: session.activeRoleName,
-            action: "order.submit_for_payment",
-            entityType: "order",
-            entityId: order.id,
-            metadata: {
-              orderNo: order.orderNo,
-              fromStatus: "DRAFT",
-              toStatus: "PENDING_PAYMENT",
-              itemCount: orderItems.length,
-            },
-            requestContext,
-          }),
-        );
-
-        if (idempotencyRecordId) {
-          await markIdempotencySucceeded({
-            recordId: idempotencyRecordId,
-            statusCode: 200,
-            body: { ok: true },
-            tx,
-          });
-        }
-      });
       await invalidateOrderCaches(storeId);
       return NextResponse.json({ ok: true });
     }
@@ -720,86 +551,36 @@ export async function PATCH(
       }
 
       const paymentSlipUrl = slipPayload.paymentSlipUrl.trim();
-      const paymentProofSubmittedAt = nowIso();
+      const paymentProofSubmittedAt = new Date().toISOString();
 
-      if (isPostgresSubmitPaymentSlipEnabled()) {
+      await submitOrderPaymentSlipInPostgres({
+        storeId,
+        orderId: order.id,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        orderNo: order.orderNo,
+        paymentSlipUrl,
+        paymentProofSubmittedAt,
+        requestContext,
+      });
+
+      if (idempotencyRecordId) {
         try {
-          await submitOrderPaymentSlipInPostgres({
-            storeId,
-            orderId: order.id,
-            actorUserId: session.userId,
-            actorName: session.displayName,
-            actorRole: session.activeRoleName,
-            orderNo: order.orderNo,
-            paymentSlipUrl,
-            paymentProofSubmittedAt,
-            requestContext,
+          await markIdempotencySucceeded({
+            recordId: idempotencyRecordId,
+            statusCode: 200,
+            body: { ok: true },
           });
-
-          if (idempotencyRecordId) {
-            try {
-              await markIdempotencySucceeded({
-                recordId: idempotencyRecordId,
-                statusCode: 200,
-                body: { ok: true },
-              });
-            } catch (error) {
-              console.error(
-                `[orders.write.pg] idempotency mark failed action=submit_payment_slip orderId=${order.id}: ${
-                  error instanceof Error ? error.message : "unknown"
-                }`,
-              );
-            }
-          }
-
-          await invalidateOrderCaches(storeId);
-          return NextResponse.json({ ok: true });
         } catch (error) {
-          console.warn(
-            `[orders.write.pg] fallback to turso for submit_payment_slip orderId=${order.id}: ${
+          console.error(
+            `[orders.write.pg] idempotency mark failed action=submit_payment_slip orderId=${order.id}: ${
               error instanceof Error ? error.message : "unknown"
             }`,
           );
         }
       }
 
-      await db.transaction(async (tx) => {
-        await tx
-          .update(orders)
-          .set({
-            paymentSlipUrl,
-            paymentProofSubmittedAt,
-            paymentStatus: "PENDING_PROOF",
-          })
-          .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
-
-        await tx.insert(auditEvents).values(
-          buildAuditEventValues({
-            scope: "STORE",
-            storeId,
-            actorUserId: session.userId,
-            actorName: session.displayName,
-            actorRole: session.activeRoleName,
-            action: "order.submit_payment_slip",
-            entityType: "order",
-            entityId: order.id,
-            metadata: {
-              orderNo: order.orderNo,
-              status: order.status,
-            },
-            requestContext,
-          }),
-        );
-
-        if (idempotencyRecordId) {
-          await markIdempotencySucceeded({
-            recordId: idempotencyRecordId,
-            statusCode: 200,
-            body: { ok: true },
-            tx,
-          });
-        }
-      });
       await invalidateOrderCaches(storeId);
       return NextResponse.json({ ok: true });
     }
@@ -863,20 +644,10 @@ export async function PATCH(
             );
           }
 
-          const [paymentAccount] = await db
-            .select({
-              id: storePaymentAccounts.id,
-            })
-            .from(storePaymentAccounts)
-            .where(
-              and(
-                eq(storePaymentAccounts.id, confirmPaidPayload.paymentAccountId),
-                eq(storePaymentAccounts.storeId, storeId),
-                eq(storePaymentAccounts.accountType, "LAO_QR"),
-                eq(storePaymentAccounts.isActive, true),
-              ),
-            )
-            .limit(1);
+          const paymentAccount = await findActiveLaoQrPaymentAccountFromPostgres(
+            storeId,
+            confirmPaidPayload.paymentAccountId,
+          );
 
           if (!paymentAccount) {
             return failAction(
@@ -904,211 +675,61 @@ export async function PATCH(
         isPostPickupPendingPaymentConfirm ||
         (isStandardPendingPaymentConfirm && Boolean(orderStockState?.hasStockOutFromOrder));
 
-      if (isPostgresConfirmPaidEnabled()) {
+      const codAmountToSave =
+        isCodSettlementAfterShipped
+          ? typeof confirmPaidPayload.codAmount === "number"
+            ? confirmPaidPayload.codAmount
+            : order.codAmount > 0
+              ? order.codAmount
+              : order.total
+          : null;
+
+      await confirmOrderPaidInPostgres({
+        storeId,
+        orderId: order.id,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        orderNo: order.orderNo,
+        currentStatus: order.status,
+        currentPaymentStatus: order.paymentStatus,
+        currentPaymentMethod: order.paymentMethod,
+        currentPaymentAccountId: order.paymentAccountId,
+        effectivePaymentMethod,
+        effectivePaymentAccountId,
+        paymentSlipUrl: isInStoreCreditSettlement ? null : order.paymentSlipUrl,
+        paymentProofSubmittedAt: isInStoreCreditSettlement
+          ? null
+          : order.paymentProofSubmittedAt,
+        existingPaidAt: order.paidAt,
+        codAmountToSave,
+        isCodSettlementAfterShipped,
+        isPickupPaymentConfirm,
+        isPickupCompleteAfterPrepaid,
+        shouldOnlyUpdatePaymentAfterReceived,
+        items: orderItems.map((item) => ({
+          productId: item.productId,
+          qtyBase: item.qtyBase,
+        })),
+        requestContext,
+      });
+
+      if (idempotencyRecordId) {
         try {
-          const codAmountToSave =
-            isCodSettlementAfterShipped
-              ? typeof confirmPaidPayload.codAmount === "number"
-                ? confirmPaidPayload.codAmount
-                : order.codAmount > 0
-                  ? order.codAmount
-                  : order.total
-              : null;
-
-          await confirmOrderPaidInPostgres({
-            storeId,
-            orderId: order.id,
-            actorUserId: session.userId,
-            actorName: session.displayName,
-            actorRole: session.activeRoleName,
-            orderNo: order.orderNo,
-            currentStatus: order.status,
-            currentPaymentStatus: order.paymentStatus,
-            currentPaymentMethod: order.paymentMethod,
-            currentPaymentAccountId: order.paymentAccountId,
-            effectivePaymentMethod,
-            effectivePaymentAccountId,
-            paymentSlipUrl: isInStoreCreditSettlement ? null : order.paymentSlipUrl,
-            paymentProofSubmittedAt: isInStoreCreditSettlement
-              ? null
-              : order.paymentProofSubmittedAt,
-            existingPaidAt: order.paidAt,
-            codAmountToSave,
-            isCodSettlementAfterShipped,
-            isPickupPaymentConfirm,
-            isPickupCompleteAfterPrepaid,
-            shouldOnlyUpdatePaymentAfterReceived,
-            items: orderItems.map((item) => ({
-              productId: item.productId,
-              qtyBase: item.qtyBase,
-            })),
-            requestContext,
+          await markIdempotencySucceeded({
+            recordId: idempotencyRecordId,
+            statusCode: 200,
+            body: { ok: true },
           });
-
-          if (idempotencyRecordId) {
-            try {
-              await markIdempotencySucceeded({
-                recordId: idempotencyRecordId,
-                statusCode: 200,
-                body: { ok: true },
-              });
-            } catch (error) {
-              console.error(
-                `[orders.write.pg] idempotency mark failed action=confirm_paid orderId=${order.id}: ${
-                  error instanceof Error ? error.message : "unknown"
-                }`,
-              );
-            }
-          }
-
-          await invalidateOrderCaches(storeId);
-          return NextResponse.json({ ok: true });
         } catch (error) {
-          console.warn(
-            `[orders.write.pg] fallback to turso for confirm_paid orderId=${order.id}: ${
+          console.error(
+            `[orders.write.pg] idempotency mark failed action=confirm_paid orderId=${order.id}: ${
               error instanceof Error ? error.message : "unknown"
             }`,
           );
         }
       }
 
-      await db.transaction(async (tx) => {
-        if (isCodSettlementAfterShipped) {
-          const now = nowIso();
-          const codAmountToSave =
-            typeof confirmPaidPayload.codAmount === "number"
-              ? confirmPaidPayload.codAmount
-              : order.codAmount > 0
-                ? order.codAmount
-                : order.total;
-          await tx
-            .update(orders)
-            .set({
-              paymentStatus: "COD_SETTLED",
-              codSettledAt: now,
-              paidAt: order.paidAt ?? now,
-              codAmount: codAmountToSave,
-            })
-            .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
-        } else if (isPickupPaymentConfirm) {
-          await tx
-            .update(orders)
-            .set({
-              paymentStatus: "PAID",
-              paymentMethod: effectivePaymentMethod,
-              paymentAccountId: effectivePaymentAccountId,
-              paymentSlipUrl: isInStoreCreditSettlement ? null : order.paymentSlipUrl,
-              paymentProofSubmittedAt: isInStoreCreditSettlement
-                ? null
-                : order.paymentProofSubmittedAt,
-              paidAt: order.paidAt ?? nowIso(),
-            })
-            .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
-        } else if (shouldOnlyUpdatePaymentAfterReceived) {
-          await tx
-            .update(orders)
-            .set({
-              status: "PAID",
-              paymentStatus: "PAID",
-              paymentMethod: effectivePaymentMethod,
-              paymentAccountId: effectivePaymentAccountId,
-              paymentSlipUrl: isInStoreCreditSettlement ? null : order.paymentSlipUrl,
-              paymentProofSubmittedAt: isInStoreCreditSettlement
-                ? null
-                : order.paymentProofSubmittedAt,
-              paidAt: order.paidAt ?? nowIso(),
-            })
-            .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
-        } else {
-          if (orderItems.length > 0) {
-            await tx.insert(inventoryMovements).values(
-              orderItems.flatMap((item) => [
-                {
-                  storeId,
-                  productId: item.productId,
-                  type: "RELEASE" as const,
-                  qtyBase: item.qtyBase,
-                  refType: "ORDER" as const,
-                  refId: order.id,
-                  note: isPickupCompleteAfterPrepaid
-                    ? `ปล่อยจองสต็อกเมื่อรับสินค้าหน้าร้าน ${order.orderNo}`
-                    : `ปล่อยจองสต็อกเมื่อชำระเงิน ${order.orderNo}`,
-                  createdBy: session.userId,
-                },
-                {
-                  storeId,
-                  productId: item.productId,
-                  type: "OUT" as const,
-                  qtyBase: item.qtyBase,
-                  refType: "ORDER" as const,
-                  refId: order.id,
-                  note: isPickupCompleteAfterPrepaid
-                    ? `ตัดสต็อกเมื่อรับสินค้าหน้าร้าน ${order.orderNo}`
-                    : `ตัดสต็อกเมื่อชำระเงิน ${order.orderNo}`,
-                  createdBy: session.userId,
-                },
-              ]),
-            );
-          }
-
-          await tx
-            .update(orders)
-            .set({
-              status: "PAID",
-              paymentStatus: "PAID",
-              paymentMethod: effectivePaymentMethod,
-              paymentAccountId: effectivePaymentAccountId,
-              paidAt: order.paidAt ?? nowIso(),
-            })
-            .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
-        }
-
-        await tx.insert(auditEvents).values(
-          buildAuditEventValues({
-            scope: "STORE",
-            storeId,
-            actorUserId: session.userId,
-            actorName: session.displayName,
-            actorRole: session.activeRoleName,
-            action: "order.confirm_paid",
-            entityType: "order",
-            entityId: order.id,
-            metadata: {
-              orderNo: order.orderNo,
-              fromStatus: order.status,
-              toStatus:
-                isCodSettlementAfterShipped || isPickupPaymentConfirm ? order.status : "PAID",
-              fromPaymentStatus: order.paymentStatus,
-              toPaymentStatus: isCodSettlementAfterShipped ? "COD_SETTLED" : "PAID",
-              stockOutItems:
-                isCodSettlementAfterShipped || isPickupPaymentConfirm || shouldOnlyUpdatePaymentAfterReceived
-                  ? 0
-                  : orderItems.length,
-              pickupCompletion: isPickupCompleteAfterPrepaid,
-              pickupPaymentOnly: isPickupPaymentConfirm,
-              postPickupSettlement: shouldOnlyUpdatePaymentAfterReceived,
-              fromPaymentMethod: order.paymentMethod,
-              toPaymentMethod: effectivePaymentMethod,
-              fromPaymentAccountId: order.paymentAccountId,
-              toPaymentAccountId: effectivePaymentAccountId,
-              codAmount:
-                isCodSettlementAfterShipped && typeof confirmPaidPayload.codAmount === "number"
-                  ? confirmPaidPayload.codAmount
-                  : undefined,
-            },
-            requestContext,
-          }),
-        );
-
-        if (idempotencyRecordId) {
-          await markIdempotencySucceeded({
-            recordId: idempotencyRecordId,
-            statusCode: 200,
-            body: { ok: true },
-            tx,
-          });
-        }
-      });
       await invalidateOrderCaches(storeId);
       return NextResponse.json({ ok: true });
     }
@@ -1135,116 +756,38 @@ export async function PATCH(
         });
       }
 
-      if (isPostgresMarkPickedUpUnpaidEnabled()) {
+      await markOrderPickedUpUnpaidInPostgres({
+        storeId,
+        orderId: order.id,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        orderNo: order.orderNo,
+        currentStatus: order.status,
+        currentPaymentStatus: order.paymentStatus,
+        items: orderItems.map((item) => ({
+          productId: item.productId,
+          qtyBase: item.qtyBase,
+        })),
+        requestContext,
+      });
+
+      if (idempotencyRecordId) {
         try {
-          await markOrderPickedUpUnpaidInPostgres({
-            storeId,
-            orderId: order.id,
-            actorUserId: session.userId,
-            actorName: session.displayName,
-            actorRole: session.activeRoleName,
-            orderNo: order.orderNo,
-            currentStatus: order.status,
-            currentPaymentStatus: order.paymentStatus,
-            items: orderItems.map((item) => ({
-              productId: item.productId,
-              qtyBase: item.qtyBase,
-            })),
-            requestContext,
+          await markIdempotencySucceeded({
+            recordId: idempotencyRecordId,
+            statusCode: 200,
+            body: { ok: true },
           });
-
-          if (idempotencyRecordId) {
-            try {
-              await markIdempotencySucceeded({
-                recordId: idempotencyRecordId,
-                statusCode: 200,
-                body: { ok: true },
-              });
-            } catch (error) {
-              console.error(
-                `[orders.write.pg] idempotency mark failed action=mark_picked_up_unpaid orderId=${order.id}: ${
-                  error instanceof Error ? error.message : "unknown"
-                }`,
-              );
-            }
-          }
-
-          await invalidateOrderCaches(storeId);
-          return NextResponse.json({ ok: true });
         } catch (error) {
-          console.warn(
-            `[orders.write.pg] fallback to turso for mark_picked_up_unpaid orderId=${order.id}: ${
+          console.error(
+            `[orders.write.pg] idempotency mark failed action=mark_picked_up_unpaid orderId=${order.id}: ${
               error instanceof Error ? error.message : "unknown"
             }`,
           );
         }
       }
 
-      await db.transaction(async (tx) => {
-        if (orderItems.length > 0) {
-          await tx.insert(inventoryMovements).values(
-            orderItems.flatMap((item) => [
-              {
-                storeId,
-                productId: item.productId,
-                type: "RELEASE" as const,
-                qtyBase: item.qtyBase,
-                refType: "ORDER" as const,
-                refId: order.id,
-                note: `ปล่อยจองสต็อกเมื่อรับสินค้าแบบค้างจ่าย ${order.orderNo}`,
-                createdBy: session.userId,
-              },
-              {
-                storeId,
-                productId: item.productId,
-                type: "OUT" as const,
-                qtyBase: item.qtyBase,
-                refType: "ORDER" as const,
-                refId: order.id,
-                note: `ตัดสต็อกเมื่อรับสินค้าแบบค้างจ่าย ${order.orderNo}`,
-                createdBy: session.userId,
-              },
-            ]),
-          );
-        }
-
-        await tx
-          .update(orders)
-          .set({
-            status: "PICKED_UP_PENDING_PAYMENT",
-          })
-          .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
-
-        await tx.insert(auditEvents).values(
-          buildAuditEventValues({
-            scope: "STORE",
-            storeId,
-            actorUserId: session.userId,
-            actorName: session.displayName,
-            actorRole: session.activeRoleName,
-            action: "order.mark_picked_up_unpaid",
-            entityType: "order",
-            entityId: order.id,
-            metadata: {
-              orderNo: order.orderNo,
-              fromStatus: order.status,
-              toStatus: "PICKED_UP_PENDING_PAYMENT",
-              paymentStatus: order.paymentStatus,
-              stockOutItems: orderItems.length,
-            },
-            requestContext,
-          }),
-        );
-
-        if (idempotencyRecordId) {
-          await markIdempotencySucceeded({
-            recordId: idempotencyRecordId,
-            statusCode: 200,
-            body: { ok: true },
-            tx,
-          });
-        }
-      });
       await invalidateOrderCaches(storeId);
       return NextResponse.json({ ok: true });
     }
@@ -1263,113 +806,38 @@ export async function PATCH(
         });
       }
 
-      if (isPostgresMarkPackedEnabled()) {
+      await markOrderPackedInPostgres({
+        storeId,
+        orderId: order.id,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        orderNo: order.orderNo,
+        currentStatus: order.status,
+        canPackCodFromPending,
+        items: orderItems.map((item) => ({
+          productId: item.productId,
+          qtyBase: item.qtyBase,
+        })),
+        requestContext,
+      });
+
+      if (idempotencyRecordId) {
         try {
-          await markOrderPackedInPostgres({
-            storeId,
-            orderId: order.id,
-            actorUserId: session.userId,
-            actorName: session.displayName,
-            actorRole: session.activeRoleName,
-            orderNo: order.orderNo,
-            currentStatus: order.status,
-            canPackCodFromPending,
-            items: orderItems.map((item) => ({
-              productId: item.productId,
-              qtyBase: item.qtyBase,
-            })),
-            requestContext,
+          await markIdempotencySucceeded({
+            recordId: idempotencyRecordId,
+            statusCode: 200,
+            body: { ok: true },
           });
-
-          if (idempotencyRecordId) {
-            try {
-              await markIdempotencySucceeded({
-                recordId: idempotencyRecordId,
-                statusCode: 200,
-                body: { ok: true },
-              });
-            } catch (error) {
-              console.error(
-                `[orders.write.pg] idempotency mark failed action=mark_packed orderId=${order.id}: ${
-                  error instanceof Error ? error.message : "unknown"
-                }`,
-              );
-            }
-          }
-
-          await invalidateOrderCaches(storeId);
-          return NextResponse.json({ ok: true });
         } catch (error) {
-          console.warn(
-            `[orders.write.pg] fallback to turso for mark_packed orderId=${order.id}: ${
+          console.error(
+            `[orders.write.pg] idempotency mark failed action=mark_packed orderId=${order.id}: ${
               error instanceof Error ? error.message : "unknown"
             }`,
           );
         }
       }
 
-      await db.transaction(async (tx) => {
-        if (canPackCodFromPending && orderItems.length > 0) {
-          await tx.insert(inventoryMovements).values(
-            orderItems.flatMap((item) => [
-              {
-                storeId,
-                productId: item.productId,
-                type: "RELEASE" as const,
-                qtyBase: item.qtyBase,
-                refType: "ORDER" as const,
-                refId: order.id,
-                note: `ปล่อยจองสต็อกเมื่อแพ็ก COD ${order.orderNo}`,
-                createdBy: session.userId,
-              },
-              {
-                storeId,
-                productId: item.productId,
-                type: "OUT" as const,
-                qtyBase: item.qtyBase,
-                refType: "ORDER" as const,
-                refId: order.id,
-                note: `ตัดสต็อกเมื่อแพ็ก COD ${order.orderNo}`,
-                createdBy: session.userId,
-              },
-            ]),
-          );
-        }
-
-        await tx
-          .update(orders)
-          .set({ status: "PACKED" })
-          .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
-
-        await tx.insert(auditEvents).values(
-          buildAuditEventValues({
-            scope: "STORE",
-            storeId,
-            actorUserId: session.userId,
-            actorName: session.displayName,
-            actorRole: session.activeRoleName,
-            action: "order.mark_packed",
-            entityType: "order",
-            entityId: order.id,
-            metadata: {
-              orderNo: order.orderNo,
-              fromStatus: order.status,
-              toStatus: "PACKED",
-              stockOutItems: canPackCodFromPending ? orderItems.length : 0,
-            },
-            requestContext,
-          }),
-        );
-
-        if (idempotencyRecordId) {
-          await markIdempotencySucceeded({
-            recordId: idempotencyRecordId,
-            statusCode: 200,
-            body: { ok: true },
-            tx,
-          });
-        }
-      });
       await invalidateOrderCaches(storeId);
       return NextResponse.json({ ok: true });
     }
@@ -1382,82 +850,32 @@ export async function PATCH(
         });
       }
 
-      if (isPostgresMarkShippedEnabled()) {
+      await markOrderShippedInPostgres({
+        storeId,
+        orderId: order.id,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        orderNo: order.orderNo,
+        requestContext,
+      });
+
+      if (idempotencyRecordId) {
         try {
-          await markOrderShippedInPostgres({
-            storeId,
-            orderId: order.id,
-            actorUserId: session.userId,
-            actorName: session.displayName,
-            actorRole: session.activeRoleName,
-            orderNo: order.orderNo,
-            requestContext,
+          await markIdempotencySucceeded({
+            recordId: idempotencyRecordId,
+            statusCode: 200,
+            body: { ok: true },
           });
-
-          if (idempotencyRecordId) {
-            try {
-              await markIdempotencySucceeded({
-                recordId: idempotencyRecordId,
-                statusCode: 200,
-                body: { ok: true },
-              });
-            } catch (error) {
-              console.error(
-                `[orders.write.pg] idempotency mark failed action=mark_shipped orderId=${order.id}: ${
-                  error instanceof Error ? error.message : "unknown"
-                }`,
-              );
-            }
-          }
-
-          await invalidateOrderCaches(storeId);
-          return NextResponse.json({ ok: true });
         } catch (error) {
-          console.warn(
-            `[orders.write.pg] fallback to turso for mark_shipped orderId=${order.id}: ${
+          console.error(
+            `[orders.write.pg] idempotency mark failed action=mark_shipped orderId=${order.id}: ${
               error instanceof Error ? error.message : "unknown"
             }`,
           );
         }
       }
 
-      await db.transaction(async (tx) => {
-        await tx
-          .update(orders)
-          .set({
-            status: "SHIPPED",
-            shippedAt: nowIso(),
-          })
-          .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
-
-        await tx.insert(auditEvents).values(
-          buildAuditEventValues({
-            scope: "STORE",
-            storeId,
-            actorUserId: session.userId,
-            actorName: session.displayName,
-            actorRole: session.activeRoleName,
-            action: "order.mark_shipped",
-            entityType: "order",
-            entityId: order.id,
-            metadata: {
-              orderNo: order.orderNo,
-              fromStatus: "PACKED",
-              toStatus: "SHIPPED",
-            },
-            requestContext,
-          }),
-        );
-
-        if (idempotencyRecordId) {
-          await markIdempotencySucceeded({
-            recordId: idempotencyRecordId,
-            statusCode: 200,
-            body: { ok: true },
-            tx,
-          });
-        }
-      });
       await invalidateOrderCaches(storeId);
       return NextResponse.json({ ok: true });
     }
@@ -1479,126 +897,42 @@ export async function PATCH(
         });
       }
 
-      if (isPostgresMarkCodReturnedEnabled()) {
+      await markOrderCodReturnedInPostgres({
+        storeId,
+        orderId: order.id,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        orderNo: order.orderNo,
+        currentPaymentStatus: order.paymentStatus,
+        currentShippingCost: order.shippingCost,
+        currentCodFee: order.codFee,
+        normalizedCodFee:
+          typeof codReturnPayload.codFee === "number" ? codReturnPayload.codFee : 0,
+        normalizedCodReturnNote: codReturnPayload.codReturnNote?.trim() || null,
+        items: orderItems.map((item) => ({
+          productId: item.productId,
+          qtyBase: item.qtyBase,
+        })),
+        requestContext,
+      });
+
+      if (idempotencyRecordId) {
         try {
-          await markOrderCodReturnedInPostgres({
-            storeId,
-            orderId: order.id,
-            actorUserId: session.userId,
-            actorName: session.displayName,
-            actorRole: session.activeRoleName,
-            orderNo: order.orderNo,
-            currentPaymentStatus: order.paymentStatus,
-            currentShippingCost: order.shippingCost,
-            currentCodFee: order.codFee,
-            normalizedCodFee:
-              typeof codReturnPayload.codFee === "number" ? codReturnPayload.codFee : 0,
-            normalizedCodReturnNote: codReturnPayload.codReturnNote?.trim() || null,
-            items: orderItems.map((item) => ({
-              productId: item.productId,
-              qtyBase: item.qtyBase,
-            })),
-            requestContext,
+          await markIdempotencySucceeded({
+            recordId: idempotencyRecordId,
+            statusCode: 200,
+            body: { ok: true },
           });
-
-          if (idempotencyRecordId) {
-            try {
-              await markIdempotencySucceeded({
-                recordId: idempotencyRecordId,
-                statusCode: 200,
-                body: { ok: true },
-              });
-            } catch (error) {
-              console.error(
-                `[orders.write.pg] idempotency mark failed action=mark_cod_returned orderId=${order.id}: ${
-                  error instanceof Error ? error.message : "unknown"
-                }`,
-              );
-            }
-          }
-
-          await invalidateOrderCaches(storeId);
-          return NextResponse.json({ ok: true });
         } catch (error) {
-          console.warn(
-            `[orders.write.pg] fallback to turso for mark_cod_returned orderId=${order.id}: ${
+          console.error(
+            `[orders.write.pg] idempotency mark failed action=mark_cod_returned orderId=${order.id}: ${
               error instanceof Error ? error.message : "unknown"
             }`,
           );
         }
       }
 
-      await db.transaction(async (tx) => {
-        const normalizedCodFee =
-          typeof codReturnPayload.codFee === "number" ? codReturnPayload.codFee : 0;
-        const nextCodFee = Math.max(0, order.codFee) + normalizedCodFee;
-        const nextShippingCost = Math.max(0, order.shippingCost) + normalizedCodFee;
-        const normalizedCodReturnNote = codReturnPayload.codReturnNote?.trim() || null;
-
-        if (orderItems.length > 0) {
-          await tx.insert(inventoryMovements).values(
-            orderItems.map((item) => ({
-              storeId,
-              productId: item.productId,
-              type: "RETURN" as const,
-              qtyBase: item.qtyBase,
-              refType: "RETURN" as const,
-              refId: order.id,
-              note: `รับสินค้าตีกลับ COD ${order.orderNo}`,
-              createdBy: session.userId,
-            })),
-          );
-        }
-
-        await tx
-          .update(orders)
-          .set({
-            status: "COD_RETURNED",
-            paymentStatus: "FAILED",
-            codAmount: 0,
-            codSettledAt: null,
-            codFee: nextCodFee,
-            codReturnNote: normalizedCodReturnNote,
-            shippingCost: nextShippingCost,
-            codReturnedAt: nowIso(),
-          })
-          .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
-
-        await tx.insert(auditEvents).values(
-          buildAuditEventValues({
-            scope: "STORE",
-            storeId,
-            actorUserId: session.userId,
-            actorName: session.displayName,
-            actorRole: session.activeRoleName,
-            action: "order.mark_cod_returned",
-            entityType: "order",
-            entityId: order.id,
-            metadata: {
-              orderNo: order.orderNo,
-              fromStatus: "SHIPPED",
-              toStatus: "COD_RETURNED",
-              fromPaymentStatus: order.paymentStatus,
-              toPaymentStatus: "FAILED",
-              stockReturnItems: orderItems.length,
-              codFeeAdded: normalizedCodFee,
-              codFeeTotal: nextCodFee,
-              codReturnNote: normalizedCodReturnNote,
-              shippingCostTotal: nextShippingCost,
-            },
-            requestContext,
-          }),
-        );
-
-        if (idempotencyRecordId) {
-          await markIdempotencySucceeded({
-            recordId: idempotencyRecordId,
-            statusCode: 200,
-            body: { ok: true },
-            tx,
-          });
-        }
-      });
       await invalidateOrderCaches(storeId);
       return NextResponse.json({ ok: true });
     }
@@ -1675,141 +1009,52 @@ export async function PATCH(
       order.status === "SHIPPED" ||
       order.status === "PICKED_UP_PENDING_PAYMENT" ||
       (order.status === "PENDING_PAYMENT" && Boolean(cancelOrderStockState?.hasStockOutFromOrder));
-    const stockReleaseItems = shouldReleaseReservedOnCancel ? orderItems.length : 0;
-    const stockReturnItems = shouldReturnStockOnCancel ? orderItems.length : 0;
-
     const nextPaymentStatus =
       order.paymentStatus === "PAID" || order.paymentStatus === "COD_SETTLED"
         ? order.paymentStatus
         : "FAILED";
 
-    if (isPostgresCancelEnabled()) {
+    await cancelOrderInPostgres({
+      storeId,
+      orderId: order.id,
+      actorUserId: session.userId,
+      actorName: session.displayName,
+      actorRole: session.activeRoleName,
+      orderNo: order.orderNo,
+      currentStatus: order.status,
+      currentPaymentStatus: order.paymentStatus,
+      nextPaymentStatus,
+      cancelReason,
+      approverUserId: approver.userId,
+      approverName: approver.name,
+      approverEmail: approver.email,
+      approverRole: approver.roleName,
+      approvalMode: approver.approvalMode,
+      shouldReleaseReservedOnCancel,
+      shouldReturnStockOnCancel,
+      items: orderItems.map((item) => ({
+        productId: item.productId,
+        qtyBase: item.qtyBase,
+      })),
+      requestContext,
+    });
+
+    if (idempotencyRecordId) {
       try {
-        await cancelOrderInPostgres({
-          storeId,
-          orderId: order.id,
-          actorUserId: session.userId,
-          actorName: session.displayName,
-          actorRole: session.activeRoleName,
-          orderNo: order.orderNo,
-          currentStatus: order.status,
-          currentPaymentStatus: order.paymentStatus,
-          nextPaymentStatus,
-          cancelReason,
-          approverUserId: approver.userId,
-          approverName: approver.name,
-          approverEmail: approver.email,
-          approverRole: approver.roleName,
-          approvalMode: approver.approvalMode,
-          shouldReleaseReservedOnCancel,
-          shouldReturnStockOnCancel,
-          items: orderItems.map((item) => ({
-            productId: item.productId,
-            qtyBase: item.qtyBase,
-          })),
-          requestContext,
+        await markIdempotencySucceeded({
+          recordId: idempotencyRecordId,
+          statusCode: 200,
+          body: { ok: true },
         });
-
-        if (idempotencyRecordId) {
-          try {
-            await markIdempotencySucceeded({
-              recordId: idempotencyRecordId,
-              statusCode: 200,
-              body: { ok: true },
-            });
-          } catch (error) {
-            console.error(
-              `[orders.write.pg] idempotency mark failed action=cancel orderId=${order.id}: ${
-                error instanceof Error ? error.message : "unknown"
-              }`,
-            );
-          }
-        }
-
-        await invalidateOrderCaches(storeId);
-        return NextResponse.json({ ok: true });
       } catch (error) {
-        console.warn(
-          `[orders.write.pg] fallback to turso for cancel orderId=${order.id}: ${
+        console.error(
+          `[orders.write.pg] idempotency mark failed action=cancel orderId=${order.id}: ${
             error instanceof Error ? error.message : "unknown"
           }`,
         );
       }
     }
 
-    await db.transaction(async (tx) => {
-      if (shouldReleaseReservedOnCancel && orderItems.length > 0) {
-        await tx.insert(inventoryMovements).values(
-          orderItems.map((item) => ({
-            storeId,
-            productId: item.productId,
-            type: "RELEASE" as const,
-            qtyBase: item.qtyBase,
-            refType: "ORDER" as const,
-            refId: order.id,
-            note: `ปล่อยจองสต็อกจากการยกเลิก ${order.orderNo}`,
-            createdBy: session.userId,
-          })),
-        );
-      }
-
-      if (shouldReturnStockOnCancel && orderItems.length > 0) {
-        await tx.insert(inventoryMovements).values(
-          orderItems.map((item) => ({
-            storeId,
-            productId: item.productId,
-            type: "RETURN" as const,
-            qtyBase: item.qtyBase,
-            refType: "RETURN" as const,
-            refId: order.id,
-            note: `คืนสต็อกจากการยกเลิก ${order.orderNo}`,
-            createdBy: session.userId,
-          })),
-        );
-      }
-
-      await tx
-        .update(orders)
-        .set({ status: "CANCELLED", paymentStatus: nextPaymentStatus })
-        .where(and(eq(orders.id, order.id), eq(orders.storeId, storeId)));
-
-      await tx.insert(auditEvents).values(
-        buildAuditEventValues({
-          scope: "STORE",
-          storeId,
-          actorUserId: session.userId,
-          actorName: session.displayName,
-          actorRole: session.activeRoleName,
-          action: "order.cancel",
-          entityType: "order",
-          entityId: order.id,
-          metadata: {
-            orderNo: order.orderNo,
-            fromStatus: order.status,
-            toStatus: "CANCELLED",
-            cancelReason,
-            approvedByUserId: approver.userId,
-            approvedByName: approver.name,
-            approvedByEmail: approver.email,
-            approvedByRole: approver.roleName,
-            approvalMode: approver.approvalMode,
-            selfApproved: approver.approvalMode === "SELF_SLIDE",
-            stockReleaseItems,
-            stockReturnItems,
-          },
-          requestContext,
-        }),
-      );
-
-      if (idempotencyRecordId) {
-        await markIdempotencySucceeded({
-          recordId: idempotencyRecordId,
-          statusCode: 200,
-          body: { ok: true },
-          tx,
-        });
-      }
-    });
     await invalidateOrderCaches(storeId);
     return NextResponse.json({ ok: true });
   } catch (error) {

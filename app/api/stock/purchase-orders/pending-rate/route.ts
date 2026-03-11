@@ -1,9 +1,7 @@
-import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { db } from "@/lib/db/client";
-import { stores } from "@/lib/db/schema";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
+import { getReportStoreCurrency } from "@/lib/reports/queries";
 import { getPendingExchangeRateQueue } from "@/server/services/purchase.service";
 
 function toDateStartIso(value: string): string | null {
@@ -42,15 +40,9 @@ export async function GET(request: Request) {
     const receivedFrom = receivedFromParsed ?? undefined;
     const receivedTo = receivedToParsed ?? undefined;
 
-    const [storeRow] = await db
-      .select({ currency: stores.currency })
-      .from(stores)
-      .where(eq(stores.id, storeId))
-      .limit(1);
-
     const queue = await getPendingExchangeRateQueue({
       storeId,
-      storeCurrency: (storeRow?.currency ?? "LAK") as "LAK" | "THB" | "USD",
+      storeCurrency: await getReportStoreCurrency(storeId),
       supplierQuery: supplierQuery || undefined,
       receivedFrom,
       receivedTo,

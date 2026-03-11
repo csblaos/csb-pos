@@ -1,12 +1,11 @@
 import Link from "next/link";
-import { asc, eq } from "drizzle-orm";
 import { ChevronRight, Settings2, Store } from "lucide-react";
 import { redirect } from "next/navigation";
 
 import { StoreShippingProvidersSettings } from "@/components/app/store-shipping-providers-settings";
 import { getSession } from "@/lib/auth/session";
-import { db } from "@/lib/db/client";
-import { shippingProviders, stores } from "@/lib/db/schema";
+import { queryMany } from "@/lib/db/query";
+import { getStoreProfileFromPostgres } from "@/lib/platform/postgres-store-settings";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 
 const parseAliases = (raw: string | null | undefined) => {
@@ -55,39 +54,35 @@ export default async function SettingsStoreShippingProvidersPage() {
   }
 
   const [store, providerRows] = await Promise.all([
-    db
-      .select({
-        id: stores.id,
-        name: stores.name,
-      })
-      .from(stores)
-      .where(eq(stores.id, activeStoreId))
-      .limit(1)
-      .then((rows) => rows[0] ?? null),
-    (async () => {
-      try {
-        return await db
-          .select({
-            id: shippingProviders.id,
-            code: shippingProviders.code,
-            displayName: shippingProviders.displayName,
-            branchName: shippingProviders.branchName,
-            aliases: shippingProviders.aliases,
-            active: shippingProviders.active,
-            sortOrder: shippingProviders.sortOrder,
-            createdAt: shippingProviders.createdAt,
-          })
-          .from(shippingProviders)
-          .where(eq(shippingProviders.storeId, activeStoreId))
-          .orderBy(
-            asc(shippingProviders.sortOrder),
-            asc(shippingProviders.displayName),
-            asc(shippingProviders.createdAt),
-          );
-      } catch {
-        return [];
-      }
-    })(),
+    getStoreProfileFromPostgres(activeStoreId),
+    queryMany<{
+      id: string;
+      code: string;
+      displayName: string;
+      branchName: string | null;
+      aliases: string | null;
+      active: boolean | null;
+      sortOrder: number | null;
+      createdAt: string;
+    }>(
+      `
+        select
+          id,
+          code,
+          display_name as "displayName",
+          branch_name as "branchName",
+          aliases,
+          active,
+          sort_order as "sortOrder",
+          created_at as "createdAt"
+        from shipping_providers
+        where store_id = :storeId
+        order by sort_order asc, display_name asc, created_at asc
+      `,
+      {
+        replacements: { storeId: activeStoreId },
+      },
+    ),
   ]);
 
   if (!store) {
@@ -105,6 +100,8 @@ export default async function SettingsStoreShippingProvidersPage() {
   const initialProviders = providerRows.map((row) => ({
     ...row,
     aliases: parseAliases(row.aliases),
+    active: row.active === true,
+    sortOrder: typeof row.sortOrder === "number" ? row.sortOrder : 0,
   }));
 
   return (

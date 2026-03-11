@@ -1,12 +1,10 @@
 import Link from "next/link";
-import { asc, desc, inArray } from "drizzle-orm";
 import { ChevronRight, PlugZap, Store } from "lucide-react";
 import { redirect } from "next/navigation";
 
 import { getSession } from "@/lib/auth/session";
 import { listActiveMemberships } from "@/lib/auth/session-db";
-import { db } from "@/lib/db/client";
-import { fbConnections, stores, waConnections } from "@/lib/db/schema";
+import { queryMany } from "@/lib/db/query";
 
 type ConnectionStatus = "DISCONNECTED" | "CONNECTED" | "ERROR";
 
@@ -61,33 +59,59 @@ export default async function SettingsSuperadminIntegrationsPage() {
   }
 
   const storeIds = memberships.map((membership) => membership.storeId);
-
   const [storeRows, fbRows, waRows] = await Promise.all([
-    db
-      .select({ id: stores.id, name: stores.name, storeType: stores.storeType })
-      .from(stores)
-      .where(inArray(stores.id, storeIds))
-      .orderBy(asc(stores.name)),
-    db
-      .select({
-        storeId: fbConnections.storeId,
-        status: fbConnections.status,
-        pageName: fbConnections.pageName,
-        connectedAt: fbConnections.connectedAt,
-      })
-      .from(fbConnections)
-      .where(inArray(fbConnections.storeId, storeIds))
-      .orderBy(desc(fbConnections.connectedAt)),
-    db
-      .select({
-        storeId: waConnections.storeId,
-        status: waConnections.status,
-        phoneNumber: waConnections.phoneNumber,
-        connectedAt: waConnections.connectedAt,
-      })
-      .from(waConnections)
-      .where(inArray(waConnections.storeId, storeIds))
-      .orderBy(desc(waConnections.connectedAt)),
+    queryMany<{
+      id: string;
+      name: string;
+      storeType: "ONLINE_RETAIL" | "RESTAURANT" | "CAFE" | "OTHER" | null;
+    }>(
+      `
+        select
+          id,
+          name,
+          store_type as "storeType"
+        from stores
+        where id in (:storeIds)
+        order by name asc
+      `,
+      { replacements: { storeIds } },
+    ),
+    queryMany<{
+      storeId: string;
+      status: ConnectionStatus;
+      pageName: string | null;
+      connectedAt: string | null;
+    }>(
+      `
+        select
+          store_id as "storeId",
+          status,
+          page_name as "pageName",
+          connected_at as "connectedAt"
+        from fb_connections
+        where store_id in (:storeIds)
+        order by connected_at desc nulls last
+      `,
+      { replacements: { storeIds } },
+    ),
+    queryMany<{
+      storeId: string;
+      status: ConnectionStatus;
+      phoneNumber: string | null;
+      connectedAt: string | null;
+    }>(
+      `
+        select
+          store_id as "storeId",
+          status,
+          phone_number as "phoneNumber",
+          connected_at as "connectedAt"
+        from wa_connections
+        where store_id in (:storeIds)
+        order by connected_at desc nulls last
+      `,
+      { replacements: { storeIds } },
+    ),
   ]);
 
   const fbByStore = new Map<string, (typeof fbRows)[number]>();

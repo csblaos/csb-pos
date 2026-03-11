@@ -1,15 +1,16 @@
 import dynamic from "next/dynamic";
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
 
 import { getSession } from "@/lib/auth/session";
 import {
   getUserPermissionsForCurrentSession,
   isPermissionGranted,
 } from "@/lib/rbac/access";
-import { parseStoreCurrency } from "@/lib/finance/store-financial";
-import { db } from "@/lib/db/client";
-import { stores } from "@/lib/db/schema";
+import {
+  getStoreFinancialConfigFromPostgres,
+  getStorePdfConfigFromPostgres,
+  getStoreProfileFromPostgres,
+} from "@/lib/platform/postgres-store-settings";
 import { createPerfScope } from "@/server/perf/perf";
 import {
   getRecentStockMovements,
@@ -114,7 +115,15 @@ export default async function StockPage({
     const PRODUCT_PAGE_SIZE = 20;
     const PO_PAGE_SIZE = 20;
 
-    const [movements, purchaseOrderRows, stockProductRows, storeRow, categories] =
+    const [
+      movements,
+      purchaseOrderRows,
+      stockProductRows,
+      storeProfile,
+      storeFinancial,
+      storePdfConfig,
+      categories,
+    ] =
       await perf.step("service.getStockAndPO", async () =>
         Promise.all([
           getRecentStockMovements({
@@ -127,24 +136,9 @@ export default async function StockPage({
             limit: PRODUCT_PAGE_SIZE + 1,
             offset: 0,
           }),
-          db
-            .select({
-              currency: stores.currency,
-              logoUrl: stores.logoUrl,
-              outStockThreshold: stores.outStockThreshold,
-              lowStockThreshold: stores.lowStockThreshold,
-              pdfShowLogo: stores.pdfShowLogo,
-              pdfShowSignature: stores.pdfShowSignature,
-              pdfShowNote: stores.pdfShowNote,
-              pdfHeaderColor: stores.pdfHeaderColor,
-              pdfCompanyName: stores.pdfCompanyName,
-              pdfCompanyAddress: stores.pdfCompanyAddress,
-              pdfCompanyPhone: stores.pdfCompanyPhone,
-            })
-            .from(stores)
-            .where(eq(stores.id, activeStoreId))
-            .limit(1)
-            .then((rows) => rows[0] ?? null),
+          getStoreProfileFromPostgres(activeStoreId),
+          getStoreFinancialConfigFromPostgres(activeStoreId),
+          getStorePdfConfigFromPostgres(activeStoreId),
           listCategories(activeStoreId),
         ]),
       );
@@ -154,19 +148,19 @@ export default async function StockPage({
     const hasMorePO = purchaseOrderRows.length > PO_PAGE_SIZE;
     const initialPOs = purchaseOrderRows.slice(0, PO_PAGE_SIZE);
 
-    const storeCurrency = parseStoreCurrency(storeRow?.currency);
-    const storeLogoUrl = storeRow?.logoUrl ?? null;
-    const storePdfConfig = {
-      showLogo: storeRow?.pdfShowLogo ?? true,
-      showSignature: storeRow?.pdfShowSignature ?? true,
-      showNote: storeRow?.pdfShowNote ?? true,
-      headerColor: storeRow?.pdfHeaderColor ?? "#f1f5f9",
-      companyName: storeRow?.pdfCompanyName ?? null,
-      companyAddress: storeRow?.pdfCompanyAddress ?? null,
-      companyPhone: storeRow?.pdfCompanyPhone ?? null,
+    const storeCurrency = storeFinancial?.currency ?? "LAK";
+    const storeLogoUrl = storeProfile?.logoUrl ?? null;
+    const purchaseOrderPdfConfig = {
+      showLogo: storePdfConfig?.pdfShowLogo ?? true,
+      showSignature: storePdfConfig?.pdfShowSignature ?? true,
+      showNote: storePdfConfig?.pdfShowNote ?? true,
+      headerColor: storePdfConfig?.pdfHeaderColor ?? "#f1f5f9",
+      companyName: storePdfConfig?.pdfCompanyName ?? null,
+      companyAddress: storePdfConfig?.pdfCompanyAddress ?? null,
+      companyPhone: storePdfConfig?.pdfCompanyPhone ?? null,
     };
-    const storeOutStockThreshold = storeRow?.outStockThreshold ?? 0;
-    const storeLowStockThreshold = storeRow?.lowStockThreshold ?? 10;
+    const storeOutStockThreshold = storeProfile?.outStockThreshold ?? 0;
+    const storeLowStockThreshold = storeProfile?.lowStockThreshold ?? 10;
     const params = await searchParams;
     const initialTab = params?.tab === "purchase"
       ? "purchase"
@@ -216,7 +210,7 @@ export default async function StockPage({
               pageSize={PO_PAGE_SIZE}
               initialHasMore={hasMorePO}
               storeLogoUrl={storeLogoUrl}
-              pdfConfig={storePdfConfig}
+              pdfConfig={purchaseOrderPdfConfig}
             />
           }
         />

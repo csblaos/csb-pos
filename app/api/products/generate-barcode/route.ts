@@ -1,7 +1,7 @@
 import { and, eq, like } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { db } from "@/lib/db/client";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { products } from "@/lib/db/schema";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 
@@ -24,6 +24,7 @@ function calcEAN13CheckDigit(first12: string): number {
 export async function POST() {
   try {
     const { storeId } = await enforcePermission("products.create");
+    const db = await getTursoDb();
 
     // Find the highest existing internal barcode for this store
     const rows = await db

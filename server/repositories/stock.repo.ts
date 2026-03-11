@@ -1,8 +1,9 @@
 import "server-only";
 
-import { and, eq, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 
-import { db } from "@/server/db/client";
+import { execute, queryOne } from "@/lib/db/query";
+import type { PostgresTransaction } from "@/lib/db/sequelize";
 import { timeDb } from "@/server/perf/perf";
 import {
   getInventoryMovementsPage,
@@ -14,9 +15,8 @@ import {
   type InventoryMovementPage,
   type StockProductOption,
 } from "@/lib/inventory/queries";
-import { inventoryMovements, productUnits, products } from "@/lib/db/schema";
-type StockRepoTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
-type StockRepoExecutor = typeof db | StockRepoTx;
+
+type StockRepoTx = PostgresTransaction;
 
 export type StockMutationProduct = {
   id: string;
@@ -72,23 +72,28 @@ export async function findStockMutationProduct(
   productId: string,
   tx?: StockRepoTx,
 ): Promise<StockMutationProduct | null> {
-  const executor: StockRepoExecutor = tx ?? db;
   const load = async () =>
-    executor
-      .select({
-        id: products.id,
-        baseUnitId: products.baseUnitId,
-        active: products.active,
-      })
-      .from(products)
-      .where(and(eq(products.id, productId), eq(products.storeId, storeId)))
-      .limit(1);
+    queryOne<StockMutationProduct>(
+      `
+        select
+          id,
+          base_unit_id as "baseUnitId",
+          active
+        from products
+        where id = :productId
+          and store_id = :storeId
+        limit 1
+      `,
+      {
+        transaction: tx,
+        replacements: {
+          storeId,
+          productId,
+        },
+      },
+    );
 
-  const [product] = tx
-    ? await load()
-    : await timeDb("stock.repo.findProduct", async () => load());
-
-  return product ?? null;
+  return tx ? load() : timeDb("stock.repo.findProduct", async () => load());
 }
 
 export async function findUnitMultiplierToBase(
@@ -96,21 +101,32 @@ export async function findUnitMultiplierToBase(
   unitId: string,
   tx?: StockRepoTx,
 ): Promise<number | null> {
-  const executor: StockRepoExecutor = tx ?? db;
-  const load = async () =>
-    executor
-      .select({ multiplierToBase: productUnits.multiplierToBase })
-      .from(productUnits)
-      .where(
-        and(eq(productUnits.productId, productId), eq(productUnits.unitId, unitId)),
-      )
-      .limit(1);
+  const load = async () => {
+    const conversion = await queryOne<{ multiplierToBase: number | string | null }>(
+      `
+        select multiplier_to_base as "multiplierToBase"
+        from product_units
+        where product_id = :productId
+          and unit_id = :unitId
+        limit 1
+      `,
+      {
+        transaction: tx,
+        replacements: {
+          productId,
+          unitId,
+        },
+      },
+    );
 
-  const [conversion] = tx
-    ? await load()
-    : await timeDb("stock.repo.findUnitMultiplier", async () => load());
+    return conversion?.multiplierToBase != null
+      ? Number(conversion.multiplierToBase)
+      : null;
+  };
 
-  return conversion?.multiplierToBase ?? null;
+  return tx
+    ? load()
+    : timeDb("stock.repo.findUnitMultiplier", async () => load());
 }
 
 export async function createInventoryMovementRecord(input: {
@@ -122,27 +138,54 @@ export async function createInventoryMovementRecord(input: {
   createdBy: string;
   tx?: StockRepoTx;
 }) {
-  const executor: StockRepoExecutor = input.tx ?? db;
-  const insert = async () =>
-    executor
-      .insert(inventoryMovements)
-      .values({
-        storeId: input.storeId,
-        productId: input.productId,
-        type: input.type,
-        qtyBase: input.qtyBase,
-        refType: input.type === "RETURN" ? "RETURN" : "MANUAL",
-        refId: null,
-        note: input.note,
-        createdBy: input.createdBy,
-      })
-      .returning({ id: inventoryMovements.id });
+  const movementId = randomUUID();
+  const insert = async () => {
+    await execute(
+      `
+        insert into inventory_movements (
+          id,
+          store_id,
+          product_id,
+          type,
+          qty_base,
+          ref_type,
+          ref_id,
+          note,
+          created_by
+        )
+        values (
+          :id,
+          :storeId,
+          :productId,
+          :type,
+          :qtyBase,
+          :refType,
+          null,
+          :note,
+          :createdBy
+        )
+      `,
+      {
+        transaction: input.tx,
+        replacements: {
+          id: movementId,
+          storeId: input.storeId,
+          productId: input.productId,
+          type: input.type,
+          qtyBase: input.qtyBase,
+          refType: input.type === "RETURN" ? "RETURN" : "MANUAL",
+          note: input.note,
+          createdBy: input.createdBy,
+        },
+      },
+    );
 
-  const [inserted] = input.tx
-    ? await insert()
-    : await timeDb("stock.repo.insertMovement", async () => insert());
+    return movementId;
+  };
 
-  return inserted?.id ?? null;
+  return input.tx
+    ? insert()
+    : timeDb("stock.repo.insertMovement", async () => insert());
 }
 
 export async function getStockBalanceByProduct(
@@ -150,34 +193,37 @@ export async function getStockBalanceByProduct(
   productId: string,
   tx?: StockRepoTx,
 ) {
-  const executor: StockRepoExecutor = tx ?? db;
   const load = async () => {
-    const [row] = await executor
-      .select({
-        onHand: sql<number>`
+    const row = await queryOne<{
+      onHand: number | string | null;
+      reserved: number | string | null;
+    }>(
+      `
+        select
           coalesce(sum(case
-            when ${inventoryMovements.type} = 'IN' then ${inventoryMovements.qtyBase}
-            when ${inventoryMovements.type} = 'RETURN' then ${inventoryMovements.qtyBase}
-            when ${inventoryMovements.type} = 'OUT' then -${inventoryMovements.qtyBase}
-            when ${inventoryMovements.type} = 'ADJUST' then ${inventoryMovements.qtyBase}
+            when type = 'IN' then qty_base
+            when type = 'RETURN' then qty_base
+            when type = 'OUT' then -qty_base
+            when type = 'ADJUST' then qty_base
             else 0
-          end), 0)
-        `,
-        reserved: sql<number>`
+          end), 0) as "onHand",
           coalesce(sum(case
-            when ${inventoryMovements.type} = 'RESERVE' then ${inventoryMovements.qtyBase}
-            when ${inventoryMovements.type} = 'RELEASE' then -${inventoryMovements.qtyBase}
+            when type = 'RESERVE' then qty_base
+            when type = 'RELEASE' then -qty_base
             else 0
-          end), 0)
-        `,
-      })
-      .from(inventoryMovements)
-      .where(
-        and(
-          eq(inventoryMovements.storeId, storeId),
-          eq(inventoryMovements.productId, productId),
-        ),
-      );
+          end), 0) as "reserved"
+        from inventory_movements
+        where store_id = :storeId
+          and product_id = :productId
+      `,
+      {
+        transaction: tx,
+        replacements: {
+          storeId,
+          productId,
+        },
+      },
+    );
 
     const onHand = Number(row?.onHand ?? 0);
     const reserved = Number(row?.reserved ?? 0);

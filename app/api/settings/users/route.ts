@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { generateTemporaryPassword, hashPassword } from "@/lib/auth/password";
-import { db } from "@/lib/db/client";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { roles, storeMembers, users } from "@/lib/db/schema";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { safeLogAuditEvent } from "@/server/services/audit.service";
@@ -40,6 +40,7 @@ type CreateStoreUserPayload =
   | z.infer<typeof addExistingStoreUserSchema>;
 
 const activeOwnerCount = async (storeId: string) => {
+  const db = await getTursoDb();
   const [row] = await db
     .select({ count: sql<number>`count(*)` })
     .from(storeMembers)
@@ -90,6 +91,7 @@ const parseCreateStoreUserPayload = (
 };
 
 const listUsers = async (storeId: string) => {
+  const db = await getTursoDb();
   const userCreators = alias(users, "user_creators");
   const memberAdders = alias(users, "member_adders");
 
@@ -122,6 +124,7 @@ const listUsers = async (storeId: string) => {
 };
 
 const getRoleForStore = async (storeId: string, roleId: string) => {
+  const db = await getTursoDb();
   const [role] = await db
     .select({ id: roles.id, name: roles.name })
     .from(roles)
@@ -132,6 +135,7 @@ const getRoleForStore = async (storeId: string, roleId: string) => {
 };
 
 const getUserSystemRole = async (userId: string) => {
+  const db = await getTursoDb();
   const [row] = await db
     .select({ systemRole: users.systemRole })
     .from(users)
@@ -145,6 +149,7 @@ const canSuperadminLinkUserAcrossOwnedStores = async (
   superadminUserId: string,
   targetUserId: string,
 ) => {
+  const db = await getTursoDb();
   const ownedStoreRows = await db
     .select({
       storeId: storeMembers.storeId,
@@ -186,6 +191,7 @@ const upsertMembershipWithRoleGuard = async (params: {
   nextRoleId: string;
   nextRoleName: string;
 }) => {
+  const db = await getTursoDb();
   const [existingMembership] = await db
     .select({
       status: storeMembers.status,
@@ -259,6 +265,7 @@ export async function POST(request: Request) {
 
   try {
     const { storeId, session } = await enforcePermission("members.create");
+    const db = await getTursoDb();
     auditContext = {
       storeId,
       userId: session.userId,

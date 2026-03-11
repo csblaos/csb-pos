@@ -1,6 +1,7 @@
 import { and, eq, or, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { orderItems, orders, productUnits, products, units } from "@/lib/db/schema";
 import {
   deleteUnitInPostgres,
@@ -10,8 +11,6 @@ import {
 } from "@/lib/platform/postgres-products-onboarding-write";
 import { RBACError, enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { createUnitSchema, normalizeUnitPayload } from "@/lib/products/validation";
-
-const getTursoDb = async () => (await import("@/lib/db/client")).db;
 
 export async function PATCH(
   request: Request,

@@ -1,24 +1,37 @@
-import { permissions } from "@/lib/db/schema";
-import {
-  defaultPermissionCatalog,
-  permissionIdFromKey,
-  permissionKey,
-} from "@/lib/rbac/defaults";
+import { execute } from "@/lib/db/query";
+import { defaultPermissionCatalog, permissionIdFromKey, permissionKey } from "@/lib/rbac/defaults";
 
 export async function ensurePermissionCatalog() {
-  const { db } = await import("@/lib/db/client");
-  await db
-    .insert(permissions)
-    .values(
-      defaultPermissionCatalog.map((item) => {
-        const key = permissionKey(item.resource, item.action);
-        return {
+  for (const item of defaultPermissionCatalog) {
+    const key = permissionKey(item.resource, item.action);
+    await execute(
+      `
+        insert into permissions (
+          id,
+          key,
+          resource,
+          action,
+          created_at,
+          updated_at
+        )
+        values (
+          :id,
+          :key,
+          :resource,
+          :action,
+          current_timestamp,
+          current_timestamp
+        )
+        on conflict (key) do nothing
+      `,
+      {
+        replacements: {
           id: permissionIdFromKey(key),
           key,
           resource: item.resource,
           action: item.action,
-        };
-      }),
-    )
-    .onConflictDoNothing({ target: permissions.key });
+        },
+      },
+    );
+  }
 }

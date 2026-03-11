@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { and, eq, inArray, sql } from "drizzle-orm";
 import { ChevronRight, Gauge, ShieldCheck, Store } from "lucide-react";
 import { redirect } from "next/navigation";
 
@@ -14,8 +13,7 @@ import {
   evaluateStoreCreationAccess,
   getStoreCreationPolicy,
 } from "@/lib/auth/store-creation";
-import { db } from "@/lib/db/client";
-import { storeBranches, storeMembers, stores, users } from "@/lib/db/schema";
+import { queryMany } from "@/lib/db/query";
 
 const toNumber = (value: unknown) => Number(value ?? 0);
 const toNonNegativeIntOrNull = (value: unknown) => {
@@ -78,38 +76,54 @@ export default async function SettingsSuperadminQuotasPage() {
   const [storePolicy, globalBranchPolicy, activeMemberRows, branchCountRows, storeRows, userRows] = await Promise.all([
     getStoreCreationPolicy(session.userId),
     getGlobalBranchPolicy(),
-    db
-      .select({
-        storeId: storeMembers.storeId,
-        count: sql<number>`count(*)`,
-      })
-      .from(storeMembers)
-      .where(and(inArray(storeMembers.storeId, storeIds), eq(storeMembers.status, "ACTIVE")))
-      .groupBy(storeMembers.storeId),
-    db
-      .select({
-        storeId: storeBranches.storeId,
-        count: sql<number>`count(*)`,
-      })
-      .from(storeBranches)
-      .where(inArray(storeBranches.storeId, storeIds))
-      .groupBy(storeBranches.storeId),
-    db
-      .select({
-        id: stores.id,
-        maxBranchesOverride: stores.maxBranchesOverride,
-      })
-      .from(stores)
-      .where(inArray(stores.id, storeIds)),
-    db
-      .select({
-        systemRole: users.systemRole,
-        canCreateBranches: users.canCreateBranches,
-        maxBranchesPerStore: users.maxBranchesPerStore,
-      })
-      .from(users)
-      .where(eq(users.id, session.userId))
-      .limit(1),
+    queryMany<{ storeId: string; count: number | string }>(
+      `
+        select
+          store_id as "storeId",
+          count(*) as "count"
+        from store_members
+        where store_id in (:storeIds) and status = 'ACTIVE'
+        group by store_id
+      `,
+      { replacements: { storeIds } },
+    ),
+    queryMany<{ storeId: string; count: number | string }>(
+      `
+        select
+          store_id as "storeId",
+          count(*) as "count"
+        from store_branches
+        where store_id in (:storeIds)
+        group by store_id
+      `,
+      { replacements: { storeIds } },
+    ),
+    queryMany<{ id: string; maxBranchesOverride: number | null }>(
+      `
+        select
+          id,
+          max_branches_override as "maxBranchesOverride"
+        from stores
+        where id in (:storeIds)
+      `,
+      { replacements: { storeIds } },
+    ),
+    queryMany<{
+      systemRole: "USER" | "SUPERADMIN" | "SYSTEM_ADMIN" | null;
+      canCreateBranches: boolean | null;
+      maxBranchesPerStore: number | null;
+    }>(
+      `
+        select
+          system_role as "systemRole",
+          can_create_branches as "canCreateBranches",
+          max_branches_per_store as "maxBranchesPerStore"
+        from users
+        where id = :userId
+        limit 1
+      `,
+      { replacements: { userId: session.userId } },
+    ),
   ]);
 
   const storeAccess = evaluateStoreCreationAccess(storePolicy);

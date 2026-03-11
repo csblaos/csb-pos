@@ -1,14 +1,13 @@
-import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 
 import { StorePdfSettings } from "@/components/app/store-pdf-settings";
 import { getSession } from "@/lib/auth/session";
+import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 import {
-  getUserPermissionsForCurrentSession,
-  isPermissionGranted,
-} from "@/lib/rbac/access";
-import { db } from "@/lib/db/client";
-import { stores } from "@/lib/db/schema";
+  getStoreFinancialConfigFromPostgres,
+  getStorePdfConfigFromPostgres,
+  getStoreProfileFromPostgres,
+} from "@/lib/platform/postgres-store-settings";
 
 export default async function SettingsPdfPage() {
   const session = await getSession();
@@ -33,30 +32,20 @@ export default async function SettingsPdfPage() {
     );
   }
 
-  const [store] = await db
-    .select({
-      logoUrl: stores.logoUrl,
-      currency: stores.currency,
-      pdfShowLogo: stores.pdfShowLogo,
-      pdfShowSignature: stores.pdfShowSignature,
-      pdfShowNote: stores.pdfShowNote,
-      pdfHeaderColor: stores.pdfHeaderColor,
-      pdfCompanyName: stores.pdfCompanyName,
-      pdfCompanyAddress: stores.pdfCompanyAddress,
-      pdfCompanyPhone: stores.pdfCompanyPhone,
-    })
-    .from(stores)
-    .where(eq(stores.id, session.activeStoreId))
-    .limit(1);
+  const [storeProfile, storeFinancial, pdfConfig] = await Promise.all([
+    getStoreProfileFromPostgres(session.activeStoreId),
+    getStoreFinancialConfigFromPostgres(session.activeStoreId),
+    getStorePdfConfigFromPostgres(session.activeStoreId),
+  ]);
 
   const initialConfig = {
-    pdfShowLogo: store?.pdfShowLogo ?? true,
-    pdfShowSignature: store?.pdfShowSignature ?? true,
-    pdfShowNote: store?.pdfShowNote ?? true,
-    pdfHeaderColor: store?.pdfHeaderColor ?? "#f1f5f9",
-    pdfCompanyName: store?.pdfCompanyName ?? null,
-    pdfCompanyAddress: store?.pdfCompanyAddress ?? null,
-    pdfCompanyPhone: store?.pdfCompanyPhone ?? null,
+    pdfShowLogo: pdfConfig?.pdfShowLogo ?? true,
+    pdfShowSignature: pdfConfig?.pdfShowSignature ?? true,
+    pdfShowNote: pdfConfig?.pdfShowNote ?? true,
+    pdfHeaderColor: pdfConfig?.pdfHeaderColor ?? "#f1f5f9",
+    pdfCompanyName: pdfConfig?.pdfCompanyName ?? null,
+    pdfCompanyAddress: pdfConfig?.pdfCompanyAddress ?? null,
+    pdfCompanyPhone: pdfConfig?.pdfCompanyPhone ?? null,
   };
 
   return (
@@ -70,8 +59,8 @@ export default async function SettingsPdfPage() {
 
       <StorePdfSettings
         initialConfig={initialConfig}
-        storeLogoUrl={store?.logoUrl ?? null}
-        storeCurrency={store?.currency ?? "LAK"}
+        storeLogoUrl={storeProfile?.logoUrl ?? null}
+        storeCurrency={storeFinancial?.currency ?? "LAK"}
         canUpdate={canUpdate}
       />
     </section>

@@ -1,8 +1,6 @@
-import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { db } from "@/lib/db/client";
-import { orders } from "@/lib/db/schema";
+import { queryOne } from "@/lib/db/query";
 import { buildRequestContext } from "@/lib/http/request-context";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import {
@@ -142,15 +140,28 @@ export async function POST(
       );
     }
 
-    const [targetOrder] = await db
-      .select({
-        id: orders.id,
-        orderNo: orders.orderNo,
-        status: orders.status,
-      })
-      .from(orders)
-      .where(and(eq(orders.id, orderId), eq(orders.storeId, storeId)))
-      .limit(1);
+    const targetOrder = await queryOne<{
+      id: string;
+      orderNo: string;
+      status: string;
+    }>(
+      `
+        select
+          id,
+          order_no as "orderNo",
+          status
+        from orders
+        where id = :orderId
+          and store_id = :storeId
+        limit 1
+      `,
+      {
+        replacements: {
+          orderId,
+          storeId,
+        },
+      },
+    );
 
     if (!targetOrder) {
       await safeLogAuditEvent({

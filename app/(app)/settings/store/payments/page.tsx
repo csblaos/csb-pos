@@ -1,12 +1,13 @@
 import Link from "next/link";
-import { asc, desc, eq } from "drizzle-orm";
 import { ChevronRight, Settings2, Store } from "lucide-react";
 import { redirect } from "next/navigation";
 
 import { StorePaymentAccountsSettings } from "@/components/app/store-payment-accounts-settings";
 import { getSession } from "@/lib/auth/session";
-import { db } from "@/lib/db/client";
-import { storePaymentAccounts, stores } from "@/lib/db/schema";
+import {
+  getStoreProfileFromPostgres,
+  listStorePaymentAccountsFromPostgres,
+} from "@/lib/platform/postgres-store-settings";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 import { isPaymentQrR2Configured, resolvePaymentQrImageUrl } from "@/lib/storage/r2";
 import { getGlobalPaymentPolicy } from "@/lib/system-config/policy";
@@ -39,43 +40,8 @@ export default async function SettingsStorePaymentsPage() {
   }
 
   const [store, accounts, paymentPolicy] = await Promise.all([
-    db
-      .select({
-        id: stores.id,
-        name: stores.name,
-      })
-      .from(stores)
-      .where(eq(stores.id, activeStoreId))
-      .limit(1)
-      .then((rows) => rows[0] ?? null),
-    (async () => {
-      try {
-        return await db
-          .select({
-            id: storePaymentAccounts.id,
-            displayName: storePaymentAccounts.displayName,
-            accountType: storePaymentAccounts.accountType,
-            bankName: storePaymentAccounts.bankName,
-            accountName: storePaymentAccounts.accountName,
-            accountNumber: storePaymentAccounts.accountNumber,
-            qrImageUrl: storePaymentAccounts.qrImageUrl,
-            promptpayId: storePaymentAccounts.promptpayId,
-            isDefault: storePaymentAccounts.isDefault,
-            isActive: storePaymentAccounts.isActive,
-            createdAt: storePaymentAccounts.createdAt,
-            updatedAt: storePaymentAccounts.updatedAt,
-          })
-          .from(storePaymentAccounts)
-          .where(eq(storePaymentAccounts.storeId, activeStoreId))
-          .orderBy(
-            desc(storePaymentAccounts.isDefault),
-            desc(storePaymentAccounts.isActive),
-            asc(storePaymentAccounts.createdAt),
-          );
-      } catch {
-        return [];
-      }
-    })(),
+    getStoreProfileFromPostgres(activeStoreId),
+    listStorePaymentAccountsFromPostgres(activeStoreId),
     getGlobalPaymentPolicy(),
   ]);
 
@@ -91,7 +57,7 @@ export default async function SettingsStorePaymentsPage() {
     );
   }
 
-  const normalizedAccounts = accounts.map((account) => ({
+  const normalizedAccounts = (accounts ?? []).map((account) => ({
     ...account,
     accountType:
       account.accountType === "BANK" || account.accountType === "LAO_QR"

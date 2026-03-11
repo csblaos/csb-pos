@@ -15,8 +15,9 @@ import {
   getPurchaseOrderDetailFromPostgres,
   listPurchaseOrdersFromPostgres,
   listPurchaseOrdersPagedFromPostgres,
-  logPurchaseReadFallback,
 } from "@/lib/purchases/queries";
+import { execute } from "@/lib/db/query";
+import { runInTransaction } from "@/lib/db/transaction";
 import {
   getNextPoNumber,
   getLatestPurchaseOrderPaymentEntry,
@@ -29,9 +30,6 @@ import {
   insertPurchaseOrder,
   insertPurchaseOrderItems,
   insertPurchaseOrderPayment,
-  listPendingExchangeRateQueue,
-  listPurchaseOrders,
-  listPurchaseOrdersPaged,
   replacePurchaseOrderItems,
   updatePurchaseOrderItemCostFields,
   updateProductCostBase,
@@ -45,8 +43,6 @@ import type {
   PurchaseOrderListItem,
   PurchaseOrderView,
 } from "@/server/repositories/purchase.repo";
-import { db } from "@/lib/db/client";
-import { auditEvents } from "@/lib/db/schema";
 import { buildAuditEventValues } from "@/server/services/audit.service";
 import { markIdempotencySucceeded } from "@/server/services/idempotency.service";
 
@@ -98,21 +94,84 @@ function derivePoPaymentStatus(
   return "PARTIAL";
 }
 
+async function insertAuditEvent(
+  tx: PurchaseRepoTx,
+  auditValues: ReturnType<typeof buildAuditEventValues>,
+) {
+  await execute(
+    `
+      insert into audit_events (
+        id,
+        scope,
+        store_id,
+        actor_user_id,
+        actor_name,
+        actor_role,
+        action,
+        entity_type,
+        entity_id,
+        result,
+        reason_code,
+        ip_address,
+        user_agent,
+        request_id,
+        metadata,
+        before,
+        after,
+        occurred_at
+      )
+      values (
+        gen_random_uuid(),
+        :scope,
+        :storeId,
+        :actorUserId,
+        :actorName,
+        :actorRole,
+        :action,
+        :entityType,
+        :entityId,
+        :result,
+        :reasonCode,
+        :ipAddress,
+        :userAgent,
+        :requestId,
+        cast(:metadata as jsonb),
+        cast(:before as jsonb),
+        cast(:after as jsonb),
+        :occurredAt
+      )
+    `,
+    {
+      transaction: tx,
+      replacements: {
+        scope: auditValues.scope,
+        storeId: auditValues.storeId,
+        actorUserId: auditValues.actorUserId,
+        actorName: auditValues.actorName,
+        actorRole: auditValues.actorRole,
+        action: auditValues.action,
+        entityType: auditValues.entityType,
+        entityId: auditValues.entityId,
+        result: auditValues.result,
+        reasonCode: auditValues.reasonCode,
+        ipAddress: auditValues.ipAddress,
+        userAgent: auditValues.userAgent,
+        requestId: auditValues.requestId,
+        metadata: auditValues.metadata,
+        before: auditValues.before,
+        after: auditValues.after,
+        occurredAt: auditValues.occurredAt,
+      },
+    },
+  );
+}
+
 /* ────────────────────────────────────────────────
  * List
  * ──────────────────────────────────────────────── */
 
 export async function getPurchaseOrderList(storeId: string) {
-  try {
-    const purchaseOrders = await listPurchaseOrdersFromPostgres(storeId);
-    if (purchaseOrders) {
-      return purchaseOrders;
-    }
-  } catch (error) {
-    logPurchaseReadFallback("getPurchaseOrderList", error);
-  }
-
-  return listPurchaseOrders(storeId);
+  return listPurchaseOrdersFromPostgres(storeId);
 }
 
 export async function getPurchaseOrderListPage(
@@ -120,16 +179,7 @@ export async function getPurchaseOrderListPage(
   limit: number,
   offset: number,
 ) {
-  try {
-    const purchaseOrders = await listPurchaseOrdersPagedFromPostgres(storeId, limit, offset);
-    if (purchaseOrders) {
-      return purchaseOrders;
-    }
-  } catch (error) {
-    logPurchaseReadFallback("getPurchaseOrderListPage", error);
-  }
-
-  return listPurchaseOrdersPaged(storeId, limit, offset);
+  return listPurchaseOrdersPagedFromPostgres(storeId, limit, offset);
 }
 
 export async function getPendingExchangeRateQueue(params: {
@@ -140,16 +190,7 @@ export async function getPendingExchangeRateQueue(params: {
   receivedTo?: string;
   limit?: number;
 }) {
-  try {
-    const queue = await getPendingExchangeRateQueueFromPostgres(params);
-    if (queue) {
-      return queue;
-    }
-  } catch (error) {
-    logPurchaseReadFallback("getPendingExchangeRateQueue", error);
-  }
-
-  return listPendingExchangeRateQueue(params);
+  return getPendingExchangeRateQueueFromPostgres(params);
 }
 
 /* ────────────────────────────────────────────────
@@ -160,18 +201,7 @@ export async function getPurchaseOrderDetail(
   poId: string,
   storeId: string,
 ): Promise<PurchaseOrderView> {
-  let po: PurchaseOrderView | null = null;
-
-  try {
-    po = await getPurchaseOrderDetailFromPostgres(poId, storeId);
-  } catch (error) {
-    logPurchaseReadFallback("getPurchaseOrderDetail", error);
-  }
-
-  if (!po) {
-    po = await getPurchaseOrderById(poId, storeId);
-  }
-
+  const po = await getPurchaseOrderDetailFromPostgres(poId, storeId);
   if (!po) {
     throw new PurchaseServiceError(404, "ไม่พบใบสั่งซื้อ");
   }
@@ -204,7 +234,7 @@ export async function createPurchaseOrder(params: {
 
   const initialStatus = payload.receiveImmediately ? "RECEIVED" : "DRAFT";
 
-  return db.transaction(async (tx) => {
+  return runInTransaction(async (tx) => {
     const poNumber = await getNextPoNumber(storeId, tx);
     const po = await insertPurchaseOrder(
       {
@@ -289,7 +319,8 @@ export async function createPurchaseOrder(params: {
     }
 
     if (audit) {
-      await tx.insert(auditEvents).values(
+      await insertAuditEvent(
+        tx,
         buildAuditEventValues({
           scope: "STORE",
           storeId,
@@ -324,7 +355,6 @@ export async function createPurchaseOrder(params: {
           ok: true,
           purchaseOrder: createdPo,
         },
-        tx,
       });
     }
 
@@ -348,7 +378,7 @@ export async function updatePurchaseOrderStatusFlow(params: {
 
   const now = new Date().toISOString();
 
-  return db.transaction(async (tx) => {
+  return runInTransaction(async (tx) => {
     const po = await getPurchaseOrderById(poId, storeId, tx);
 
     if (!po) {
@@ -470,7 +500,8 @@ export async function updatePurchaseOrderStatusFlow(params: {
     await updatePurchaseOrderStatus(poId, updates, tx);
 
     if (audit) {
-      await tx.insert(auditEvents).values(
+      await insertAuditEvent(
+        tx,
         buildAuditEventValues({
           scope: "STORE",
           storeId,
@@ -503,7 +534,6 @@ export async function updatePurchaseOrderStatusFlow(params: {
           ok: true,
           purchaseOrder: updatedPo,
         },
-        tx,
       });
     }
 
@@ -524,7 +554,7 @@ export async function finalizePurchaseOrderExchangeRateFlow(params: {
   const now = new Date().toISOString();
   const nextRate = Math.round(payload.exchangeRate);
 
-  return db.transaction(async (tx) => {
+  return runInTransaction(async (tx) => {
     const po = await getPurchaseOrderById(poId, storeId, tx);
     if (!po) {
       throw new PurchaseServiceError(404, "ไม่พบใบสั่งซื้อ");
@@ -591,7 +621,8 @@ export async function finalizePurchaseOrderExchangeRateFlow(params: {
     );
 
     if (audit) {
-      await tx.insert(auditEvents).values(
+      await insertAuditEvent(
+        tx,
         buildAuditEventValues({
           scope: "STORE",
           storeId,
@@ -626,7 +657,6 @@ export async function finalizePurchaseOrderExchangeRateFlow(params: {
           ok: true,
           purchaseOrder: updatedPo,
         },
-        tx,
       });
     }
 
@@ -651,7 +681,7 @@ export async function settlePurchaseOrderPaymentFlow(params: {
     throw new PurchaseServiceError(400, "ยอดชำระต้องมากกว่า 0");
   }
 
-  return db.transaction(async (tx) => {
+  return runInTransaction(async (tx) => {
     const po = await getPurchaseOrderById(poId, storeId, tx);
     if (!po) {
       throw new PurchaseServiceError(404, "ไม่พบใบสั่งซื้อ");
@@ -709,7 +739,8 @@ export async function settlePurchaseOrderPaymentFlow(params: {
     );
 
     if (audit) {
-      await tx.insert(auditEvents).values(
+      await insertAuditEvent(
+        tx,
         buildAuditEventValues({
           scope: "STORE",
           storeId,
@@ -746,7 +777,6 @@ export async function settlePurchaseOrderPaymentFlow(params: {
           ok: true,
           purchaseOrder: updatedPo,
         },
-        tx,
       });
     }
 
@@ -765,7 +795,7 @@ export async function applyPurchaseOrderExtraCostFlow(params: {
   const { poId, storeId, userId, payload, audit, idempotency } = params;
   const now = new Date().toISOString();
 
-  return db.transaction(async (tx) => {
+  return runInTransaction(async (tx) => {
     const po = await getPurchaseOrderById(poId, storeId, tx);
     if (!po) {
       throw new PurchaseServiceError(404, "ไม่พบใบสั่งซื้อ");
@@ -843,7 +873,8 @@ export async function applyPurchaseOrderExtraCostFlow(params: {
     );
 
     if (audit) {
-      await tx.insert(auditEvents).values(
+      await insertAuditEvent(
+        tx,
         buildAuditEventValues({
           scope: "STORE",
           storeId,
@@ -883,7 +914,6 @@ export async function applyPurchaseOrderExtraCostFlow(params: {
           ok: true,
           purchaseOrder: updatedPo,
         },
-        tx,
       });
     }
 
@@ -903,7 +933,7 @@ export async function reversePurchaseOrderPaymentFlow(params: {
   const { poId, paymentId, storeId, userId, payload, audit, idempotency } = params;
   const now = new Date().toISOString();
 
-  return db.transaction(async (tx) => {
+  return runInTransaction(async (tx) => {
     const po = await getPurchaseOrderById(poId, storeId, tx);
     if (!po) {
       throw new PurchaseServiceError(404, "ไม่พบใบสั่งซื้อ");
@@ -966,7 +996,8 @@ export async function reversePurchaseOrderPaymentFlow(params: {
     );
 
     if (audit) {
-      await tx.insert(auditEvents).values(
+      await insertAuditEvent(
+        tx,
         buildAuditEventValues({
           scope: "STORE",
           storeId,
@@ -1001,7 +1032,6 @@ export async function reversePurchaseOrderPaymentFlow(params: {
           ok: true,
           purchaseOrder: updatedPo,
         },
-        tx,
       });
     }
 
@@ -1021,7 +1051,7 @@ export async function updatePurchaseOrderFlow(params: {
   const { poId, storeId, userId, storeCurrency, payload, audit, idempotency } = params;
   const now = new Date().toISOString();
 
-  return db.transaction(async (tx) => {
+  return runInTransaction(async (tx) => {
     const po = await getPurchaseOrderById(poId, storeId, tx);
 
     if (!po) {
@@ -1178,7 +1208,8 @@ export async function updatePurchaseOrderFlow(params: {
     await updatePurchaseOrderFields(po.id, updates, tx);
 
     if (audit) {
-      await tx.insert(auditEvents).values(
+      await insertAuditEvent(
+        tx,
         buildAuditEventValues({
           scope: "STORE",
           storeId,
@@ -1211,7 +1242,6 @@ export async function updatePurchaseOrderFlow(params: {
           ok: true,
           purchaseOrder: updatedPo,
         },
-        tx,
       });
     }
 
@@ -1277,7 +1307,8 @@ async function receiveStockAndUpdateCost(
     await updateProductCostBase(item.productId, newCostBase, tx);
 
     if (newCostBase !== currentCostBase) {
-      await tx.insert(auditEvents).values(
+      await insertAuditEvent(
+        tx,
         buildAuditEventValues({
           scope: "STORE",
           storeId,

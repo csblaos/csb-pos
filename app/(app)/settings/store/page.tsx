@@ -1,13 +1,11 @@
 import Link from "next/link";
-import { eq } from "drizzle-orm";
 import { ChevronRight, Store, Truck, WalletCards } from "lucide-react";
 import { redirect } from "next/navigation";
 
 import { StoreFinancialSettings } from "@/components/app/store-financial-settings";
 import { StoreProfileSettings } from "@/components/app/store-profile-settings";
 import { getSession } from "@/lib/auth/session";
-import { db } from "@/lib/db/client";
-import { stores } from "@/lib/db/schema";
+import { getStoreProfileFromPostgres } from "@/lib/platform/postgres-store-settings";
 import { getStoreFinancialConfig } from "@/lib/stores/financial";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 
@@ -20,6 +18,7 @@ export default async function SettingsStorePage() {
   if (!session.activeStoreId) {
     redirect("/onboarding");
   }
+  const activeStoreId = session.activeStoreId;
 
   const permissionKeys = await getUserPermissionsForCurrentSession();
   const canView = isPermissionGranted(permissionKeys, "settings.view");
@@ -39,20 +38,8 @@ export default async function SettingsStorePage() {
   }
 
   const [store, financial] = await Promise.all([
-    db
-      .select({
-        id: stores.id,
-        name: stores.name,
-        logoName: stores.logoName,
-        logoUrl: stores.logoUrl,
-        address: stores.address,
-        phoneNumber: stores.phoneNumber,
-      })
-      .from(stores)
-      .where(eq(stores.id, session.activeStoreId))
-      .limit(1)
-      .then((rows) => rows[0] ?? null),
-    getStoreFinancialConfig(session.activeStoreId),
+    getStoreProfileFromPostgres(activeStoreId),
+    getStoreFinancialConfig(activeStoreId),
   ]);
 
   if (!store) {

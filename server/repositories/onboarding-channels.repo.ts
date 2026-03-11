@@ -6,6 +6,7 @@ import {
   getOnboardingChannelStatusFromPostgres,
   logProductsOnboardingReadFallback,
 } from "@/lib/platform/postgres-products-onboarding";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { createPerfScope, timeDb } from "@/server/perf/perf";
 import { fbConnections, waConnections } from "@/lib/db/schema";
 
@@ -19,8 +20,6 @@ type ChannelStatusReadMode = "parallel" | "combined";
 
 const getReadMode = (): ChannelStatusReadMode =>
   process.env.CHANNEL_STATUS_QUERY_MODE === "parallel" ? "parallel" : "combined";
-
-const getTursoDb = async () => (await import("@/server/db/client")).db;
 
 async function readStoreChannelStatusParallel(storeId: string): Promise<ChannelState> {
   const db = await getTursoDb();

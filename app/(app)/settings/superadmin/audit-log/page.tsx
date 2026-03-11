@@ -1,25 +1,11 @@
 import Link from "next/link";
-import {
-  and,
-  desc,
-  eq,
-  gte,
-  inArray,
-  like,
-  lt,
-  lte,
-  or,
-  sql,
-} from "drizzle-orm";
-import { alias } from "drizzle-orm/sqlite-core";
 import { ChevronRight, ClipboardList, Store } from "lucide-react";
 import { redirect } from "next/navigation";
 
 import { getSession } from "@/lib/auth/session";
 import { listActiveMemberships } from "@/lib/auth/session-db";
 import { getUserSystemRole } from "@/lib/auth/system-admin";
-import { db } from "@/lib/db/client";
-import { auditEvents, roles, storeMembers, stores, users } from "@/lib/db/schema";
+import { queryMany } from "@/lib/db/query";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -157,19 +143,21 @@ export default async function SettingsSuperadminAuditLogPage({
   const membershipStoreIds = memberships.map((membership) => membership.storeId);
   const canViewSystem = systemRole === "SYSTEM_ADMIN";
   const params = rawParams ?? {};
-
-  const creatorOwnedStoreRows = await db
-    .select({ storeId: storeMembers.storeId })
-    .from(storeMembers)
-    .innerJoin(roles, eq(storeMembers.roleId, roles.id))
-    .where(
-      and(
-        eq(storeMembers.userId, session.userId),
-        eq(storeMembers.status, "ACTIVE"),
-        eq(roles.name, "Owner"),
-        eq(storeMembers.addedBy, session.userId),
-      ),
-    );
+  const creatorOwnedStoreRows = await queryMany<{ storeId: string }>(
+    `
+      select sm.store_id as "storeId"
+      from store_members sm
+      inner join roles r on sm.role_id = r.id
+      where
+        sm.user_id = :userId
+        and sm.status = 'ACTIVE'
+        and r.name = 'Owner'
+        and sm.added_by = :userId
+    `,
+    {
+      replacements: { userId: session.userId },
+    },
+  );
 
   const creatorOwnedStoreIdSet = new Set(creatorOwnedStoreRows.map((row) => row.storeId));
   let visibleStoreIds = membershipStoreIds;
@@ -202,114 +190,141 @@ export default async function SettingsSuperadminAuditLogPage({
     cursorAtRaw.length > 0 && !Number.isNaN(Date.parse(cursorAtRaw)) ? cursorAtRaw : "";
   const cursorId = cursorAt && cursorIdRaw ? cursorIdRaw : "";
 
-  const actorUsers = alias(users, "actor_users");
-
-  const whereClauses = [];
+  const whereClauses: string[] = [];
 
   if (!canViewSystem) {
-    whereClauses.push(eq(auditEvents.scope, "STORE"));
+    whereClauses.push(`ae.scope = 'STORE'`);
     if (visibleStoreIds.length > 0) {
-      whereClauses.push(inArray(auditEvents.storeId, visibleStoreIds));
+      whereClauses.push(`ae.store_id in (:visibleStoreIds)`);
     } else {
-      whereClauses.push(sql`1 = 0`);
+      whereClauses.push(`1 = 0`);
     }
   }
 
   if (canViewSystem && (scope === "STORE" || scope === "SYSTEM")) {
-    whereClauses.push(eq(auditEvents.scope, scope));
+    whereClauses.push(`ae.scope = :scope`);
   }
 
   if (selectedStoreId) {
-    whereClauses.push(eq(auditEvents.storeId, selectedStoreId));
+    whereClauses.push(`ae.store_id = :selectedStoreId`);
   }
 
   if (result === "SUCCESS" || result === "FAIL") {
-    whereClauses.push(eq(auditEvents.result, result));
+    whereClauses.push(`ae.result = :result`);
   }
 
   if (action) {
-    whereClauses.push(eq(auditEvents.action, action));
+    whereClauses.push(`ae.action = :action`);
   }
 
   if (actionLike) {
-    whereClauses.push(like(auditEvents.action, `%${actionLike}%`));
+    whereClauses.push(`ae.action like :actionLikePattern`);
   }
 
   if (q) {
-    const searchCondition = or(
-      like(auditEvents.action, `%${q}%`),
-      like(auditEvents.entityType, `%${q}%`),
-      like(auditEvents.entityId, `%${q}%`),
-      like(auditEvents.actorName, `%${q}%`),
-      like(actorUsers.name, `%${q}%`),
+    whereClauses.push(
+      `(ae.action like :qPattern or ae.entity_type like :qPattern or ae.entity_id like :qPattern or ae.actor_name like :qPattern or actor_users.name like :qPattern)`,
     );
-    if (searchCondition) {
-      whereClauses.push(searchCondition);
-    }
   }
 
   const fromIso = fromDate ? toDayStartIso(fromDate) : null;
   const toIso = toDate ? toDayEndIso(toDate) : null;
 
   if (fromIso) {
-    whereClauses.push(gte(auditEvents.occurredAt, fromIso));
+    whereClauses.push(`ae.occurred_at >= :fromIso`);
   }
 
   if (toIso) {
-    whereClauses.push(lte(auditEvents.occurredAt, toIso));
+    whereClauses.push(`ae.occurred_at <= :toIso`);
   }
 
   if (cursorAt && cursorId) {
-    const cursorCondition = or(
-      lt(auditEvents.occurredAt, cursorAt),
-      and(eq(auditEvents.occurredAt, cursorAt), lt(auditEvents.id, cursorId)),
+    whereClauses.push(
+      `(ae.occurred_at < :cursorAt or (ae.occurred_at = :cursorAt and ae.id < :cursorId))`,
     );
-    if (cursorCondition) {
-      whereClauses.push(cursorCondition);
-    }
   }
 
-  const whereCondition = whereClauses.length > 0 ? and(...whereClauses) : undefined;
+  const whereSql = whereClauses.length > 0 ? whereClauses.join(" and ") : "1 = 1";
+  const replacements = {
+    userId: session.userId,
+    visibleStoreIds,
+    scope,
+    selectedStoreId,
+    result,
+    action,
+    fromIso,
+    toIso,
+    cursorAt,
+    cursorId,
+    actionLikePattern: `%${actionLike}%`,
+    qPattern: `%${q}%`,
+    limit: PAGE_SIZE + 1,
+  };
 
   const [storeOptions, rowsWithExtra] = await Promise.all([
     canViewSystem
-      ? db
-          .select({ id: stores.id, name: stores.name })
-          .from(stores)
-          .orderBy(stores.name)
-          .limit(200)
+      ? queryMany<{ id: string; name: string }>(
+          `
+            select id, name
+            from stores
+            order by name asc
+            limit 200
+          `,
+        )
       : visibleStoreIds.length === 0
         ? Promise.resolve([])
-        : db
-            .select({ id: stores.id, name: stores.name })
-            .from(stores)
-            .where(inArray(stores.id, visibleStoreIds))
-            .orderBy(stores.name),
-    db
-      .select({
-        id: auditEvents.id,
-        occurredAt: auditEvents.occurredAt,
-        scope: auditEvents.scope,
-        storeId: auditEvents.storeId,
-        storeName: stores.name,
-        actorUserId: auditEvents.actorUserId,
-        actorNameSnapshot: auditEvents.actorName,
-        actorRoleSnapshot: auditEvents.actorRole,
-        actorName: actorUsers.name,
-        action: auditEvents.action,
-        entityType: auditEvents.entityType,
-        entityId: auditEvents.entityId,
-        result: auditEvents.result,
-        reasonCode: auditEvents.reasonCode,
-        metadata: auditEvents.metadata,
-      })
-      .from(auditEvents)
-      .leftJoin(stores, eq(auditEvents.storeId, stores.id))
-      .leftJoin(actorUsers, eq(auditEvents.actorUserId, actorUsers.id))
-      .where(whereCondition)
-      .orderBy(desc(auditEvents.occurredAt), desc(auditEvents.id))
-      .limit(PAGE_SIZE + 1)
-      .offset(0),
+        : queryMany<{ id: string; name: string }>(
+            `
+              select id, name
+              from stores
+              where id in (:visibleStoreIds)
+              order by name asc
+            `,
+            { replacements: { visibleStoreIds } },
+          ),
+    queryMany<{
+      id: string;
+      occurredAt: string;
+      scope: string;
+      storeId: string | null;
+      storeName: string | null;
+      actorUserId: string | null;
+      actorNameSnapshot: string | null;
+      actorRoleSnapshot: string | null;
+      actorName: string | null;
+      action: string;
+      entityType: string;
+      entityId: string | null;
+      result: string;
+      reasonCode: string | null;
+      metadata: string | null;
+    }>(
+      `
+        select
+          ae.id,
+          ae.occurred_at as "occurredAt",
+          ae.scope,
+          ae.store_id as "storeId",
+          s.name as "storeName",
+          ae.actor_user_id as "actorUserId",
+          ae.actor_name as "actorNameSnapshot",
+          ae.actor_role as "actorRoleSnapshot",
+          actor_users.name as "actorName",
+          ae.action,
+          ae.entity_type as "entityType",
+          ae.entity_id as "entityId",
+          ae.result,
+          ae.reason_code as "reasonCode",
+          ae.metadata
+        from audit_events ae
+        left join stores s on ae.store_id = s.id
+        left join users actor_users on ae.actor_user_id = actor_users.id
+        where ${whereSql}
+        order by ae.occurred_at desc, ae.id desc
+        limit :limit
+      `,
+      { replacements },
+    ),
   ]);
 
   const hasMore = rowsWithExtra.length > PAGE_SIZE;

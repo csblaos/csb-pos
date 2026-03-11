@@ -4,6 +4,7 @@ import { and, eq, inArray, or } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { auditEvents, productUnits, products, units } from "@/lib/db/schema";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { buildRequestContext } from "@/lib/http/request-context";
 import { getStoreProductByIdDirectFromPostgres } from "@/lib/platform/postgres-products-onboarding";
 import {
@@ -32,8 +33,6 @@ import {
   buildVariantColumns,
   isVariantCombinationUniqueError,
 } from "@/lib/products/variant-persistence";
-
-const getTursoDb = async () => (await import("@/lib/db/client")).db;
 
 export async function PATCH(
   request: Request,

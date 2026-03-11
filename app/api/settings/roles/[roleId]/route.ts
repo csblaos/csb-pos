@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { invalidateUserSessions } from "@/lib/auth/session";
-import { db } from "@/lib/db/client";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { permissions, rolePermissions, roles, storeMembers } from "@/lib/db/schema";
 import { timeDbQuery } from "@/lib/perf/server";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
@@ -20,6 +20,7 @@ export async function GET(
 ) {
   try {
     const { storeId } = await enforcePermission("rbac.roles.view");
+    const db = await getTursoDb();
 
     const { roleId } = await context.params;
 
@@ -82,6 +83,7 @@ export async function PATCH(
 
   try {
     const { storeId, session } = await enforcePermission("rbac.roles.update");
+    const db = await getTursoDb();
 
     const { roleId } = await context.params;
     auditContext = {

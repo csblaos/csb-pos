@@ -7,6 +7,7 @@ import { z } from "zod";
 import { hashPassword } from "@/lib/auth/password";
 import { buildSessionForUser } from "@/lib/auth/session-db";
 import { createSessionCookie, SessionStoreUnavailableError } from "@/lib/auth/session";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { users } from "@/lib/db/schema";
 
 const signupSchema = z.object({
@@ -14,8 +15,6 @@ const signupSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).max(128),
 });
-
-const getTursoDb = async () => (await import("@/lib/db/client")).db;
 
 export async function POST(request: Request) {
   const db = await getTursoDb();

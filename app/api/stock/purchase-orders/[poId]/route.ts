@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
 
 import { buildRequestContext } from "@/lib/http/request-context";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
@@ -17,8 +16,6 @@ import {
   updatePurchaseOrderStatusFlow,
   PurchaseServiceError,
 } from "@/server/services/purchase.service";
-import { db } from "@/lib/db/client";
-import { stores } from "@/lib/db/schema";
 import { safeLogAuditEvent } from "@/server/services/audit.service";
 import {
   claimIdempotency,
@@ -27,6 +24,7 @@ import {
   markIdempotencySucceeded,
   safeMarkIdempotencyFailed,
 } from "@/server/services/idempotency.service";
+import { getReportStoreCurrency } from "@/lib/reports/queries";
 
 type RouteParams = { params: Promise<{ poId: string }> };
 
@@ -166,45 +164,37 @@ export async function PATCH(request: Request, { params }: RouteParams) {
       parsed.data.status === "RECEIVED" &&
       isPostgresPurchaseReceiveStatusEnabled()
     ) {
-      try {
-        const currentPo = await getPurchaseOrderDetail(poId, storeId);
-        const purchaseOrder = await receivePurchaseOrderInPostgres({
-          storeId,
-          userId: session.userId,
-          po: currentPo,
-          payload: parsed.data,
-          actorName: session.displayName,
-          actorRole: session.activeRoleName,
-          requestContext,
-        });
+      const currentPo = await getPurchaseOrderDetail(poId, storeId);
+      const purchaseOrder = await receivePurchaseOrderInPostgres({
+        storeId,
+        userId: session.userId,
+        po: currentPo,
+        payload: parsed.data,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        requestContext,
+      });
 
-        if (idempotencyRecordId) {
-          try {
-            await markIdempotencySucceeded({
-              recordId: idempotencyRecordId,
-              statusCode: 200,
-              body: {
-                ok: true,
-                purchaseOrder,
-              },
-            });
-          } catch (error) {
-            console.error(
-              `[purchase.write.pg] idempotency mark failed action=po.status.change poId=${poId}: ${
-                error instanceof Error ? error.message : "unknown"
-              }`,
-            );
-          }
+      if (idempotencyRecordId) {
+        try {
+          await markIdempotencySucceeded({
+            recordId: idempotencyRecordId,
+            statusCode: 200,
+            body: {
+              ok: true,
+              purchaseOrder,
+            },
+          });
+        } catch (error) {
+          console.error(
+            `[purchase.write.pg] idempotency mark failed action=po.status.change poId=${poId}: ${
+              error instanceof Error ? error.message : "unknown"
+            }`,
+          );
         }
-
-        return NextResponse.json({ ok: true, purchaseOrder });
-      } catch (error) {
-        console.warn(
-          `[purchase.write.pg] fallback to turso for po.status.change receive poId=${poId}: ${
-            error instanceof Error ? error.message : "unknown"
-          }`,
-        );
       }
+
+      return NextResponse.json({ ok: true, purchaseOrder });
     }
 
     const po = await updatePurchaseOrderStatusFlow({
@@ -401,17 +391,13 @@ export async function PUT(request: Request, { params }: RouteParams) {
       return NextResponse.json({ message: firstError }, { status: 400 });
     }
 
-    const [storeRow] = await db
-      .select({ currency: stores.currency })
-      .from(stores)
-      .where(eq(stores.id, storeId))
-      .limit(1);
+    const storeCurrency = await getReportStoreCurrency(storeId);
 
     const po = await updatePurchaseOrderFlow({
       poId,
       storeId,
       userId: session.userId,
-      storeCurrency: storeRow?.currency ?? "LAK",
+      storeCurrency,
       payload: parsed.data,
       audit: {
         actorName: session.displayName,

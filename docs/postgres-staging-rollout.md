@@ -31,6 +31,12 @@ npm run build
 
 ถ้า command ใด fail ให้หยุด rollout และแก้ที่ต้นเหตุทันที
 
+หมายเหตุ:
+- `npm run smoke:postgres:purchase-suite` ตอนนี้เป็น preflight chain ของ purchase rollout แล้ว โดยรวม `db:check:postgres`, `db:migrate:postgres`, `db:compare:postgres:auth-rbac-read`, `db:backfill:postgres:purchase-read`, `db:compare:postgres:purchase-read`, purchase smokes, `db:compare:postgres:inventory`, `lint`, และ `build`
+- `npm run smoke:postgres:orders-write-suite` ตอนนี้เป็น preflight chain ของ orders write rollout แล้ว โดยรวม `db:check:postgres`, `db:migrate:postgres`, `db:compare:postgres:auth-rbac-read`, `db:compare:postgres:orders-read`, `db:compare:postgres:purchase-read`, `db:compare:postgres:inventory`, `db:compare:postgres:reports-read`, order write smokes ทั้งชุด, `lint`, และ `build`
+- `npm run smoke:postgres:stock-movement-gate` ตอนนี้เป็น preflight chain ของ stock movement rollout แล้ว โดยรวม `db:check:postgres`, `db:migrate:postgres`, `db:compare:postgres:auth-rbac-read`, `db:compare:postgres:branches`, `smoke:postgres:inventory-read-gate`, `smoke:postgres:stock-movement`, `lint`, และ `build`
+- `npm run smoke:postgres:all-postgres-observe-gate` ตอนนี้เป็น operational gate สำหรับ phase observe/fallback removal แล้ว โดยรวม gates ของ auth/rbac, settings/system-admin, branches, store settings, notifications, products, reports, และ stock movement เพื่อเช็ก readiness ก่อนเริ่ม zero-fallback observe window
+
 ## Auth/RBAC Read Rollout
 
 ก้อนนี้ควรเปิดก่อน `settings/system-admin` และก่อนพยายามลด Turso runtime เพิ่ม
@@ -66,6 +72,44 @@ POSTGRES_AUTH_RBAC_READ_ENABLED=1
 - ไม่มี fallback warning ต่อเนื่องจาก `auth-rbac.read.pg`
 
 ดู checklist ปฏิบัติจริงแบบละเอียดที่ [docs/postgres-auth-rbac-read-rollout-execution.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-auth-rbac-read-rollout-execution.md)
+
+## Branches Rollout
+
+ก้อนนี้ควรเปิดหลัง `auth/RBAC` และ `settings/system-admin read` เพราะ branch policy, branch access, และ branch switch พึ่ง membership / role / permission / system-role จากก้อนแรก และพึ่ง system-admin/settings views จากก้อนหลังโดยตรง
+
+### Branches Preflight
+
+```bash
+npm run smoke:postgres:branches-gate
+npm run lint
+npm run build
+```
+
+### Branches Wave 0: Keep Off
+
+```env
+POSTGRES_BRANCHES_ENABLED=0
+```
+
+### Branches Wave 1: Canary Enable
+
+เปิด:
+
+```env
+POSTGRES_BRANCHES_ENABLED=1
+```
+
+ตรวจ:
+- `GET/PATCH /api/system-admin/config/branch-policy`
+- `GET/POST /api/stores/branches`
+- `POST /api/stores/branches/switch`
+- member branch access ใน `PATCH /api/settings/users/[userId]`
+- `/settings/users`
+- `/system-admin/config/stores-users`
+- branch policy / quota / branch switch / selected branches ยังตรง
+- ไม่มี fallback warning ต่อเนื่องจาก `branches.pg`
+
+ดู checklist ปฏิบัติจริงแบบละเอียดที่ [docs/postgres-branches-rollout-execution.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-branches-rollout-execution.md)
 
 ## Settings/System-Admin Read Rollout
 
@@ -104,6 +148,46 @@ POSTGRES_SETTINGS_SYSTEM_ADMIN_READ_ENABLED=1
 - ไม่มี fallback warning ต่อเนื่องจาก `settings-admin.read.pg`
 
 ดู checklist ปฏิบัติจริงแบบละเอียดที่ [docs/postgres-settings-system-admin-read-rollout-execution.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-settings-system-admin-read-rollout-execution.md)
+
+## Settings/System-Admin Write Rollout
+
+ก้อนนี้ควรเปิดหลัง `auth/RBAC` และ `settings/system-admin read` นิ่งแล้ว
+เพราะ write path นี้พึ่ง read-side parity ของ dashboard/summaries/global snapshots โดยตรง และถ้าเปิดก่อน read side จะเสี่ยง stale หลังเขียน
+
+### Settings/System-Admin Write Preflight
+
+```bash
+npm run smoke:postgres:settings-system-admin-write-gate
+npm run lint
+npm run build
+```
+
+### Settings/System-Admin Write Wave 0: Keep Off
+
+```env
+POSTGRES_SETTINGS_SYSTEM_ADMIN_WRITE_ENABLED=0
+```
+
+### Settings/System-Admin Write Wave 1: Canary Enable
+
+เปิด:
+
+```env
+POSTGRES_SETTINGS_SYSTEM_ADMIN_WRITE_ENABLED=1
+```
+
+ตรวจ:
+- `POST /api/system-admin/superadmins`
+- `PATCH /api/system-admin/superadmins/[userId]`
+- `PATCH /api/system-admin/config/users/[userId]`
+- `PATCH /api/system-admin/config/stores/[storeId]`
+- `PATCH /api/system-admin/config/session-policy`
+- `PATCH /api/system-admin/config/store-logo-policy`
+- `PATCH /api/settings/superadmin/payment-policy`
+- global summaries / superadmin list / policy snapshots refresh แล้วตรง
+- ไม่มี fallback warning ต่อเนื่องจาก `settings-admin.write.pg`
+
+ดู checklist ปฏิบัติจริงแบบละเอียดที่ [docs/postgres-settings-system-admin-write-rollout-execution.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-settings-system-admin-write-rollout-execution.md)
 
 ## Products/Units/Onboarding Read Rollout
 
@@ -180,6 +264,156 @@ POSTGRES_PRODUCTS_ONBOARDING_WRITE_ENABLED=1
 - ไม่มี fallback warning ต่อเนื่องจาก `products-onboarding.write.pg`
 
 ดู checklist ปฏิบัติจริงแบบละเอียดที่ [docs/postgres-products-units-onboarding-write-rollout-execution.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-products-units-onboarding-write-rollout-execution.md)
+
+## Products Write Rollout
+
+ก้อนนี้ควรเปิดหลัง `auth/RBAC`, `settings/system-admin`, `products/units/onboarding read`, และ `products/units/onboarding low-risk write` นิ่งแล้ว
+เพราะ product CRUD + variant persistence ต้องพึ่ง read-after-write parity ของ model/search/category/unit helpers และถ้า write path นี้เปิดก่อน read side จะเสี่ยง stale หรือ false negative ตอน canary
+
+### Products Write Preflight
+
+```bash
+npm run smoke:postgres:products-write-gate
+npm run lint
+npm run build
+```
+
+### Products Write Wave 0: Keep Off
+
+```env
+POSTGRES_PRODUCTS_WRITE_ENABLED=0
+```
+
+### Products Write Wave 1: Canary Enable
+
+เปิด:
+
+```env
+POSTGRES_PRODUCTS_WRITE_ENABLED=1
+```
+
+ตรวจ:
+- `/products` create/update product
+- `GET /api/products/models`
+- `GET /api/products/search`
+- `set_active`
+- `update_cost`
+- image update/remove
+- variant persistence หลัง create/update ยังตรง
+- ไม่มี fallback warning ต่อเนื่องจาก `products.write.pg`
+
+ดู checklist ปฏิบัติจริงแบบละเอียดที่ [docs/postgres-products-write-rollout-execution.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-products-write-rollout-execution.md)
+
+## Store Settings / Payment Accounts Rollout
+
+ก้อนนี้ควรเปิดหลัง `auth/RBAC`, `settings/system-admin read`, และ `settings/system-admin write` นิ่งแล้ว
+เพราะหน้า `/settings/store` กับ `/settings/store/payments` พึ่ง session, permission, policy, store membership และ policy summaries จากก้อนก่อนหน้าโดยตรง
+
+### Store Settings Preflight
+
+```bash
+npm run smoke:postgres:store-settings-gate
+```
+
+### Store Settings Wave 0: Keep Off
+
+```env
+POSTGRES_STORE_SETTINGS_READ_ENABLED=0
+POSTGRES_STORE_SETTINGS_WRITE_ENABLED=0
+POSTGRES_STORE_PAYMENT_ACCOUNTS_WRITE_ENABLED=0
+```
+
+### Store Settings Wave 1: Read Canary
+
+เปิด:
+
+```env
+POSTGRES_STORE_SETTINGS_READ_ENABLED=1
+POSTGRES_STORE_SETTINGS_WRITE_ENABLED=0
+POSTGRES_STORE_PAYMENT_ACCOUNTS_WRITE_ENABLED=0
+```
+
+ตรวจ:
+- `/settings/store`
+- `/settings/store/payments`
+- `GET /api/settings/store`
+- `GET /api/settings/store/pdf`
+- `GET /api/settings/store/payment-accounts`
+- `GET /api/orders/payment-accounts/[accountId]/qr-image`
+- `/settings/superadmin/global-config`
+- ไม่มี fallback warning ต่อเนื่องจาก `store-settings.read.pg`
+
+### Store Settings Wave 2: Store Profile / JSON / PDF Write
+
+เปิด:
+
+```env
+POSTGRES_STORE_SETTINGS_READ_ENABLED=1
+POSTGRES_STORE_SETTINGS_WRITE_ENABLED=1
+POSTGRES_STORE_PAYMENT_ACCOUNTS_WRITE_ENABLED=0
+```
+
+ตรวจ:
+- multipart/logo upload
+- store JSON update
+- PDF config update
+- read-after-write ของ `/settings/store` และ `/settings/pdf`
+- summaries ที่ `/settings/superadmin/global-config` และ `/system-admin/config/system`
+- ไม่มี fallback warning ต่อเนื่องจาก `store-settings.write.pg`
+
+### Store Settings Wave 3: Payment Accounts Write
+
+เปิด:
+
+```env
+POSTGRES_STORE_SETTINGS_READ_ENABLED=1
+POSTGRES_STORE_SETTINGS_WRITE_ENABLED=1
+POSTGRES_STORE_PAYMENT_ACCOUNTS_WRITE_ENABLED=1
+```
+
+ตรวจ:
+- payment accounts create/update/delete
+- default account behavior
+- QR image metadata lookup หลัง write
+- ไม่มี fallback warning ต่อเนื่องจาก `store-settings.write.pg`
+
+ดู checklist ปฏิบัติจริงแบบละเอียดที่ [docs/postgres-store-settings-rollout-execution.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-store-settings-rollout-execution.md)
+
+## Notifications Rollout
+
+ก้อนนี้ควรเปิดหลัง `auth/RBAC` และ `reports read` นิ่งแล้ว
+เพราะหน้า `/settings/notifications` พึ่ง permission/session จากก้อนแรก และ cron AP reminders พึ่ง source data จาก `purchase-ap/reporting` helper ของก้อนหลังโดยตรง
+
+### Notifications Preflight
+
+```bash
+npm run smoke:postgres:notifications-gate
+```
+
+### Notifications Wave 0: Keep Off
+
+```env
+POSTGRES_NOTIFICATIONS_ENABLED=0
+```
+
+### Notifications Wave 1: Canary Enable
+
+เปิด:
+
+```env
+POSTGRES_NOTIFICATIONS_ENABLED=1
+```
+
+ตรวจ:
+- `/settings/notifications`
+- `GET/PATCH /api/settings/notifications/inbox`
+- `PATCH /api/settings/notifications/rules`
+- `GET /api/internal/cron/ap-reminders`
+- `/stock/purchase-orders/ap-by-supplier`
+- inbox summary / item actions / mute-snooze rules / cron sync ยังตรง
+- ไม่มี fallback warning ต่อเนื่องจาก `notifications.pg`
+
+ดู checklist ปฏิบัติจริงแบบละเอียดที่ [docs/postgres-notifications-rollout-execution.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-notifications-rollout-execution.md)
 
 ## Flag Waves
 
@@ -379,10 +613,11 @@ npm run smoke:postgres:orders-write-suite
 ### Inventory Read Preflight
 
 ```bash
-npm run db:check:postgres
-npm run db:migrate:postgres
 npm run smoke:postgres:inventory-read-gate
 ```
+
+หมายเหตุ:
+- `npm run smoke:postgres:inventory-read-gate` ตอนนี้เป็น preflight chain ของ inventory read rollout แล้ว โดยรวม `db:check:postgres`, `db:migrate:postgres`, `db:compare:postgres:auth-rbac-read`, `db:compare:postgres:orders-read`, `db:compare:postgres:purchase-read`, `db:compare:postgres:inventory`, `smoke:postgres:orders-write-suite`, `smoke:postgres:purchase-suite`, `lint`, และ `build`
 
 ### Inventory Read Wave 0: Keep Off
 

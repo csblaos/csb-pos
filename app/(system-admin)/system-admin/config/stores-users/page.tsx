@@ -1,40 +1,90 @@
-import { asc, desc } from "drizzle-orm";
-
 import { SystemStoreUserConfig } from "@/components/system-admin/system-store-user-config";
-import { db } from "@/lib/db/client";
-import { stores, users } from "@/lib/db/schema";
+import { queryMany } from "@/lib/db/query";
+
+type StoreType = "ONLINE_RETAIL" | "RESTAURANT" | "CAFE" | "OTHER";
+type SystemRole = "USER" | "SUPERADMIN" | "SYSTEM_ADMIN";
 
 export default async function SystemAdminStoresUsersConfigPage() {
-  const [storeRows, userRows] = await Promise.all([
-    db
-      .select({
-        id: stores.id,
-        name: stores.name,
-        storeType: stores.storeType,
-        currency: stores.currency,
-        vatEnabled: stores.vatEnabled,
-        vatRate: stores.vatRate,
-        maxBranchesOverride: stores.maxBranchesOverride,
-        createdAt: stores.createdAt,
-      })
-      .from(stores)
-      .orderBy(desc(stores.createdAt)),
-    db
-      .select({
-        id: users.id,
-        email: users.email,
-        name: users.name,
-        systemRole: users.systemRole,
-        canCreateStores: users.canCreateStores,
-        maxStores: users.maxStores,
-        canCreateBranches: users.canCreateBranches,
-        maxBranchesPerStore: users.maxBranchesPerStore,
-        sessionLimit: users.sessionLimit,
-        createdAt: users.createdAt,
-      })
-      .from(users)
-      .orderBy(asc(users.name), asc(users.createdAt)),
+  const [rawStoreRows, rawUserRows] = await Promise.all([
+    queryMany<{
+      id: string;
+      name: string;
+      storeType: string | null;
+      currency: string | null;
+      vatEnabled: boolean | null;
+      vatRate: number | null;
+      maxBranchesOverride: number | null;
+      createdAt: string;
+    }>(
+      `
+        select
+          id,
+          name,
+          store_type as "storeType",
+          currency,
+          vat_enabled as "vatEnabled",
+          vat_rate as "vatRate",
+          max_branches_override as "maxBranchesOverride",
+          created_at as "createdAt"
+        from stores
+        order by created_at desc
+      `,
+    ),
+    queryMany<{
+      id: string;
+      email: string;
+      name: string;
+      systemRole: string | null;
+      canCreateStores: boolean | null;
+      maxStores: number | null;
+      canCreateBranches: boolean | null;
+      maxBranchesPerStore: number | null;
+      sessionLimit: number | null;
+      createdAt: string;
+    }>(
+      `
+        select
+          id,
+          email,
+          name,
+          system_role as "systemRole",
+          can_create_stores as "canCreateStores",
+          max_stores as "maxStores",
+          can_create_branches as "canCreateBranches",
+          max_branches_per_store as "maxBranchesPerStore",
+          session_limit as "sessionLimit",
+          created_at as "createdAt"
+        from users
+        order by name asc, created_at asc
+      `,
+    ),
   ]);
+
+  const storeRows = rawStoreRows.map((row) => ({
+    ...row,
+    storeType: (
+      row.storeType === "ONLINE_RETAIL" ||
+      row.storeType === "RESTAURANT" ||
+      row.storeType === "CAFE" ||
+      row.storeType === "OTHER"
+        ? row.storeType
+        : "OTHER"
+    ) as StoreType,
+    currency: row.currency ?? "LAK",
+    vatEnabled: row.vatEnabled === true,
+    vatRate: typeof row.vatRate === "number" ? row.vatRate : 0,
+  }));
+
+  const userRows = rawUserRows.map((row) => ({
+    ...row,
+    systemRole: (
+      row.systemRole === "SUPERADMIN" ||
+      row.systemRole === "SYSTEM_ADMIN" ||
+      row.systemRole === "USER"
+        ? row.systemRole
+        : "USER"
+    ) as SystemRole,
+  }));
 
   return (
     <section className="space-y-4">

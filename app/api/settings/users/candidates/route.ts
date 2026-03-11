@@ -1,13 +1,14 @@
 import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { db } from "@/lib/db/client";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { roles, storeMembers, stores, users } from "@/lib/db/schema";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 
 export async function GET(request: Request) {
   try {
     const { storeId, session } = await enforcePermission("members.create");
+    const db = await getTursoDb();
 
     const [actor] = await db
       .select({ systemRole: users.systemRole })

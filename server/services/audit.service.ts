@@ -1,7 +1,6 @@
 import "server-only";
 
-import { db } from "@/lib/db/client";
-import { auditEvents } from "@/lib/db/schema";
+import { execute } from "@/lib/db/query";
 import {
   buildRequestContext,
   type RequestContext,
@@ -67,7 +66,54 @@ export function buildAuditEventValues(input: AuditEventInput) {
 }
 
 export async function logAuditEvent(input: AuditEventInput) {
-  await db.insert(auditEvents).values(buildAuditEventValues(input));
+  const values = buildAuditEventValues(input);
+  await execute(
+    `
+      insert into audit_events (
+        id,
+        scope,
+        store_id,
+        actor_user_id,
+        actor_name,
+        actor_role,
+        action,
+        entity_type,
+        entity_id,
+        result,
+        reason_code,
+        ip_address,
+        user_agent,
+        request_id,
+        metadata,
+        before,
+        after,
+        occurred_at
+      )
+      values (
+        gen_random_uuid(),
+        :scope,
+        :storeId,
+        :actorUserId,
+        :actorName,
+        :actorRole,
+        :action,
+        :entityType,
+        :entityId,
+        :result,
+        :reasonCode,
+        :ipAddress,
+        :userAgent,
+        :requestId,
+        cast(:metadata as jsonb),
+        cast(:before as jsonb),
+        cast(:after as jsonb),
+        :occurredAt
+      )
+    `,
+    {
+      replacements: values,
+    },
+  );
 }
 
 export async function safeLogAuditEvent(input: AuditEventInput) {

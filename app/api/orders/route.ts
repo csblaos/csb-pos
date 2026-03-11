@@ -1,8 +1,5 @@
-import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { db } from "@/lib/db/client";
-import { auditEvents, inventoryMovements, orderItems, orders } from "@/lib/db/schema";
 import { parseStoreCurrency } from "@/lib/finance/store-financial";
 import { getInventoryBalancesByStore } from "@/lib/inventory/queries";
 import { computeOrderTotals } from "@/lib/orders/totals";
@@ -16,10 +13,9 @@ import {
 } from "@/lib/orders/queries";
 import {
   createOrderInPostgres,
-  isPostgresCreateOrderEnabled,
   orderNoExistsInPostgres,
 } from "@/lib/orders/postgres-write";
-import { buildAuditEventValues, safeLogAuditEvent } from "@/server/services/audit.service";
+import { safeLogAuditEvent } from "@/server/services/audit.service";
 import { invalidateDashboardSummaryCache } from "@/server/services/dashboard.service";
 import {
   claimIdempotency,
@@ -586,211 +582,65 @@ export async function POST(request: Request) {
     const shippingCarrier = payload.shippingCarrier?.trim() || null;
 
     let orderNo = await generateOrderNo(storeId);
+    const orderNoBase = orderNo;
+    let attempts = 0;
 
-    const [existingOrderNo] = await db
-      .select({ id: orders.id })
-      .from(orders)
-      .where(and(eq(orders.storeId, storeId), eq(orders.orderNo, orderNo)))
-      .limit(1);
-
-    if (existingOrderNo) {
-      orderNo = `${orderNo}-${Math.floor(Math.random() * 90 + 10)}`;
+    while (await orderNoExistsInPostgres(storeId, orderNo)) {
+      attempts += 1;
+      const suffix =
+        attempts <= 5
+          ? `${Math.floor(Math.random() * 90 + 10)}`
+          : `${Date.now().toString().slice(-6)}-${attempts}`;
+      orderNo = `${orderNoBase}-${suffix}`;
     }
 
-    if (isPostgresCreateOrderEnabled()) {
-      const orderNoBase = orderNo;
-      let pgOrderNo = orderNo;
-      let attempts = 0;
+    const { orderId } = await createOrderInPostgres({
+      storeId,
+      actorUserId: session.userId,
+      actorName: session.displayName,
+      actorRole: session.activeRoleName,
+      orderNo,
+      channel: payload.channel,
+      status: initialStatus,
+      contactId: payload.channel === "WALK_IN" ? null : payload.contactId || null,
+      customerName,
+      customerPhone,
+      customerAddress: payload.customerAddress?.trim() || null,
+      subtotal,
+      discount: totals.discount,
+      vatAmount: totals.vatAmount,
+      shippingFeeCharged: payload.shippingFeeCharged,
+      total: totals.total,
+      paymentCurrency: selectedPaymentCurrency,
+      paymentMethod: selectedPaymentMethod,
+      paymentStatus: initialPaymentStatus,
+      paymentAccountId: selectedPaymentAccountId,
+      shippingProvider: isOnlineDelivery ? shippingProvider : null,
+      shippingCarrier: isOnlineDelivery ? shippingCarrier : null,
+      shippingCost: payload.shippingCost,
+      paidAt: initialPaidAt,
+      checkoutFlow,
+      shouldReserveStockOnCreate,
+      shouldStockOutOnCreate,
+      items: normalizedItems,
+      request,
+    });
 
-      while (await orderNoExistsInPostgres(storeId, pgOrderNo)) {
-        attempts += 1;
-        const suffix =
-          attempts <= 5
-            ? `${Math.floor(Math.random() * 90 + 10)}`
-            : `${Date.now().toString().slice(-6)}-${attempts}`;
-        pgOrderNo = `${orderNoBase}-${suffix}`;
-      }
-
-      orderNo = pgOrderNo;
-    }
-
-    if (isPostgresCreateOrderEnabled()) {
+    if (idempotencyRecordId) {
       try {
-        const { orderId } = await createOrderInPostgres({
-          storeId,
-          actorUserId: session.userId,
-          actorName: session.displayName,
-          actorRole: session.activeRoleName,
-          orderNo,
-          channel: payload.channel,
-          status: initialStatus,
-          contactId: payload.channel === "WALK_IN" ? null : payload.contactId || null,
-          customerName,
-          customerPhone,
-          customerAddress: payload.customerAddress?.trim() || null,
-          subtotal,
-          discount: totals.discount,
-          vatAmount: totals.vatAmount,
-          shippingFeeCharged: payload.shippingFeeCharged,
-          total: totals.total,
-          paymentCurrency: selectedPaymentCurrency,
-          paymentMethod: selectedPaymentMethod,
-          paymentStatus: initialPaymentStatus,
-          paymentAccountId: selectedPaymentAccountId,
-          shippingProvider: isOnlineDelivery ? shippingProvider : null,
-          shippingCarrier: isOnlineDelivery ? shippingCarrier : null,
-          shippingCost: payload.shippingCost,
-          paidAt: initialPaidAt,
-          checkoutFlow,
-          shouldReserveStockOnCreate,
-          shouldStockOutOnCreate,
-          items: normalizedItems,
-          request,
+        await markIdempotencySucceeded({
+          recordId: idempotencyRecordId,
+          statusCode: 201,
+          body: { ok: true, orderId, orderNo },
         });
-
-        if (idempotencyRecordId) {
-          try {
-            await markIdempotencySucceeded({
-              recordId: idempotencyRecordId,
-              statusCode: 201,
-              body: { ok: true, orderId, orderNo },
-            });
-          } catch (error) {
-            console.error(
-              `[orders.write.pg] idempotency mark failed action=create orderNo=${orderNo}: ${
-                error instanceof Error ? error.message : "unknown"
-              }`,
-            );
-          }
-        }
-
-        await invalidateOrderReadCaches(storeId);
-        return NextResponse.json({ ok: true, orderId, orderNo }, { status: 201 });
       } catch (error) {
-        console.warn(
-          `[orders.write.pg] fallback to turso for create orderNo=${orderNo}: ${
+        console.error(
+          `[orders.write.pg] idempotency mark failed action=create orderNo=${orderNo}: ${
             error instanceof Error ? error.message : "unknown"
           }`,
         );
       }
     }
-
-    let orderId = "";
-
-    await db.transaction(async (tx) => {
-      const inserted = await tx
-        .insert(orders)
-        .values({
-          storeId,
-          orderNo,
-          channel: payload.channel,
-          status: initialStatus,
-          contactId: payload.channel === "WALK_IN" ? null : payload.contactId || null,
-          customerName,
-          customerPhone,
-          customerAddress: payload.customerAddress?.trim() || null,
-          subtotal,
-          discount: totals.discount,
-          vatAmount: totals.vatAmount,
-          shippingFeeCharged: payload.shippingFeeCharged,
-          total: totals.total,
-          paymentCurrency: selectedPaymentCurrency,
-          paymentMethod: selectedPaymentMethod,
-          paymentStatus: initialPaymentStatus,
-          paymentAccountId: selectedPaymentAccountId,
-          paymentSlipUrl: null,
-          paymentProofSubmittedAt: null,
-          shippingProvider: isOnlineDelivery ? shippingProvider : null,
-          shippingCarrier: isOnlineDelivery ? shippingCarrier : null,
-          trackingNo: null,
-          shippingCost: payload.shippingCost,
-          paidAt: initialPaidAt,
-          createdBy: session.userId,
-        })
-        .returning({ id: orders.id });
-
-      orderId = inserted[0].id;
-
-      await tx.insert(orderItems).values(
-        normalizedItems.map((item) => ({
-          orderId,
-          productId: item.productId,
-          unitId: item.unitId,
-          qty: item.qty,
-          qtyBase: item.qtyBase,
-          priceBaseAtSale: item.priceBaseAtSale,
-          costBaseAtSale: item.costBaseAtSale,
-          lineTotal: item.lineTotal,
-        })),
-      );
-
-      if (shouldReserveStockOnCreate && normalizedItems.length > 0) {
-        const reserveNotePrefix = isPickupLater
-          ? "จองสต็อกสำหรับรับที่ร้าน"
-          : "จองสต็อกสำหรับออเดอร์ค้างจ่าย";
-        await tx.insert(inventoryMovements).values(
-          normalizedItems.map((item) => ({
-            storeId,
-            productId: item.productId,
-            type: "RESERVE" as const,
-            qtyBase: item.qtyBase,
-            refType: "ORDER" as const,
-            refId: orderId,
-            note: `${reserveNotePrefix} ${orderNo}`,
-            createdBy: session.userId,
-          })),
-        );
-      }
-
-      if (shouldStockOutOnCreate && normalizedItems.length > 0) {
-        await tx.insert(inventoryMovements).values(
-          normalizedItems.map((item) => ({
-            storeId,
-            productId: item.productId,
-            type: "OUT" as const,
-            qtyBase: item.qtyBase,
-            refType: "ORDER" as const,
-            refId: orderId,
-            note: `ตัดสต็อกทันทีจากการขายหน้าร้าน ${orderNo}`,
-            createdBy: session.userId,
-          })),
-        );
-      }
-
-      await tx.insert(auditEvents).values(
-        buildAuditEventValues({
-          scope: "STORE",
-          storeId,
-          actorUserId: session.userId,
-          actorName: session.displayName,
-          actorRole: session.activeRoleName,
-          action,
-          entityType: "order",
-          entityId: orderId,
-          metadata: {
-            orderNo,
-            channel: payload.channel,
-            itemCount: normalizedItems.length,
-            paymentMethod: selectedPaymentMethod,
-            status: initialStatus,
-            paymentStatus: initialPaymentStatus,
-            stockReservedOnCreate: shouldReserveStockOnCreate,
-            stockOutOnCreate: shouldStockOutOnCreate,
-            checkoutFlow,
-          },
-          request,
-        }),
-      );
-
-      if (idempotencyRecordId) {
-        await markIdempotencySucceeded({
-          recordId: idempotencyRecordId,
-          statusCode: 201,
-          body: { ok: true, orderId, orderNo },
-          tx,
-        });
-      }
-    });
 
     await invalidateOrderReadCaches(storeId);
 

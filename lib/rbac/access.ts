@@ -1,14 +1,11 @@
-import { and, eq } from "drizzle-orm";
 import { unstable_cache } from "next/cache";
 import { cache } from "react";
 
 import { getSession } from "@/lib/auth/session";
-import { permissions, rolePermissions, roles, storeMembers } from "@/lib/db/schema";
 import {
   getAllPermissionKeysFromPostgres,
   getMembershipFromPostgres,
   getRolePermissionKeysFromPostgres,
-  logAuthRbacReadFallback,
 } from "@/lib/platform/postgres-auth-rbac";
 
 export const OWNER_PERMISSION_WILDCARD = "*";
@@ -37,54 +34,22 @@ const userIdFromIdentity = (user: UserIdentity) => {
   return userId;
 };
 
-const getTursoDb = async () => (await import("@/lib/db/client")).db;
-
 async function getMembership(userId: string, storeId: string) {
-  try {
-    const postgresMembership = await getMembershipFromPostgres(userId, storeId);
-    if (postgresMembership !== undefined) {
-      return postgresMembership ?? null;
-    }
-  } catch (error) {
-    logAuthRbacReadFallback("rbac.membership", error);
+  const postgresMembership = await getMembershipFromPostgres(userId, storeId);
+  if (postgresMembership !== undefined) {
+    return postgresMembership ?? null;
   }
-
-  const db = await getTursoDb();
-  const [membership] = await db
-    .select({
-      roleId: roles.id,
-      roleName: roles.name,
-      status: storeMembers.status,
-    })
-    .from(storeMembers)
-    .innerJoin(roles, eq(storeMembers.roleId, roles.id))
-    .where(
-      and(
-        eq(storeMembers.storeId, storeId),
-        eq(storeMembers.userId, userId),
-        eq(storeMembers.status, "ACTIVE"),
-      ),
-    )
-    .limit(1);
-
-  return membership ?? null;
+  throw new Error("POSTGRES_AUTH_RBAC_READ_ENABLED is required for membership lookup");
 }
 
 const getMembershipForRequest = cache(getMembership);
 
 async function getAllPermissionKeys() {
-  try {
-    const postgresPermissionKeys = await getAllPermissionKeysFromPostgres();
-    if (postgresPermissionKeys !== undefined) {
-      return postgresPermissionKeys;
-    }
-  } catch (error) {
-    logAuthRbacReadFallback("rbac.permission-keys", error);
+  const postgresPermissionKeys = await getAllPermissionKeysFromPostgres();
+  if (postgresPermissionKeys !== undefined) {
+    return postgresPermissionKeys;
   }
-
-  const db = await getTursoDb();
-  const allPermissionRows = await db.select({ key: permissions.key }).from(permissions);
-  return allPermissionRows.map((permission) => permission.key);
+  throw new Error("POSTGRES_AUTH_RBAC_READ_ENABLED is required for permission keys");
 }
 
 const getAllPermissionKeysCached = unstable_cache(
@@ -94,23 +59,11 @@ const getAllPermissionKeysCached = unstable_cache(
 );
 
 async function getRolePermissionKeys(roleId: string) {
-  try {
-    const postgresPermissionKeys = await getRolePermissionKeysFromPostgres(roleId);
-    if (postgresPermissionKeys !== undefined) {
-      return postgresPermissionKeys;
-    }
-  } catch (error) {
-    logAuthRbacReadFallback("rbac.role-permission-keys", error);
+  const postgresPermissionKeys = await getRolePermissionKeysFromPostgres(roleId);
+  if (postgresPermissionKeys !== undefined) {
+    return postgresPermissionKeys;
   }
-
-  const db = await getTursoDb();
-  const permissionRows = await db
-    .select({ key: permissions.key })
-    .from(rolePermissions)
-    .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id))
-    .where(eq(rolePermissions.roleId, roleId));
-
-  return permissionRows.map((permission) => permission.key);
+  throw new Error("POSTGRES_AUTH_RBAC_READ_ENABLED is required for role permission keys");
 }
 
 const getRolePermissionKeysForRequest = cache(getRolePermissionKeys);

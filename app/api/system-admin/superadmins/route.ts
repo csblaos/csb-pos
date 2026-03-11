@@ -6,8 +6,13 @@ import { z } from "zod";
 
 import { hashPassword } from "@/lib/auth/password";
 import { enforceSystemAdminSession, toSystemAdminErrorResponse } from "@/lib/auth/system-admin";
-import { db } from "@/lib/db/client";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { users } from "@/lib/db/schema";
+import {
+  createSuperadminInPostgres,
+  findUserByEmailFromPostgres,
+  logSettingsSystemAdminWriteFallback,
+} from "@/lib/platform/postgres-settings-admin-write";
 import { listSuperadmins } from "@/lib/system-admin/superadmins";
 
 const createSuperadminSchema = z.object({
@@ -42,6 +47,36 @@ export async function POST(request: Request) {
 
     const normalizedEmail = payload.data.email.trim().toLowerCase();
 
+    const passwordHash = await hashPassword(payload.data.password);
+
+    try {
+      const existingUser = await findUserByEmailFromPostgres(normalizedEmail);
+      if (existingUser !== undefined) {
+        if (existingUser) {
+          return NextResponse.json({ message: "อีเมลนี้มีในระบบแล้ว" }, { status: 409 });
+        }
+
+        const result = await createSuperadminInPostgres({
+          email: normalizedEmail,
+          name: payload.data.name,
+          passwordHash,
+          createdBy: session.userId,
+          canCreateStores: payload.data.canCreateStores,
+          maxStores: payload.data.canCreateStores ? payload.data.maxStores : null,
+          canCreateBranches: payload.data.canCreateBranches,
+          maxBranchesPerStore:
+            payload.data.canCreateBranches === false ? null : payload.data.maxBranchesPerStore,
+        });
+
+        if (result !== undefined) {
+          return NextResponse.json({ ok: true, superadmins: result.superadmins });
+        }
+      }
+    } catch (error) {
+      logSettingsSystemAdminWriteFallback("system-admin.superadmins.create", error);
+    }
+
+    const db = await getTursoDb();
     const [existingUser] = await db
       .select({ id: users.id })
       .from(users)
@@ -52,11 +87,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "อีเมลนี้มีในระบบแล้ว" }, { status: 409 });
     }
 
-    const userId = randomUUID();
-    const passwordHash = await hashPassword(payload.data.password);
-
     await db.insert(users).values({
-      id: userId,
+      id: randomUUID(),
       email: normalizedEmail,
       name: payload.data.name,
       passwordHash,

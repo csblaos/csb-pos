@@ -58,23 +58,19 @@ POSTGRES_STOCK_WRITE_MOVEMENT_ENABLED=1
 2. inventory read rollout ผ่าน
 3. orders write rollout ผ่าน
 4. `POSTGRES_INVENTORY_READ_ENABLED=1` ใช้งานนิ่งแล้ว
-5. compare/smoke ของ inventory และ orders ยังผ่าน
+5. `POSTGRES_AUTH_RBAC_READ_ENABLED=1` และ `POSTGRES_BRANCHES_ENABLED=1` ใช้งานนิ่งแล้ว เพื่อให้ store/branch context ระหว่าง UAT ไม่เพี้ยน
+6. compare/smoke ของ inventory และ orders ยังผ่าน
 
 ## Preflight Commands
 
 รันก่อนแตะ env ทุกครั้ง:
 
 ```bash
-npm run db:check:postgres
-npm run db:migrate:postgres
-npm run db:compare:postgres:inventory
-npm run db:compare:postgres:reports-read
-npm run smoke:postgres:stock-movement
-npm run smoke:postgres:inventory-read-gate
-npm run smoke:postgres:orders-write-suite
-npm run lint
-npm run build
+npm run smoke:postgres:stock-movement-gate
 ```
+
+หมายเหตุ:
+- `npm run smoke:postgres:stock-movement-gate` ตอนนี้เป็น preflight chain ของ stock movement rollout แล้ว โดยรวม `db:check:postgres`, `db:migrate:postgres`, `db:compare:postgres:auth-rbac-read`, `db:compare:postgres:branches`, `smoke:postgres:inventory-read-gate`, `smoke:postgres:stock-movement`, `lint`, และ `build`
 
 ถ้า command ใด fail:
 - หยุด rollout

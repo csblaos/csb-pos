@@ -3,8 +3,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { enforceSystemAdminSession, toSystemAdminErrorResponse } from "@/lib/auth/system-admin";
-import { db } from "@/lib/db/client";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { users } from "@/lib/db/schema";
+import {
+  findUserByIdFromPostgres,
+  logSettingsSystemAdminWriteFallback,
+  updateSuperadminConfigInPostgres,
+} from "@/lib/platform/postgres-settings-admin-write";
 
 const updateSuperadminSchema = z.object({
   action: z.literal("set_store_creation_config"),
@@ -27,6 +32,38 @@ export async function PATCH(
       return NextResponse.json({ message: "ข้อมูลไม่ถูกต้อง" }, { status: 400 });
     }
 
+    try {
+      const targetUser = await findUserByIdFromPostgres(userId);
+      if (targetUser !== undefined) {
+        if (!targetUser) {
+          return NextResponse.json({ message: "ไม่พบบัญชีผู้ใช้" }, { status: 404 });
+        }
+
+        if (targetUser.systemRole !== "SUPERADMIN") {
+          return NextResponse.json(
+            { message: "อนุญาตแก้ไขเฉพาะบัญชี SUPERADMIN" },
+            { status: 400 },
+          );
+        }
+
+        await updateSuperadminConfigInPostgres({
+          userId,
+          canCreateStores: payload.data.canCreateStores,
+          maxStores: payload.data.canCreateStores ? payload.data.maxStores : null,
+          canCreateBranches: payload.data.canCreateBranches,
+          maxBranchesPerStore:
+            payload.data.canCreateBranches === false
+              ? null
+              : payload.data.maxBranchesPerStore,
+        });
+
+        return NextResponse.json({ ok: true });
+      }
+    } catch (error) {
+      logSettingsSystemAdminWriteFallback("system-admin.superadmins.update", error);
+    }
+
+    const db = await getTursoDb();
     const [targetUser] = await db
       .select({
         id: users.id,

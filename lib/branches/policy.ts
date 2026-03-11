@@ -2,8 +2,15 @@ import "server-only";
 
 import { and, eq, sql } from "drizzle-orm";
 
-import { db } from "@/lib/db/client";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { roles, storeBranches, storeMembers, stores, systemConfig, users } from "@/lib/db/schema";
+import {
+  getGlobalBranchPolicyFromPostgres,
+  listBranchesByStoreFromPostgres,
+  loadBranchCreationPolicyInputsFromPostgres,
+  logBranchesFallback,
+  upsertGlobalBranchPolicyInPostgres,
+} from "@/lib/platform/postgres-branches";
 
 export const GLOBAL_BRANCH_CONFIG_ID = "global";
 const DEFAULT_GLOBAL_BRANCH_MAX = 1;
@@ -86,6 +93,16 @@ const resolveMaxBranchesPerStore = (params: {
 };
 
 export async function getGlobalBranchPolicy(): Promise<GlobalBranchPolicy> {
+  try {
+    const postgresPolicy = await getGlobalBranchPolicyFromPostgres();
+    if (postgresPolicy !== undefined) {
+      return postgresPolicy;
+    }
+  } catch (error) {
+    logBranchesFallback("policy.global.read", error);
+  }
+
+  const db = await getTursoDb();
   const [row] = await db
     .select({
       defaultCanCreateBranches: systemConfig.defaultCanCreateBranches,
@@ -118,6 +135,19 @@ export async function upsertGlobalBranchPolicy(input: GlobalBranchPolicy) {
   const defaultCanCreateBranches = input.defaultCanCreateBranches;
   const defaultMaxBranchesPerStore = toNonNegativeIntOrNull(input.defaultMaxBranchesPerStore);
 
+  try {
+    const updated = await upsertGlobalBranchPolicyInPostgres({
+      defaultCanCreateBranches,
+      defaultMaxBranchesPerStore,
+    });
+    if (updated !== undefined) {
+      return;
+    }
+  } catch (error) {
+    logBranchesFallback("policy.global.write", error);
+  }
+
+  const db = await getTursoDb();
   await db
     .insert(systemConfig)
     .values({
@@ -140,6 +170,51 @@ export async function getBranchCreationPolicy(
   userId: string,
   storeId: string,
 ): Promise<BranchCreationPolicy> {
+  try {
+    const postgresInputs = await loadBranchCreationPolicyInputsFromPostgres(userId, storeId);
+    if (postgresInputs !== undefined) {
+      const isSuperadmin = postgresInputs.user?.systemRole === "SUPERADMIN";
+      const superadminCanCreateBranchesOverride = toBooleanOrNull(
+        postgresInputs.user?.canCreateBranches,
+      );
+      const superadminMaxBranchesPerStoreOverride = toNonNegativeIntOrNull(
+        postgresInputs.user?.maxBranchesPerStore,
+      );
+      const storeMaxBranchesOverride = toNonNegativeIntOrNull(
+        postgresInputs.store?.maxBranchesOverride,
+      );
+
+      const effectiveCanCreateBranches =
+        superadminCanCreateBranchesOverride ??
+        postgresInputs.globalPolicy.defaultCanCreateBranches;
+
+      const { effectiveMaxBranchesPerStore, effectiveLimitSource } = resolveMaxBranchesPerStore({
+        storeMaxBranchesOverride,
+        superadminMaxBranchesPerStoreOverride,
+        globalDefaultMaxBranchesPerStore: postgresInputs.globalPolicy.defaultMaxBranchesPerStore,
+      });
+
+      return {
+        storeExists: Boolean(postgresInputs.store),
+        isSuperadmin,
+        isStoreOwner: postgresInputs.isStoreOwner,
+        currentBranchCount: postgresInputs.currentBranchCount,
+        globalDefaultCanCreateBranches: postgresInputs.globalPolicy.defaultCanCreateBranches,
+        globalDefaultMaxBranchesPerStore:
+          postgresInputs.globalPolicy.defaultMaxBranchesPerStore,
+        superadminCanCreateBranchesOverride,
+        superadminMaxBranchesPerStoreOverride,
+        storeMaxBranchesOverride,
+        effectiveCanCreateBranches,
+        effectiveMaxBranchesPerStore,
+        effectiveLimitSource,
+      };
+    }
+  } catch (error) {
+    logBranchesFallback("policy.creation", error);
+  }
+
+  const db = await getTursoDb();
   const [globalPolicy, userRows, storeRows, ownerRows, branchCountRows] = await Promise.all([
     getGlobalBranchPolicy(),
     db
@@ -274,6 +349,16 @@ export function formatBranchQuotaSummary(policy: BranchCreationPolicy) {
 }
 
 export async function listBranchesByStore(storeId: string) {
+  try {
+    const postgresBranches = await listBranchesByStoreFromPostgres(storeId);
+    if (postgresBranches !== undefined) {
+      return postgresBranches;
+    }
+  } catch (error) {
+    logBranchesFallback("branches.list-policy", error);
+  }
+
+  const db = await getTursoDb();
   return db
     .select({
       id: storeBranches.id,

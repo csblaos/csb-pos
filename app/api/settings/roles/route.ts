@@ -1,13 +1,14 @@
 import { asc, eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { db } from "@/lib/db/client";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { rolePermissions, roles, storeMembers } from "@/lib/db/schema";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 
 export async function GET() {
   try {
     const { storeId } = await enforcePermission("rbac.roles.view");
+    const db = await getTursoDb();
 
     const [roleRows, memberCounts, permissionCounts] = await Promise.all([
       db

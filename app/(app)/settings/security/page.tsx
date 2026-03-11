@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { eq } from "drizzle-orm";
 import {
   CheckCircle2,
   ChevronRight,
@@ -13,8 +12,7 @@ import { redirect } from "next/navigation";
 import { AccountPasswordSettings } from "@/components/app/account-password-settings";
 import { AccountProfileSettings } from "@/components/app/account-profile-settings";
 import { getSession } from "@/lib/auth/session";
-import { db } from "@/lib/db/client";
-import { users } from "@/lib/db/schema";
+import { queryOne } from "@/lib/db/query";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 import { getGlobalSessionPolicy } from "@/lib/system-config/policy";
 
@@ -60,18 +58,28 @@ export default async function SettingsSecurityPage() {
   }
 
   const [account, globalSessionPolicy] = await Promise.all([
-    db
-      .select({
-        name: users.name,
-        email: users.email,
-        mustChangePassword: users.mustChangePassword,
-        passwordUpdatedAt: users.passwordUpdatedAt,
-        sessionLimit: users.sessionLimit,
-      })
-      .from(users)
-      .where(eq(users.id, session.userId))
-      .limit(1)
-      .then((rows) => rows[0] ?? null),
+    queryOne<{
+      name: string;
+      email: string;
+      mustChangePassword: boolean | null;
+      passwordUpdatedAt: string | null;
+      sessionLimit: number | null;
+    }>(
+      `
+        select
+          name,
+          email,
+          must_change_password as "mustChangePassword",
+          password_updated_at as "passwordUpdatedAt",
+          session_limit as "sessionLimit"
+        from users
+        where id = :userId
+        limit 1
+      `,
+      {
+        replacements: { userId: session.userId },
+      },
+    ),
     getGlobalSessionPolicy(),
   ]);
 
@@ -88,8 +96,9 @@ export default async function SettingsSecurityPage() {
   }
 
   const effectiveSessionLimit = account.sessionLimit ?? globalSessionPolicy.defaultSessionLimit;
-  const passwordStatus = account.mustChangePassword ? "ต้องเปลี่ยนรหัสผ่าน" : "ปกติ";
-  const passwordStatusToneClassName = account.mustChangePassword
+  const mustChangePassword = account.mustChangePassword === true;
+  const passwordStatus = mustChangePassword ? "ต้องเปลี่ยนรหัสผ่าน" : "ปกติ";
+  const passwordStatusToneClassName = mustChangePassword
     ? "border-amber-200 bg-amber-50 text-amber-700"
     : "border-emerald-200 bg-emerald-50 text-emerald-700";
 
@@ -143,7 +152,7 @@ export default async function SettingsSecurityPage() {
         <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
           เปลี่ยนรหัสผ่าน
         </p>
-        <AccountPasswordSettings mustChangePassword={account.mustChangePassword} />
+        <AccountPasswordSettings mustChangePassword={mustChangePassword} />
       </div>
 
       <div className="space-y-2">

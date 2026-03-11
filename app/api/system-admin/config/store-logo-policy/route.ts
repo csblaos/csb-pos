@@ -6,6 +6,7 @@ import {
   getGlobalStoreLogoPolicy,
   upsertGlobalStoreLogoPolicy,
 } from "@/lib/system-config/policy";
+import { upsertGlobalStoreLogoPolicyInPostgres } from "@/lib/platform/postgres-settings-admin-write";
 import { safeLogAuditEvent } from "@/server/services/audit.service";
 
 const updateGlobalStoreLogoPolicySchema = z.object({
@@ -52,8 +53,11 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ message: "ข้อมูลตั้งค่าไม่ถูกต้อง" }, { status: 400 });
     }
 
-    await upsertGlobalStoreLogoPolicy(payload.data);
-    const config = await getGlobalStoreLogoPolicy();
+    const postgresConfig = await upsertGlobalStoreLogoPolicyInPostgres(payload.data);
+    if (!postgresConfig) {
+      await upsertGlobalStoreLogoPolicy(payload.data);
+    }
+    const config = postgresConfig ?? (await getGlobalStoreLogoPolicy());
 
     await safeLogAuditEvent({
       scope: "SYSTEM",

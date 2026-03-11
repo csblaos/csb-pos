@@ -10,10 +10,8 @@ import {
   timePerf,
 } from "@/server/perf/perf";
 import {
-  createInventoryMovementRecord,
   findStockMutationProduct,
   findUnitMultiplierToBase,
-  getStockBalanceByProduct,
   listRecentStockMovementsByStore,
   listStockMovementsPageByStore,
   listStockProductsByStore,
@@ -25,9 +23,6 @@ import type {
   StockProductOption,
 } from "@/lib/inventory/queries";
 import { invalidateDashboardSummaryCache } from "@/server/services/dashboard.service";
-import { db } from "@/server/db/client";
-import { buildAuditEventValues } from "@/server/services/audit.service";
-import { auditEvents } from "@/lib/db/schema";
 import { markIdempotencySucceeded } from "@/server/services/idempotency.service";
 
 const STOCK_OVERVIEW_TTL_SECONDS = 15;
@@ -221,134 +216,45 @@ export async function postStockMovement(params: {
           ? -qtyBaseAbs
           : qtyBaseAbs;
 
-      if (isPostgresStockMovementWriteEnabled()) {
+      if (!isPostgresStockMovementWriteEnabled()) {
+        throw new StockServiceError(500, "PostgreSQL stock movement write path is not configured");
+      }
+
+      const result = await scope.step(
+        "repo.writeAndAudit.pg",
+        async () =>
+          createStockMovementInPostgres({
+            storeId,
+            productId: payload.productId,
+            type: payload.movementType,
+            qtyBase,
+            note: payload.note?.trim() ? payload.note.trim() : null,
+            actorUserId: sessionUserId,
+            actorName: params.audit?.actorName ?? null,
+            actorRole: params.audit?.actorRole ?? null,
+            qty: payload.qty,
+            unitId: payload.unitId,
+            adjustMode: payload.adjustMode,
+            requestContext: params.audit?.requestContext,
+            request: params.audit?.request,
+          }),
+      );
+
+      if (params.idempotency) {
         try {
-          const result = await scope.step("repo.writeAndAudit.pg", async () =>
-            createStockMovementInPostgres({
-              storeId,
-              productId: payload.productId,
-              type: payload.movementType,
-              qtyBase,
-              note: payload.note?.trim() ? payload.note.trim() : null,
-              actorUserId: sessionUserId,
-              actorName: params.audit?.actorName ?? null,
-              actorRole: params.audit?.actorRole ?? null,
-              qty: payload.qty,
-              unitId: payload.unitId,
-              adjustMode: payload.adjustMode,
-              requestContext: params.audit?.requestContext,
-              request: params.audit?.request,
-            }),
-          );
-
-          if (params.idempotency) {
-            try {
-              await markIdempotencySucceeded({
-                recordId: params.idempotency.recordId,
-                statusCode: 200,
-                body: { ok: true, balance: result.balance },
-              });
-            } catch (error) {
-              console.error(
-                `[stock.write.pg] idempotency mark failed action=stock.movement.create storeId=${storeId}: ${
-                  error instanceof Error ? error.message : "unknown"
-                }`,
-              );
-            }
-          }
-
-          await scope.step("cache.invalidate", async () => {
-            const [stockCacheResult, dashboardCacheResult] = await Promise.allSettled([
-              invalidateStockOverviewCache(storeId),
-              invalidateDashboardSummaryCache(storeId),
-            ]);
-
-            if (
-              stockCacheResult.status === "rejected" ||
-              dashboardCacheResult.status === "rejected"
-            ) {
-              console.error(
-                `[stock] cache invalidate failed storeId=${storeId} movementId=${result.movementId}`,
-                {
-                  stockError:
-                    stockCacheResult.status === "rejected"
-                      ? stockCacheResult.reason
-                      : null,
-                  dashboardError:
-                    dashboardCacheResult.status === "rejected"
-                      ? dashboardCacheResult.reason
-                      : null,
-                },
-              );
-            }
+          await markIdempotencySucceeded({
+            recordId: params.idempotency.recordId,
+            statusCode: 200,
+            body: { ok: true, balance: result.balance },
           });
-
-          return result;
         } catch (error) {
-          console.warn(
-            `[stock.write.pg] fallback to turso for stock.movement.create storeId=${storeId} productId=${payload.productId}: ${
+          console.error(
+            `[stock.write.pg] idempotency mark failed action=stock.movement.create storeId=${storeId}: ${
               error instanceof Error ? error.message : "unknown"
             }`,
           );
         }
       }
-
-      const { movementId, balance } = await scope.step(
-        "repo.writeAndAuditTx",
-        async () =>
-          db.transaction(async (tx) => {
-            const movementId = await createInventoryMovementRecord({
-              storeId,
-              productId: payload.productId,
-              type: payload.movementType,
-              qtyBase,
-              note: payload.note?.trim() ? payload.note.trim() : null,
-              createdBy: sessionUserId,
-              tx,
-            });
-
-            const balance = await getStockBalanceByProduct(
-              storeId,
-              payload.productId,
-              tx,
-            );
-
-            if (params.audit) {
-              await tx.insert(auditEvents).values(
-                buildAuditEventValues({
-                  scope: "STORE",
-                  storeId,
-                  actorUserId: sessionUserId,
-                  actorName: params.audit.actorName,
-                  actorRole: params.audit.actorRole,
-                  action: "stock.movement.create",
-                  entityType: "inventory_movement",
-                  entityId: movementId,
-                  metadata: {
-                    movementType: payload.movementType,
-                    productId: payload.productId,
-                    qty: payload.qty,
-                    unitId: payload.unitId,
-                    adjustMode: payload.adjustMode ?? null,
-                  },
-                  requestContext: params.audit.requestContext,
-                  request: params.audit.request,
-                }),
-              );
-            }
-
-            if (params.idempotency) {
-              await markIdempotencySucceeded({
-                recordId: params.idempotency.recordId,
-                statusCode: 200,
-                body: { ok: true, balance },
-                tx,
-              });
-            }
-
-            return { movementId, balance };
-          }),
-      );
 
       await scope.step("cache.invalidate", async () => {
         const [stockCacheResult, dashboardCacheResult] = await Promise.allSettled([
@@ -361,7 +267,7 @@ export async function postStockMovement(params: {
           dashboardCacheResult.status === "rejected"
         ) {
           console.error(
-            `[stock] cache invalidate failed storeId=${storeId} movementId=${movementId}`,
+            `[stock] cache invalidate failed storeId=${storeId} movementId=${result.movementId}`,
             {
               stockError:
                 stockCacheResult.status === "rejected"
@@ -376,7 +282,7 @@ export async function postStockMovement(params: {
         }
       });
 
-      return { balance, movementId };
+      return result;
     } finally {
       scope.end();
     }

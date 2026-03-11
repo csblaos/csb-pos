@@ -13,6 +13,30 @@
 - ลดความเสี่ยงจากการถอด fallback เร็วเกินไป
 - เตรียมทางไปสู่ phase `retire Turso/Drizzle runtime`
 
+## Latest Status
+
+- เริ่ม `fallback removal wave 1` แล้วที่ `reports read`
+- [lib/reports/queries.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/reports/queries.ts) ไม่ใช้ Turso fallback/runtime branch แล้ว
+- parity ของ reports ยังผ่านหลังตัด fallback (`npm run db:compare:postgres:reports-read`)
+- เริ่ม `fallback removal wave 2` แล้วที่ `purchase read`
+- [lib/purchases/queries.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/purchases/queries.ts) และ [server/services/purchase.service.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/services/purchase.service.ts) ไม่ใช้ Turso read fallback แล้ว
+- parity ของ purchase ยังผ่านหลังตัด fallback (`npm run db:compare:postgres:purchase-read`)
+- เริ่ม `fallback removal wave 3` แล้วที่ `inventory read`
+- [lib/inventory/queries.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/inventory/queries.ts) ไม่ใช้ Turso read fallback/runtime branch แล้วใน inventory balances + order stock state path
+- parity ของ inventory read ยังผ่านหลังตัด fallback (`npm run db:compare:postgres:inventory` -> `parity ok stores=6 orders=72`)
+- เริ่ม `fallback removal wave 4` แล้วที่ `orders read`
+- [lib/orders/queries.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/orders/queries.ts) ไม่ใช้ Turso read fallback/runtime branch แล้วใน orders list/detail และ QR accounts path
+- parity ของ orders read ยังผ่านหลังตัด fallback (`npm run db:compare:postgres:orders-read` -> `parity ok stores=1 orderDetails=72`)
+- เริ่ม `write fallback removal wave 1` แล้วที่ `stock movement`
+- [server/services/stock.service.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/services/stock.service.ts) ไม่ fallback กลับ Turso transaction path แล้วใน `postStockMovement()`
+- smoke ของ stock movement ยังผ่านหลังตัด fallback (`npm run smoke:postgres:stock-movement` -> `[pg:smoke:stock_movement] ok (transaction rolled back)`)
+- เริ่ม `write fallback removal wave 2` แล้วที่ `purchase write`
+- [app/api/stock/purchase-orders/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stock/purchase-orders/route.ts) และ [app/api/stock/purchase-orders/[poId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stock/purchase-orders/[poId]/route.ts) ไม่ fallback กลับ Turso แล้วเมื่อเข้า PostgreSQL receive branches
+- smoke ของ purchase write ยังผ่านหลังตัด fallback (`npm run smoke:postgres:po-create-received` / `npm run smoke:postgres:po-status-received` -> `ok (transaction rolled back)`)
+- เริ่ม `write fallback removal wave 3` แล้วที่ `orders write`
+- [app/api/orders/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/orders/route.ts) และ [app/api/orders/[orderId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/orders/[orderId]/route.ts) ไม่ fallback กลับ Turso แล้วเมื่อเข้า PostgreSQL write branches
+- suite ของ orders write ยังผ่านหลังตัด fallback (`npm run smoke:postgres:orders-write-suite` -> `all smoke scripts passed`)
+
 ## Preconditions
 
 ต้องครบทุกข้อ:
@@ -31,14 +55,29 @@
 - stock movement rollout ผ่านแล้ว:
   - `POSTGRES_STOCK_WRITE_MOVEMENT_ENABLED=1`
 - smoke / compare gates ผ่านครบ:
-  - `npm run smoke:postgres:orders-write-suite`
-  - `npm run smoke:postgres:purchase-suite`
-  - `npm run smoke:postgres:inventory-read-gate`
-  - `npm run smoke:postgres:reports-read-gate`
-  - `npm run db:compare:postgres:orders-read`
-  - `npm run db:compare:postgres:purchase-read`
-  - `npm run db:compare:postgres:inventory`
-  - `npm run db:compare:postgres:reports-read`
+  - `npm run smoke:postgres:all-postgres-observe-gate`
+
+## Observe Preflight
+
+รันก่อนเริ่ม observe window และก่อนเริ่ม remove fallback ทุก wave:
+
+```bash
+npm run smoke:postgres:all-postgres-observe-gate
+```
+
+คำสั่งนี้จะรวม gate ของ:
+
+- auth/rbac
+- settings/system-admin read/write
+- branches
+- store settings/payment accounts
+- notifications
+- products/units/onboarding read/write
+- products write
+- reports read
+- stock movement
+
+รวมถึง upstream parity/smoke ของ `orders`, `purchase`, `inventory`, และ `reports` ผ่าน dependency chain ของ gate เหล่านี้ด้วย
 
 ## สิ่งที่ต้อง Observe
 
@@ -76,6 +115,7 @@ npm run db:compare:postgres:reports-read
 - หลังเปิด runtime flags ครบ
 - หลัง canary/UAT ชุดใหญ่
 - ก่อนเริ่ม remove fallback ของแต่ละโดเมน
+- และอย่างน้อย 1 รอบหลัง `npm run smoke:postgres:all-postgres-observe-gate` ผ่าน
 
 ### 3. Business UAT
 

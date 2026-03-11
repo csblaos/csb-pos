@@ -1,13 +1,10 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { db } from "@/lib/db/client";
-import { auditEvents, orders } from "@/lib/db/schema";
 import { buildRequestContext } from "@/lib/http/request-context";
-import { listPendingCodReconcile } from "@/lib/orders/queries";
+import { listPendingCodReconcile, listPendingCodReconcileProviders } from "@/lib/orders/queries";
+import { bulkSettleCodReconcileInPostgres } from "@/lib/orders/postgres-write";
 import { enforcePermission, hasPermission, toRBACErrorResponse } from "@/lib/rbac/access";
-import { buildAuditEventValues } from "@/server/services/audit.service";
 import { invalidateDashboardSummaryCache } from "@/server/services/dashboard.service";
 import {
   claimIdempotency,
@@ -17,8 +14,6 @@ import {
   safeMarkIdempotencyFailed,
 } from "@/server/services/idempotency.service";
 import { invalidateReportsOverviewCache } from "@/server/services/reports.service";
-
-const nowIso = () => new Date().toISOString();
 
 const bulkSettleSchema = z.object({
   items: z
@@ -54,52 +49,15 @@ export async function GET(request: Request) {
       pageSize: Number.isFinite(pageSize) ? pageSize : 50,
     });
 
-    const providerWhereClauses = [
-      eq(orders.storeId, storeId),
-      eq(orders.paymentMethod, "COD"),
-      eq(orders.status, "SHIPPED"),
-      eq(orders.paymentStatus, "COD_PENDING_SETTLEMENT"),
-    ];
-    if (dateFrom.trim().length > 0) {
-      providerWhereClauses.push(
-        sql`${orders.shippedAt} >= datetime(${dateFrom.trim()}, 'start of day', 'utc')`,
-      );
-    }
-    if (dateTo.trim().length > 0) {
-      providerWhereClauses.push(
-        sql`${orders.shippedAt} < datetime(${dateTo.trim()}, 'start of day', '+1 day', 'utc')`,
-      );
-    }
-
-    const providerRows = await db
-      .select({
-        provider: sql<string>`coalesce(
-          nullif(trim(${orders.shippingProvider}), ''),
-          nullif(trim(${orders.shippingCarrier}), ''),
-          'ไม่ระบุ'
-        )`,
-      })
-      .from(orders)
-      .where(and(...providerWhereClauses))
-      .groupBy(
-        sql`coalesce(
-          nullif(trim(${orders.shippingProvider}), ''),
-          nullif(trim(${orders.shippingCarrier}), ''),
-          'ไม่ระบุ'
-        )`,
-      )
-      .orderBy(
-        sql`coalesce(
-          nullif(trim(${orders.shippingProvider}), ''),
-          nullif(trim(${orders.shippingCarrier}), ''),
-          'ไม่ระบุ'
-        ) asc`,
-      );
+    const providers = await listPendingCodReconcileProviders(storeId, {
+      dateFrom,
+      dateTo,
+    });
 
     return NextResponse.json({
       ok: true,
       page: list,
-      providers: providerRows.map((row) => row.provider),
+      providers,
     });
   } catch (error) {
     return toRBACErrorResponse(error);
@@ -198,119 +156,20 @@ export async function POST(request: Request) {
     }
 
     const items = parsed.data.items;
-    const orderIds = Array.from(new Set(items.map((item) => item.orderId)));
-    const orderRows = await db
-      .select({
-        id: orders.id,
-        orderNo: orders.orderNo,
-        status: orders.status,
-        paymentStatus: orders.paymentStatus,
-        paymentMethod: orders.paymentMethod,
-        paidAt: orders.paidAt,
-      })
-      .from(orders)
-      .where(and(eq(orders.storeId, storeId), inArray(orders.id, orderIds)));
-
-    const orderMap = new Map(orderRows.map((row) => [row.id, row]));
-    const results: Array<{
-      orderId: string;
-      orderNo: string | null;
-      ok: boolean;
-      message?: string;
-    }> = [];
-
-    let successCount = 0;
-
-    await db.transaction(async (tx) => {
-      for (const item of items) {
-        const order = orderMap.get(item.orderId);
-        if (!order) {
-          results.push({
-            orderId: item.orderId,
-            orderNo: null,
-            ok: false,
-            message: "ไม่พบออเดอร์",
-          });
-          continue;
-        }
-
-        if (
-          order.paymentMethod !== "COD" ||
-          order.status !== "SHIPPED" ||
-          order.paymentStatus !== "COD_PENDING_SETTLEMENT"
-        ) {
-          results.push({
-            orderId: order.id,
-            orderNo: order.orderNo,
-            ok: false,
-            message: "สถานะไม่พร้อมปิดยอด COD",
-          });
-          continue;
-        }
-
-        const codAmount = Math.max(0, Math.trunc(item.codAmount));
-        const codFee = Math.max(0, Math.trunc(item.codFee ?? 0));
-        const now = nowIso();
-        const updated = await tx
-          .update(orders)
-          .set({
-            paymentStatus: "COD_SETTLED",
-            codSettledAt: now,
-            paidAt: order.paidAt ?? now,
-            codAmount,
-            codFee,
-          })
-          .where(
-            and(
-              eq(orders.id, order.id),
-              eq(orders.storeId, storeId),
-              eq(orders.status, "SHIPPED"),
-              eq(orders.paymentMethod, "COD"),
-              eq(orders.paymentStatus, "COD_PENDING_SETTLEMENT"),
-            ),
-          )
-          .returning({ id: orders.id });
-
-        if (updated.length <= 0) {
-          results.push({
-            orderId: order.id,
-            orderNo: order.orderNo,
-            ok: false,
-            message: "รายการถูกอัปเดตโดยผู้ใช้อื่นแล้ว",
-          });
-          continue;
-        }
-
-        await tx.insert(auditEvents).values(
-          buildAuditEventValues({
-            scope: "STORE",
-            storeId,
-            actorUserId: session.userId,
-            actorName: session.displayName,
-            actorRole: session.activeRoleName,
-            action: "order.confirm_paid.bulk_cod_reconcile",
-            entityType: "order",
-            entityId: order.id,
-            metadata: {
-              orderNo: order.orderNo,
-              toPaymentStatus: "COD_SETTLED",
-              codAmount,
-              codFee,
-            },
-            requestContext,
-          }),
-        );
-
-        successCount += 1;
-        results.push({
-          orderId: order.id,
-          orderNo: order.orderNo,
-          ok: true,
-        });
-      }
+    const result = await bulkSettleCodReconcileInPostgres({
+      storeId,
+      actorUserId: session.userId,
+      actorName: session.displayName,
+      actorRole: session.activeRoleName,
+      items: items.map((item) => ({
+        orderId: item.orderId,
+        codAmount: item.codAmount,
+        codFee: item.codFee ?? 0,
+      })),
+      requestContext,
     });
 
-    if (successCount > 0) {
+    if (result.settledCount > 0) {
       await Promise.all([
         invalidateDashboardSummaryCache(storeId),
         invalidateReportsOverviewCache(storeId),
@@ -319,9 +178,9 @@ export async function POST(request: Request) {
 
     const responseBody = {
       ok: true,
-      settledCount: successCount,
-      failedCount: results.length - successCount,
-      results,
+      settledCount: result.settledCount,
+      failedCount: result.failedCount,
+      results: result.results,
     };
 
     if (idempotencyRecordId) {

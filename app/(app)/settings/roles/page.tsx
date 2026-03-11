@@ -1,12 +1,10 @@
 import Link from "next/link";
-import { asc, eq, sql } from "drizzle-orm";
 import { ChevronRight, Shield } from "lucide-react";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
-import { db } from "@/lib/db/client";
-import { roles, storeMembers } from "@/lib/db/schema";
 import { getSession } from "@/lib/auth/session";
+import { queryMany } from "@/lib/db/query";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 
 function RolesListFallback() {
@@ -35,25 +33,37 @@ async function RolesList({
   storeId: string;
   canManage: boolean;
 }) {
-  const roleRows = await db
-    .select({
-      id: roles.id,
-      name: roles.name,
-      isSystem: roles.isSystem,
-      createdAt: roles.createdAt,
-    })
-    .from(roles)
-    .where(eq(roles.storeId, storeId))
-    .orderBy(asc(roles.name));
-
-  const memberCountRows = await db
-    .select({
-      roleId: storeMembers.roleId,
-      count: sql<number>`count(*)`,
-    })
-    .from(storeMembers)
-    .where(eq(storeMembers.storeId, storeId))
-    .groupBy(storeMembers.roleId);
+  const [roleRows, memberCountRows] = await Promise.all([
+    queryMany<{
+      id: string;
+      name: string;
+      isSystem: boolean;
+      createdAt: string;
+    }>(
+      `
+        select
+          id,
+          name,
+          is_system as "isSystem",
+          created_at as "createdAt"
+        from roles
+        where store_id = :storeId
+        order by name asc
+      `,
+      { replacements: { storeId } },
+    ),
+    queryMany<{ roleId: string; count: number | string }>(
+      `
+        select
+          role_id as "roleId",
+          count(*)::int as "count"
+        from store_members
+        where store_id = :storeId
+        group by role_id
+      `,
+      { replacements: { storeId } },
+    ),
+  ]);
 
   const memberCountMap = new Map(memberCountRows.map((row) => [row.roleId, Number(row.count)]));
 

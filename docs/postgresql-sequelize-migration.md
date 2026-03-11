@@ -106,6 +106,25 @@ lib/db/transaction.ts       -> transaction wrapper
 - เพิ่ม `postgres/migrations/0005_settings_system_admin_foundation.sql` แล้ว เพื่อขยาย baseline ไปถึง `settings/system-admin` read foundation (`fb_connections`, `wa_connections`)
 - เพิ่ม `scripts/backfill-postgres-settings-system-admin-read.mjs` และ `scripts/compare-postgres-settings-system-admin-read.mjs`
 - parity ของ settings/system-admin foundation ผ่านแล้ว (`fb_connections=5`, `wa_connections=5`, `superadmins=3`, `policyUsers=4`)
+- เพิ่ม `settings/system-admin write foundation` แล้วผ่าน helper `lib/platform/postgres-settings-admin-write.ts`
+- scope write รอบนี้ครอบ:
+  - superadmin create/update
+  - system-admin config users/stores update
+  - global session policy update
+  - global store-logo policy update
+  - global payment policy update
+- เพิ่ม env flag:
+  - `POSTGRES_SETTINGS_SYSTEM_ADMIN_WRITE_ENABLED`
+- เพิ่ม smoke script:
+  - `npm run smoke:postgres:settings-system-admin-write`
+- write path แบบ flag-gated ถูกต่อแล้วใน:
+  - `app/api/system-admin/superadmins/route.ts`
+  - `app/api/system-admin/superadmins/[userId]/route.ts`
+  - `app/api/system-admin/config/users/[userId]/route.ts`
+  - `app/api/system-admin/config/stores/[storeId]/route.ts`
+  - `app/api/system-admin/config/session-policy/route.ts`
+  - `app/api/system-admin/config/store-logo-policy/route.ts`
+  - `app/api/settings/superadmin/payment-policy/route.ts`
 - เพิ่ม `postgres/migrations/0006_products_units_onboarding_foundation.sql` แล้ว เพื่อขยาย baseline ไปถึง `products/units/onboarding` read foundation (`product_categories`, `product_models`, `product_units`)
 - เพิ่ม `scripts/backfill-postgres-products-units-onboarding-read.mjs` และ `scripts/compare-postgres-products-units-onboarding-read.mjs`
 - parity ของ products/units/onboarding foundation ผ่านแล้ว (`stores=6`, `product_categories=3`, `product_models=4`, `product_units=12`)
@@ -118,9 +137,50 @@ lib/db/transaction.ts       -> transaction wrapper
 - เพิ่ม scripts:
   - `npm run db:backfill:postgres:product-variants-foundation`
   - `npm run db:compare:postgres:product-variants-foundation`
+- เพิ่ม store settings + payment accounts read foundation แล้วผ่าน helper `lib/platform/postgres-store-settings.ts`
+- เพิ่ม scripts:
+  - `npm run db:backfill:postgres:store-settings-read`
+  - `npm run db:compare:postgres:store-settings-read`
+- ใช้ baseline tables จาก `0001_orders_read_foundation.sql` ต่อได้เลย ไม่ต้องเพิ่ม migration ใหม่ในรอบนี้
+- parity ของ `stores + store_payment_accounts` ผ่านแล้ว (`stores=6`, `store_payment_accounts=2`)
+- เพิ่ม store settings + payment accounts write foundation แล้วผ่าน helper `lib/platform/postgres-store-settings-write.ts`
+- เพิ่ม env flags:
+  - `POSTGRES_STORE_SETTINGS_WRITE_ENABLED`
+  - `POSTGRES_STORE_PAYMENT_ACCOUNTS_WRITE_ENABLED`
+- scope write รอบนี้ครอบ:
+  - store JSON settings update
+  - store multipart profile update พร้อม logo upload metadata write
+  - store PDF config update
+  - payment accounts create/update/delete
+- เพิ่ม notifications foundation แล้วผ่าน helper `lib/platform/postgres-notifications.ts`
+- เพิ่ม migration `postgres/migrations/0008_notifications_foundation.sql` สำหรับ `notification_inbox` และ `notification_rules`
+- เพิ่ม env flag:
+  - `POSTGRES_NOTIFICATIONS_ENABLED`
+- เพิ่ม scripts:
+  - `npm run db:backfill:postgres:notifications`
+  - `npm run db:compare:postgres:notifications`
+- scope ของ notifications foundation รอบนี้ครอบ:
+  - inbox read
+  - inbox action update
+  - mute/snooze rule update
+  - cron sync `ap-reminders`
   - `npm run smoke:postgres:products-write`
 - เพิ่ม flag `POSTGRES_PRODUCTS_WRITE_ENABLED` สำหรับเปิด product CRUD + variant persistence write path ใน phase ถัดไป
 - ขยาย read prep ใน `lib/platform/postgres-products-onboarding.ts` / `lib/products/service.ts` ให้ครอบ `listStoreProducts`, `/api/products/models`, และ `/api/products/search` เพื่อกัน read-after-write stale ตอน rollout write path
+- เพิ่ม rollout gate `npm run smoke:postgres:products-write-gate` และ execution checklist `docs/postgres-products-write-rollout-execution.md` แล้ว เพื่อใช้เปิด product CRUD + variant persistence write path บน staging แบบ canary
+- เพิ่ม stores/branches + branch policy foundation แล้วผ่าน helper `lib/platform/postgres-branches.ts`
+- branch domain รอบนี้ไม่ต้องเพิ่ม migration ใหม่ เพราะใช้ baseline จาก `postgres/migrations/0004_auth_rbac_foundation.sql` ต่อได้เลย (`system_config`, `users`, `stores`, `store_branches`, `store_member_branches`)
+- เพิ่ม env flag:
+  - `POSTGRES_BRANCHES_ENABLED`
+- เพิ่ม parity script:
+  - `npm run db:compare:postgres:branches`
+- scope ของ branches foundation รอบนี้ครอบ:
+  - global branch policy read/write
+  - branch creation policy read
+  - store branch list read
+  - branch create
+  - branch switch lookup
+  - member branch access replace/check
 
 ### Phase 3: Data Migration
 

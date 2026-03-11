@@ -1,7 +1,7 @@
 import "server-only";
 
-import { db } from "@/lib/db/client";
-import { auditEvents } from "@/lib/db/schema";
+import { execute } from "@/lib/db/query";
+import { runInTransaction } from "@/lib/db/transaction";
 import type { RequestContext } from "@/lib/http/request-context";
 import { buildAuditEventValues } from "@/server/services/audit.service";
 import { markIdempotencySucceeded } from "@/server/services/idempotency.service";
@@ -54,6 +54,60 @@ export type CreatedShipmentLabelResult = {
     createdAt?: string | null;
   };
 };
+
+async function insertAuditEvent(
+  auditValues: ReturnType<typeof buildAuditEventValues>,
+  tx?: import("@/lib/db/sequelize").PostgresTransaction,
+) {
+  await execute(
+    `
+      insert into audit_events (
+        id,
+        scope,
+        store_id,
+        actor_user_id,
+        actor_name,
+        actor_role,
+        action,
+        entity_type,
+        entity_id,
+        result,
+        reason_code,
+        ip_address,
+        user_agent,
+        request_id,
+        metadata,
+        before,
+        after,
+        occurred_at
+      )
+      values (
+        gen_random_uuid(),
+        :scope,
+        :storeId,
+        :actorUserId,
+        :actorName,
+        :actorRole,
+        :action,
+        :entityType,
+        :entityId,
+        :result,
+        :reasonCode,
+        :ipAddress,
+        :userAgent,
+        :requestId,
+        cast(:metadata as jsonb),
+        cast(:before as jsonb),
+        cast(:after as jsonb),
+        :occurredAt
+      )
+    `,
+    {
+      transaction: tx,
+      replacements: auditValues,
+    },
+  );
+}
 
 const normalizeProvider = (value?: string | null) => {
   const trimmed = value?.trim();
@@ -118,7 +172,7 @@ export async function createOrderShipmentLabel(params: {
     } satisfies CreatedShipmentLabelResult;
 
     if (params.audit) {
-      await db.insert(auditEvents).values(
+      await insertAuditEvent(
         buildAuditEventValues({
           scope: "STORE",
           storeId: params.storeId,
@@ -178,7 +232,7 @@ export async function createOrderShipmentLabel(params: {
     );
   }
 
-  const shipment = await db.transaction(async (tx) => {
+  const shipment = await runInTransaction(async (tx) => {
     const createdShipment = await insertOrderShipment(
       {
         orderId: order.id,
@@ -213,7 +267,7 @@ export async function createOrderShipmentLabel(params: {
     );
 
     if (params.audit) {
-      await tx.insert(auditEvents).values(
+      await insertAuditEvent(
         buildAuditEventValues({
           scope: "STORE",
           storeId: params.storeId,
@@ -234,6 +288,7 @@ export async function createOrderShipmentLabel(params: {
           requestContext: params.audit.requestContext,
           request: params.audit.request,
         }),
+        tx,
       );
     }
 
@@ -253,7 +308,6 @@ export async function createOrderShipmentLabel(params: {
             createdAt: createdShipment?.createdAt ?? null,
           },
         },
-        tx,
       });
     }
 

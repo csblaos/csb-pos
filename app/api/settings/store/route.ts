@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { db } from "@/lib/db/client";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { stores } from "@/lib/db/schema";
 import {
   parseStoreCurrency,
@@ -13,6 +13,16 @@ import {
   storeVatModeValues,
 } from "@/lib/finance/store-financial";
 import { formatLaosAddress, getDistrictById, getProvinceById } from "@/lib/location/laos-address";
+import {
+  getStoreProfileFromPostgres,
+  logStoreSettingsReadFallback,
+} from "@/lib/platform/postgres-store-settings";
+import {
+  isPostgresStoreSettingsWriteEnabled,
+  logStoreSettingsWriteFallback,
+  updateStoreMultipartProfileInPostgres,
+  updateStoreJsonSettingsInPostgres,
+} from "@/lib/platform/postgres-store-settings-write";
 import { RBACError, enforcePermission, hasPermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { getStoreFinancialConfig } from "@/lib/stores/financial";
 import { deleteStoreLogoFromR2, isR2Configured, uploadStoreLogoToR2 } from "@/lib/storage/r2";
@@ -154,6 +164,7 @@ async function patchByMultipartForm(
   request: Request,
   auditContext: StoreSettingsAuditContext,
 ) {
+  const db = await getTursoDb();
   const formData = await request.formData();
   const payload = updateStoreMultipartSchema.safeParse({
     name: getFormString(formData, "name"),
@@ -296,16 +307,45 @@ async function patchByMultipartForm(
     }
   }
 
-  await db
-    .update(stores)
-    .set({
-      name: payload.data.name,
-      address: formattedAddress,
-      phoneNumber: normalizedPhoneNumber,
-      logoName: nextLogoName,
-      logoUrl: nextLogoUrl,
-    })
-    .where(eq(stores.id, storeId));
+  if (isPostgresStoreSettingsWriteEnabled()) {
+    try {
+      const pgResult = await updateStoreMultipartProfileInPostgres({
+        storeId,
+        name: payload.data.name,
+        address: formattedAddress,
+        phoneNumber: normalizedPhoneNumber,
+        logoName: nextLogoName,
+        logoUrl: nextLogoUrl,
+      });
+
+      if (!pgResult.ok) {
+        return NextResponse.json({ message: "ไม่พบข้อมูลร้านค้า" }, { status: 404 });
+      }
+    } catch (error) {
+      logStoreSettingsWriteFallback("settings.store.multipart.patch", error);
+      await db
+        .update(stores)
+        .set({
+          name: payload.data.name,
+          address: formattedAddress,
+          phoneNumber: normalizedPhoneNumber,
+          logoName: nextLogoName,
+          logoUrl: nextLogoUrl,
+        })
+        .where(eq(stores.id, storeId));
+    }
+  } else {
+    await db
+      .update(stores)
+      .set({
+        name: payload.data.name,
+        address: formattedAddress,
+        phoneNumber: normalizedPhoneNumber,
+        logoName: nextLogoName,
+        logoUrl: nextLogoUrl,
+      })
+      .where(eq(stores.id, storeId));
+  }
 
   if (logoFile && targetStore.logoUrl && nextLogoUrl && targetStore.logoUrl !== nextLogoUrl) {
     try {
@@ -412,6 +452,7 @@ async function patchByJsonBody(
     updateValues.address = normalizedAddress.length > 0 ? normalizedAddress : null;
   }
 
+  const db = await getTursoDb();
   let targetStore:
     | {
         id: string;
@@ -524,6 +565,89 @@ async function patchByJsonBody(
     updateValues.lowStockThreshold = payload.data.lowStockThreshold;
   }
 
+  if (isPostgresStoreSettingsWriteEnabled()) {
+    try {
+      const pgResult = await updateStoreJsonSettingsInPostgres({
+        storeId,
+        name: updateValues.name,
+        address: updateValues.address,
+        phoneNumber: updateValues.phoneNumber,
+        currency: updateValues.currency,
+        supportedCurrencies: updateValues.supportedCurrencies,
+        vatEnabled: updateValues.vatEnabled,
+        vatRate: updateValues.vatRate,
+        vatMode: updateValues.vatMode,
+        outStockThreshold: updateValues.outStockThreshold,
+        lowStockThreshold: updateValues.lowStockThreshold,
+      });
+
+      if (!pgResult.ok) {
+        return NextResponse.json({ message: "ไม่พบข้อมูลร้านค้า" }, { status: 404 });
+      }
+
+      const nextStore = {
+        name: updateValues.name ?? targetStore.name,
+        address: updateValues.address ?? targetStore.address,
+        phoneNumber: updateValues.phoneNumber ?? targetStore.phoneNumber,
+        logoName: targetStore.logoName,
+        logoUrl: targetStore.logoUrl,
+        currency: updateValues.currency ?? currentBaseCurrency,
+        supportedCurrencies:
+          updateValues.supportedCurrencies !== undefined
+            ? nextSupportedCurrencies
+            : parseSupportedCurrencies(targetStore.supportedCurrencies, currentBaseCurrency),
+        vatEnabled: updateValues.vatEnabled ?? Boolean(targetStore.vatEnabled),
+        vatRate: updateValues.vatRate ?? targetStore.vatRate,
+        vatMode: updateValues.vatMode ?? parseStoreVatMode(targetStore.vatMode),
+        outStockThreshold:
+          updateValues.outStockThreshold ?? targetStore.outStockThreshold,
+        lowStockThreshold:
+          updateValues.lowStockThreshold ?? targetStore.lowStockThreshold,
+      };
+
+      await safeLogAuditEvent({
+        scope: "STORE",
+        storeId,
+        actorUserId: auditContext.userId,
+        actorName: auditContext.actorName,
+        actorRole: auditContext.actorRole,
+        action: STORE_SETTINGS_UPDATE_ACTION,
+        entityType: "store",
+        entityId: storeId,
+        metadata: {
+          channel: "json",
+          fields: Object.keys(updateValues),
+        },
+        before: {
+          name: targetStore.name,
+          address: targetStore.address,
+          phoneNumber: targetStore.phoneNumber,
+          logoName: targetStore.logoName,
+          logoUrl: targetStore.logoUrl,
+          currency: currentBaseCurrency,
+          supportedCurrencies: parseSupportedCurrencies(
+            targetStore.supportedCurrencies,
+            currentBaseCurrency,
+          ),
+          vatEnabled: Boolean(targetStore.vatEnabled),
+          vatRate: targetStore.vatRate,
+          vatMode: parseStoreVatMode(targetStore.vatMode),
+          outStockThreshold: targetStore.outStockThreshold,
+          lowStockThreshold: targetStore.lowStockThreshold,
+        },
+        after: nextStore,
+        request,
+      });
+
+      return NextResponse.json({
+        ok: true,
+        store: nextStore,
+      });
+    } catch (error) {
+      logStoreSettingsWriteFallback("settings.store.json.patch", error);
+    }
+  }
+
   await db.update(stores).set(updateValues).where(eq(stores.id, storeId));
 
   const nextStore = {
@@ -590,21 +714,34 @@ export async function GET() {
   try {
     const { storeId } = await enforcePermission("settings.view");
     const financial = await getStoreFinancialConfig(storeId);
+    let store = null;
 
-    const [store] = await db
-      .select({
-        id: stores.id,
-        name: stores.name,
-        logoName: stores.logoName,
-        logoUrl: stores.logoUrl,
-        address: stores.address,
-        phoneNumber: stores.phoneNumber,
-        outStockThreshold: stores.outStockThreshold,
-        lowStockThreshold: stores.lowStockThreshold,
-      })
-      .from(stores)
-      .where(eq(stores.id, storeId))
-      .limit(1);
+    try {
+      const postgresStore = await getStoreProfileFromPostgres(storeId);
+      if (postgresStore !== undefined) {
+        store = postgresStore;
+      }
+    } catch (error) {
+      logStoreSettingsReadFallback("settings.store.api.get", error);
+    }
+
+    if (!store) {
+      const db = await getTursoDb();
+      [store] = await db
+        .select({
+          id: stores.id,
+          name: stores.name,
+          logoName: stores.logoName,
+          logoUrl: stores.logoUrl,
+          address: stores.address,
+          phoneNumber: stores.phoneNumber,
+          outStockThreshold: stores.outStockThreshold,
+          lowStockThreshold: stores.lowStockThreshold,
+        })
+        .from(stores)
+        .where(eq(stores.id, storeId))
+        .limit(1);
+    }
 
     if (!store) {
       return NextResponse.json({ message: "ไม่พบข้อมูลร้านค้า" }, { status: 404 });

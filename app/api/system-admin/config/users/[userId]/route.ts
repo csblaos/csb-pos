@@ -3,8 +3,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { enforceSystemAdminSession, toSystemAdminErrorResponse } from "@/lib/auth/system-admin";
-import { db } from "@/lib/db/client";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { users } from "@/lib/db/schema";
+import {
+  findUserByIdFromPostgres,
+  logSettingsSystemAdminWriteFallback,
+  updateSystemAdminUserConfigInPostgres,
+} from "@/lib/platform/postgres-settings-admin-write";
 
 const updateUserConfigSchema = z
   .object({
@@ -44,6 +49,48 @@ export async function PATCH(
       return NextResponse.json({ message: "ข้อมูลผู้ใช้ไม่ถูกต้อง" }, { status: 400 });
     }
 
+    try {
+      const targetUser = await findUserByIdFromPostgres(userId);
+      if (targetUser !== undefined) {
+        if (!targetUser) {
+          return NextResponse.json({ message: "ไม่พบบัญชีผู้ใช้" }, { status: 404 });
+        }
+
+        if (
+          userId === session.userId &&
+          payload.data.systemRole !== undefined &&
+          payload.data.systemRole !== "SYSTEM_ADMIN"
+        ) {
+          return NextResponse.json(
+            { message: "ไม่สามารถลดสิทธิ์ SYSTEM_ADMIN ของบัญชีตัวเองได้" },
+            { status: 400 },
+          );
+        }
+
+        await updateSystemAdminUserConfigInPostgres({
+          userId,
+          name: payload.data.name,
+          systemRole: payload.data.systemRole,
+          canCreateStores: payload.data.canCreateStores,
+          maxStores:
+            payload.data.canCreateStores === false
+              ? null
+              : payload.data.maxStores,
+          canCreateBranches: payload.data.canCreateBranches,
+          maxBranchesPerStore:
+            payload.data.canCreateBranches === false
+              ? null
+              : payload.data.maxBranchesPerStore,
+          sessionLimit: payload.data.sessionLimit,
+        });
+
+        return NextResponse.json({ ok: true });
+      }
+    } catch (error) {
+      logSettingsSystemAdminWriteFallback("system-admin.config-user.update", error);
+    }
+
+    const db = await getTursoDb();
     const [targetUser] = await db
       .select({
         id: users.id,

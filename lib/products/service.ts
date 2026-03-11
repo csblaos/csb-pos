@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import {
   auditEvents,
   productCategories,
@@ -128,8 +129,6 @@ type ProductRowWithConversion = {
   multiplierToBase: number | null;
   conversionPricePerUnit: number | null;
 };
-
-const getTursoDb = async () => (await import("@/lib/db/client")).db;
 
 export async function listUnits(storeId: string): Promise<UnitOption[]> {
   try {

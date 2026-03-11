@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   AlertTriangle,
   ChevronRight,
@@ -13,8 +12,7 @@ import { redirect } from "next/navigation";
 
 import { getSession } from "@/lib/auth/session";
 import { listActiveMemberships } from "@/lib/auth/session-db";
-import { db } from "@/lib/db/client";
-import { fbConnections, storeMembers, stores, users, waConnections } from "@/lib/db/schema";
+import { queryMany, queryOne } from "@/lib/db/query";
 
 const toNumber = (value: unknown) => Number(value ?? 0);
 
@@ -32,86 +30,101 @@ export default async function SettingsSuperadminSecurityPage() {
   const storeIds = memberships.map((membership) => membership.storeId);
 
   const [
-    mustChangePasswordTotalRows,
-    invitedTotalRows,
+    mustChangePasswordTotalRow,
+    invitedTotalRow,
     suspendedRows,
     elevatedRoleRows,
     fbErrorRows,
     waErrorRows,
   ] = await Promise.all([
-    db
-      .select({ value: sql<number>`count(distinct ${users.id})` })
-      .from(storeMembers)
-      .innerJoin(users, eq(storeMembers.userId, users.id))
-      .where(
-        and(
-          inArray(storeMembers.storeId, storeIds),
-          eq(storeMembers.status, "ACTIVE"),
-          eq(users.mustChangePassword, true),
-        ),
-      ),
-    db
-      .select({ value: sql<number>`count(*)` })
-      .from(storeMembers)
-      .where(and(inArray(storeMembers.storeId, storeIds), eq(storeMembers.status, "INVITED"))),
-    db
-      .select({
-        storeId: storeMembers.storeId,
-        storeName: stores.name,
-        count: sql<number>`count(*)`,
-      })
-      .from(storeMembers)
-      .innerJoin(stores, eq(storeMembers.storeId, stores.id))
-      .where(and(inArray(storeMembers.storeId, storeIds), eq(storeMembers.status, "SUSPENDED")))
-      .groupBy(storeMembers.storeId, stores.name)
-      .orderBy(desc(sql<number>`count(*)`)),
-    db
-      .select({
-        userId: users.id,
-        userName: users.name,
-        email: users.email,
-        systemRole: users.systemRole,
-      })
-      .from(storeMembers)
-      .innerJoin(users, eq(storeMembers.userId, users.id))
-      .where(
-        and(
-          inArray(storeMembers.storeId, storeIds),
-          eq(storeMembers.status, "ACTIVE"),
-          inArray(users.systemRole, ["SUPERADMIN", "SYSTEM_ADMIN"]),
-        ),
-      )
-      .groupBy(users.id, users.name, users.email, users.systemRole)
-      .orderBy(users.name)
-      .limit(30),
-    db
-      .select({
-        storeId: fbConnections.storeId,
-        storeName: stores.name,
-        pageName: fbConnections.pageName,
-      })
-      .from(fbConnections)
-      .innerJoin(stores, eq(fbConnections.storeId, stores.id))
-      .where(
-        and(inArray(fbConnections.storeId, storeIds), eq(fbConnections.status, "ERROR")),
-      )
-      .orderBy(stores.name),
-    db
-      .select({
-        storeId: waConnections.storeId,
-        storeName: stores.name,
-        phoneNumber: waConnections.phoneNumber,
-      })
-      .from(waConnections)
-      .innerJoin(stores, eq(waConnections.storeId, stores.id))
-      .where(
-        and(inArray(waConnections.storeId, storeIds), eq(waConnections.status, "ERROR")),
-      )
-      .orderBy(stores.name),
+    queryOne<{ value: number | string }>(
+      `
+        select count(distinct u.id) as "value"
+        from store_members sm
+        inner join users u on sm.user_id = u.id
+        where
+          sm.store_id in (:storeIds)
+          and sm.status = 'ACTIVE'
+          and u.must_change_password = true
+      `,
+      { replacements: { storeIds } },
+    ),
+    queryOne<{ value: number | string }>(
+      `
+        select count(*) as "value"
+        from store_members
+        where store_id in (:storeIds) and status = 'INVITED'
+      `,
+      { replacements: { storeIds } },
+    ),
+    queryMany<{ storeId: string; storeName: string; count: number | string }>(
+      `
+        select
+          sm.store_id as "storeId",
+          s.name as "storeName",
+          count(*) as "count"
+        from store_members sm
+        inner join stores s on sm.store_id = s.id
+        where sm.store_id in (:storeIds) and sm.status = 'SUSPENDED'
+        group by sm.store_id, s.name
+        order by count(*) desc
+      `,
+      { replacements: { storeIds } },
+    ),
+    queryMany<{
+      userId: string;
+      userName: string;
+      email: string;
+      systemRole: "SUPERADMIN" | "SYSTEM_ADMIN";
+    }>(
+      `
+        select
+          u.id as "userId",
+          u.name as "userName",
+          u.email,
+          u.system_role as "systemRole"
+        from store_members sm
+        inner join users u on sm.user_id = u.id
+        where
+          sm.store_id in (:storeIds)
+          and sm.status = 'ACTIVE'
+          and u.system_role in ('SUPERADMIN', 'SYSTEM_ADMIN')
+        group by u.id, u.name, u.email, u.system_role
+        order by u.name asc
+        limit 30
+      `,
+      { replacements: { storeIds } },
+    ),
+    queryMany<{ storeId: string; storeName: string; pageName: string | null }>(
+      `
+        select
+          fb.store_id as "storeId",
+          s.name as "storeName",
+          fb.page_name as "pageName"
+        from fb_connections fb
+        inner join stores s on fb.store_id = s.id
+        where fb.store_id in (:storeIds) and fb.status = 'ERROR'
+        order by s.name asc
+      `,
+      { replacements: { storeIds } },
+    ),
+    queryMany<{ storeId: string; storeName: string; phoneNumber: string | null }>(
+      `
+        select
+          wa.store_id as "storeId",
+          s.name as "storeName",
+          wa.phone_number as "phoneNumber"
+        from wa_connections wa
+        inner join stores s on wa.store_id = s.id
+        where wa.store_id in (:storeIds) and wa.status = 'ERROR'
+        order by s.name asc
+      `,
+      { replacements: { storeIds } },
+    ),
   ]);
 
-  const totalMustChangeUsers = toNumber(mustChangePasswordTotalRows[0]?.value);
-  const totalInvitedRows = toNumber(invitedTotalRows[0]?.value);
+  const totalMustChangeUsers = toNumber(mustChangePasswordTotalRow?.value);
+  const totalInvitedRows = toNumber(invitedTotalRow?.value);
   const totalSuspendedMembers = suspendedRows.reduce((sum, row) => sum + toNumber(row.count), 0);
   const channelErrorStoreIds = new Set([
     ...fbErrorRows.map((row) => row.storeId),

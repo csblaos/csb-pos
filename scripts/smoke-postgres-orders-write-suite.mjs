@@ -3,6 +3,13 @@ import { spawn } from "node:child_process";
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
 const commands = [
+  "db:check:postgres",
+  "db:migrate:postgres",
+  "db:compare:postgres:auth-rbac-read",
+  "db:compare:postgres:orders-read",
+  "db:compare:postgres:purchase-read",
+  "db:compare:postgres:inventory",
+  "db:compare:postgres:reports-read",
   "smoke:postgres:create-order",
   "smoke:postgres:update-shipping",
   "smoke:postgres:submit-payment-slip",
@@ -13,6 +20,8 @@ const commands = [
   "smoke:postgres:mark-cod-returned",
   "smoke:postgres:mark-packed",
   "smoke:postgres:mark-shipped",
+  "lint",
+  "build",
 ];
 
 const runScript = (scriptName) =>

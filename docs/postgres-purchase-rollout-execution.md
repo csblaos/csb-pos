@@ -8,6 +8,7 @@
 - purchase list / detail / pending-rate reads
 - create PO แบบ `receiveImmediately=true`
 - receive PO ผ่าน status transition `RECEIVED`
+- downstream AP / outstanding validation ที่ใช้ source data ก้อนเดียวกัน
 
 ## Scope
 
@@ -37,7 +38,8 @@
 3. receive existing PO จาก `ORDERED/SHIPPED -> RECEIVED` ใช้งานได้จริง
 4. pending-rate queue และ purchase print/detail ยังตรง
 5. inventory parity ยังผ่านหลัง canary flows
-6. ไม่มี fallback warnings ต่อเนื่องจาก `purchase.read.pg` หรือ `purchase.write.pg`
+6. AP / outstanding views ที่พึ่ง purchase source data ยังไม่เพี้ยน
+7. ไม่มี fallback warnings ต่อเนื่องจาก `purchase.read.pg` หรือ `purchase.write.pg`
 
 ## Flags Used
 
@@ -70,14 +72,7 @@ POSTGRES_PURCHASE_WRITE_RECEIVE_STATUS_ENABLED=1
 รันก่อนแตะ env ทุกครั้ง:
 
 ```bash
-npm run db:check:postgres
-npm run db:migrate:postgres
-npm run db:backfill:postgres:purchase-read
-npm run db:compare:postgres:purchase-read
 npm run smoke:postgres:purchase-suite
-npm run db:compare:postgres:inventory
-npm run lint
-npm run build
 ```
 
 ถ้า command ใด fail:
@@ -111,6 +106,9 @@ POSTGRES_PURCHASE_WRITE_RECEIVE_STATUS_ENABLED=0
 - pagination/filter/search ยังตรง
 - opening purchase detail ไม่ error
 - print page เปิดได้
+- `/api/stock/purchase-orders/ap-by-supplier`
+- `/api/stock/purchase-orders/ap-by-supplier/statement`
+- `/api/stock/purchase-orders/ap-by-supplier/export-csv`
 
 ### Step 4: Canary Flow 2
 
@@ -122,6 +120,7 @@ POSTGRES_PURCHASE_WRITE_RECEIVE_STATUS_ENABLED=0
 - detail ของ PO ใหม่นี้ตรงกับที่กรอก
 - status / item totals / payment status ถูกต้อง
 - inventory เปลี่ยนตามที่คาด
+- AP / outstanding views ยังไม่เพี้ยนหลัง create receive
 
 ### Step 5: Log Review
 
@@ -170,6 +169,7 @@ POSTGRES_PURCHASE_WRITE_RECEIVE_STATUS_ENABLED=1
 - received timestamp ถูก
 - received items / landed cost ถูก
 - payment status ยังสอดคล้อง
+- AP / supplier statement ที่เกี่ยวข้องยังตรง
 
 ### Step 4: Canary Flow 2
 
@@ -215,6 +215,7 @@ npm run db:compare:postgres:inventory
 2. เปิด purchase detail เดิม
 3. เปิด print page
 4. เปิด pending-rate queue
+5. เปิด AP by supplier / statement / export
 
 ### UAT Set B: Create Received
 
@@ -235,8 +236,9 @@ npm run db:compare:postgres:inventory
 1. หน้า `/stock?tab=purchase` stale หรือข้อมูลหาย
 2. receive แล้ว inventory/cost ไม่ตรง
 3. print/detail ของ PO เพี้ยน
-4. parity compare fail
-5. มี fallback warning ต่อเนื่อง
+4. AP / outstanding / statement / export ที่พึ่ง purchase source data เพี้ยน
+5. parity compare fail
+6. มี fallback warning ต่อเนื่อง
 
 ### Rollback Command Checklist
 
@@ -251,8 +253,6 @@ POSTGRES_PURCHASE_WRITE_RECEIVE_STATUS_ENABLED=0
 2. rerun:
 
 ```bash
-npm run db:compare:postgres:purchase-read
-npm run db:compare:postgres:inventory
 npm run smoke:postgres:purchase-suite
 ```
 

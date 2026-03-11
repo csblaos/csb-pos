@@ -1,6 +1,5 @@
 import "server-only";
 
-import { and, eq, inArray, sql } from "drizzle-orm";
 import { unstable_cache } from "next/cache";
 
 import {
@@ -8,18 +7,12 @@ import {
   getStoreCreationPolicy,
 } from "@/lib/auth/store-creation";
 import { getGlobalBranchPolicy } from "@/lib/branches/policy";
-import { fbConnections, orders, storeBranches, storeMembers, waConnections } from "@/lib/db/schema";
-import {
-  getSuperadminHomeSnapshotInputsFromPostgres,
-  logSettingsSystemAdminReadFallback,
-} from "@/lib/platform/postgres-settings-admin";
+import { getSuperadminHomeSnapshotInputsFromPostgres } from "@/lib/platform/postgres-settings-admin";
 import {
   getGlobalPaymentPolicy,
   getGlobalSessionPolicy,
   getGlobalStoreLogoPolicy,
 } from "@/lib/system-config/policy";
-
-const paidStatuses: Array<"PAID" | "PACKED" | "SHIPPED"> = ["PAID", "PACKED", "SHIPPED"];
 
 const toNumber = (value: unknown) => Number(value ?? 0);
 
@@ -50,74 +43,7 @@ async function getSuperadminHomeSnapshotUncached(
   userId: string,
   storeIds: string[],
 ): Promise<SuperadminHomeSnapshot> {
-  let postgresInputs:
-    | Awaited<ReturnType<typeof getSuperadminHomeSnapshotInputsFromPostgres>>
-    | undefined;
-
-  try {
-    postgresInputs = await getSuperadminHomeSnapshotInputsFromPostgres(storeIds);
-  } catch (error) {
-    logSettingsSystemAdminReadFallback("settings.superadmin.home-snapshot", error);
-  }
-
-  const fallbackMetricsPromise = async () => {
-    const { db } = await import("@/lib/db/client");
-    const [branchRows, memberRows, fbErrorRows, waErrorRows, todayOrderRows, todaySalesRows] =
-      await Promise.all([
-        db
-          .select({ storeId: storeBranches.storeId, count: sql<number>`count(*)` })
-          .from(storeBranches)
-          .where(inArray(storeBranches.storeId, storeIds))
-          .groupBy(storeBranches.storeId),
-        db
-          .select({
-            storeId: storeMembers.storeId,
-            status: storeMembers.status,
-            count: sql<number>`count(*)`,
-          })
-          .from(storeMembers)
-          .where(inArray(storeMembers.storeId, storeIds))
-          .groupBy(storeMembers.storeId, storeMembers.status),
-        db
-          .select({ storeId: fbConnections.storeId })
-          .from(fbConnections)
-          .where(and(inArray(fbConnections.storeId, storeIds), eq(fbConnections.status, "ERROR"))),
-        db
-          .select({ storeId: waConnections.storeId })
-          .from(waConnections)
-          .where(and(inArray(waConnections.storeId, storeIds), eq(waConnections.status, "ERROR"))),
-        db
-          .select({ value: sql<number>`count(*)` })
-          .from(orders)
-          .where(
-            and(
-              inArray(orders.storeId, storeIds),
-              sql`${orders.createdAt} >= datetime('now', 'localtime', 'start of day', 'utc')`,
-              sql`${orders.createdAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')`,
-            ),
-          ),
-        db
-          .select({ value: sql<number>`coalesce(sum(${orders.total}), 0)` })
-          .from(orders)
-          .where(
-            and(
-              inArray(orders.storeId, storeIds),
-              inArray(orders.status, paidStatuses),
-              sql`${orders.paidAt} >= datetime('now', 'localtime', 'start of day', 'utc')`,
-              sql`${orders.paidAt} < datetime('now', 'localtime', 'start of day', '+1 day', 'utc')`,
-            ),
-          ),
-      ]);
-
-    return {
-      branchRows,
-      memberRows,
-      fbErrorStoreIds: [...new Set(fbErrorRows.map((row) => row.storeId))],
-      waErrorStoreIds: [...new Set(waErrorRows.map((row) => row.storeId))],
-      totalTodayOrders: toNumber(todayOrderRows[0]?.value),
-      totalTodaySales: toNumber(todaySalesRows[0]?.value),
-    };
-  };
+  const postgresInputs = await getSuperadminHomeSnapshotInputsFromPostgres(storeIds);
 
   const [
     metrics,
@@ -127,7 +53,16 @@ async function getSuperadminHomeSnapshotUncached(
     globalPaymentPolicy,
     globalStoreLogoPolicy,
   ] = await Promise.all([
-    postgresInputs ? Promise.resolve(postgresInputs) : fallbackMetricsPromise(),
+    Promise.resolve(
+      postgresInputs ?? {
+        branchRows: [],
+        memberRows: [],
+        fbErrorStoreIds: [],
+        waErrorStoreIds: [],
+        totalTodayOrders: 0,
+        totalTodaySales: 0,
+      },
+    ),
     getStoreCreationPolicy(userId),
     getGlobalBranchPolicy(),
     getGlobalSessionPolicy(),

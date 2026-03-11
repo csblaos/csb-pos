@@ -41,7 +41,7 @@
 ต้อง audit ให้ชัดก่อนเริ่ม:
 
 1. `lib/db/client.ts`
-2. `server/repositories/` ที่ยังเรียก Drizzle/Turso โดยตรง
+2. `server/repositories/` และ lazy helpers ที่ยังเรียก Drizzle/Turso โดยตรง
 3. route/service ที่ยัง import `db` จาก Turso path
 4. `lib/db/schema/tables.ts` และ type helpers ที่ใช้เฉพาะ Drizzle runtime
 5. `drizzle.config.ts` และ scripts/migrations ที่ยังจำเป็นต่อ production path
@@ -71,12 +71,21 @@
    - services
    - repositories
    - query helpers
+3. ลบ wrappers ที่ไม่จำเป็น เช่น `server/db/client.ts`
+4. ปรับ `lib/db/client.ts` ไม่ให้มี import-time side effects
 3. ยืนยันว่า build/runtime ใช้ PostgreSQL path โดยไม่ probe Turso
 
 exit criteria:
 
-- `build` ไม่ควรมี Turso init/probe logs ใน runtime path หลักอีก
+- `build` ไม่ควรมี Turso init/probe logs จาก import graph ของ runtime path หลักอีก
 - `rg "lib/db/client"` และจุดเรียก Turso เหลือเฉพาะ legacy tooling ที่ตั้งใจคงไว้
+
+สถานะล่าสุด:
+
+- runtime import graph ถูกเก็บจนไม่เหลือ top-level import ของ `@/lib/db/client` แล้ว
+- [server/db/client.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/db/client.ts) ถูกลบออกจาก runtime แล้ว
+- [lib/db/client.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/client.ts) ยังอยู่เป็น legacy lazy path แต่ไม่ยิง `health_check` ตอน import แล้ว
+- งานที่เหลือใน wave นี้จึงเป็น `dead lazy/fallback path removal` มากกว่า import cleanup
 
 ### Wave 2: Remove Drizzle Repositories From Core Domains
 

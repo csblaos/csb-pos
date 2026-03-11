@@ -14,7 +14,16 @@
 - ให้ order / purchase / inventory / reports ใช้ PostgreSQL เป็น source of truth
 - ลดบทบาท Turso เหลือ fallback ชั่วคราว
 - ปิด fallback ทีละก้อนหลัง observe ผ่านจริง
+- ใช้ `npm run smoke:postgres:all-postgres-observe-gate` เป็น gate กลางก่อนเริ่ม zero-fallback observe และก่อนถอด fallback แต่ละ wave
 - เตรียมทางสำหรับ decommission `Drizzle + Turso` ในโดเมนหลัก
+
+## Runtime Note (ล่าสุด)
+
+- dev machine นี้อยู่ในสถานะ `PostgreSQL-first`
+- top-level import ของ `@/lib/db/client` ใน runtime ถูกเก็บจนเหลือ `0` ไฟล์แล้ว
+- [server/db/client.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/db/client.ts) ถูกลบแล้ว
+- [lib/db/client.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/client.ts) ยังอยู่เป็น lazy legacy path สำหรับ fallback/tooling บางส่วน แต่ไม่ยิง health probe ตอน import แล้ว
+- phase ถัดไปของ cutover คือ `dead Turso path removal` และ `TURSO_* env/tooling cleanup`
 
 ## Current Runtime Status
 
@@ -32,7 +41,13 @@
 | Domain | Flow / Endpoint | Flag |
 | --- | --- | --- |
 | Auth / RBAC Read | app shell, session membership, system role, permission checks, branches access | `POSTGRES_AUTH_RBAC_READ_ENABLED=0` |
+| Branches / Branch Policy | global branch policy, branch creation policy, branch list/create, branch switch, member branch access | `POSTGRES_BRANCHES_ENABLED=0` |
 | Settings / System Admin Read | system-admin dashboard, superadmin list, store creation policy, superadmin overview/global-config helpers | `POSTGRES_SETTINGS_SYSTEM_ADMIN_READ_ENABLED=0` |
+| Settings / System Admin Write | superadmin create/update, system-admin config users/stores update, session/logo/payment policy update | `POSTGRES_SETTINGS_SYSTEM_ADMIN_WRITE_ENABLED=0` |
+| Store Settings / Payment Accounts Read | store profile/financial/pdf reads, store payment accounts list, payment account QR image metadata | `POSTGRES_STORE_SETTINGS_READ_ENABLED=0` |
+| Store Settings Write | store profile multipart/logo update, financial JSON update, PDF config update | `POSTGRES_STORE_SETTINGS_WRITE_ENABLED=0` |
+| Store Payment Accounts Write | store payment accounts create/update/delete | `POSTGRES_STORE_PAYMENT_ACCOUNTS_WRITE_ENABLED=0` |
+| Notifications | inbox read/actions, mute-snooze rules, AP reminder cron sync | `POSTGRES_NOTIFICATIONS_ENABLED=0` |
 | Products / Units / Onboarding Read | products page, units/categories list, onboarding channel status + store-type read | `POSTGRES_PRODUCTS_ONBOARDING_READ_ENABLED=0` |
 | Products / Units / Onboarding Low-Risk Write | units, product categories, onboarding channel connect | `POSTGRES_PRODUCTS_ONBOARDING_WRITE_ENABLED=0` |
 | Products Write | product CRUD, variant persistence, image url update/remove, cost update audit | `POSTGRES_PRODUCTS_WRITE_ENABLED=0` |
@@ -57,11 +72,14 @@
 1. purchase read ทั้งหมด
 2. inventory read ทั้งหมด
 3. products/units/onboarding read ทั้งหมด
-4. products write หลัก (`products`, `variant persistence`) และ onboarding/store create
-5. manual stock movement write
-6. PO receive writes
-7. order create
-8. order lifecycle writes เกือบทั้งหมด ยกเว้น `update_shipping` กับ `submit_payment_slip`
+4. branches runtime ทั้งหมด
+5. notifications runtime ทั้งหมด
+6. settings/system-admin write ทั้งหมด
+7. products write หลัก (`products`, `variant persistence`) และ onboarding/store create
+8. manual stock movement write
+9. PO receive writes
+10. order create
+11. order lifecycle writes เกือบทั้งหมด ยกเว้น `update_shipping` กับ `submit_payment_slip`
 
 ## Phase Plan
 
@@ -90,6 +108,30 @@ POSTGRES_PURCHASE_WRITE_RECEIVE_STATUS_ENABLED=1
 เสร็จแล้วจะลด Turso ในโดเมน:
 - purchase read
 - purchase receive write
+
+### Phase 1.4: Branches Runtime Rollout
+
+เป้าหมาย:
+- ทำให้ branch policy + branches runtime ใช้ PostgreSQL จริงก่อน rollout store/platform domains ที่พึ่งสาขาโดยตรง
+
+เปิด flag:
+
+```env
+POSTGRES_BRANCHES_ENABLED=1
+```
+
+ต้องผ่าน:
+- `npm run db:compare:postgres:branches`
+- canary บน staging:
+  - GET/PATCH `/api/system-admin/config/branch-policy`
+  - GET/POST `/api/stores/branches`
+  - POST `/api/stores/branches/switch`
+  - PATCH `/api/settings/users/[userId]` action `set_branch_access`
+
+เสร็จแล้วจะลด Turso ในโดเมน:
+- branch policy read/write
+- branches read/write
+- member branch access runtime
 
 ### Phase 1.5: Products/Units/Onboarding Low-Risk Write Rollout
 
@@ -126,6 +168,7 @@ POSTGRES_PRODUCTS_WRITE_ENABLED=1
 ```
 
 ต้องผ่าน:
+- `npm run smoke:postgres:products-write-gate`
 - `npm run smoke:postgres:products-write`
 - `npm run db:compare:postgres:product-variants-foundation`
 - canary บน staging:
@@ -258,10 +301,15 @@ POSTGRES_STOCK_WRITE_MOVEMENT_ENABLED=1
 เริ่มถอด fallback ในลำดับนี้:
 
 1. reports read fallback
+   สถานะล่าสุด: เริ่มแล้วใน dev และ [lib/reports/queries.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/reports/queries.ts) ไม่ใช้ Turso runtime branch แล้ว
 2. purchase read fallback
+   สถานะล่าสุด: เริ่มแล้วใน dev และ [lib/purchases/queries.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/purchases/queries.ts) / [server/services/purchase.service.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/services/purchase.service.ts) ไม่ใช้ Turso read fallback แล้ว
 3. inventory read fallback
+   สถานะล่าสุด: เริ่มแล้วใน dev และ [lib/inventory/queries.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/inventory/queries.ts) ไม่ใช้ Turso read fallback แล้วใน inventory balances + order stock state path
 4. order read fallback
+   สถานะล่าสุด: เริ่มแล้วใน dev และ [lib/orders/queries.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/orders/queries.ts) ไม่ใช้ Turso read fallback แล้วใน orders list/detail และ QR accounts path
 5. stock/purchase/order write fallback
+   สถานะล่าสุด: เริ่มแล้วใน dev ที่ `stock movement write`, `purchase write`, และ `orders write`; [server/services/stock.service.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/services/stock.service.ts) ไม่ fallback กลับ Turso transaction path แล้วใน `postStockMovement()`, purchase receive branches ไม่ fallback แล้ว, และ [app/api/orders/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/orders/route.ts) / [app/api/orders/[orderId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/orders/[orderId]/route.ts) ไม่ fallback กลับ Turso แล้วเมื่อเข้า PostgreSQL write branches
 
 ไฟล์หลักที่ต้องทยอย clean:
 - `lib/reports/queries.ts`

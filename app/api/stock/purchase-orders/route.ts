@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
 
 import { buildRequestContext } from "@/lib/http/request-context";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
@@ -23,8 +22,7 @@ import {
   markIdempotencySucceeded,
   safeMarkIdempotencyFailed,
 } from "@/server/services/idempotency.service";
-import { db } from "@/lib/db/client";
-import { stores } from "@/lib/db/schema";
+import { getReportStoreCurrency } from "@/lib/reports/queries";
 
 export async function GET(request: Request) {
   try {
@@ -163,14 +161,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: firstError }, { status: 400 });
     }
 
-    // Get store currency
-    const [storeRow] = await db
-      .select({ currency: stores.currency })
-      .from(stores)
-      .where(eq(stores.id, storeId))
-      .limit(1);
-
-    const storeCurrency = storeRow?.currency ?? "LAK";
+    const storeCurrency = await getReportStoreCurrency(storeId);
 
     if (parsed.data.receiveImmediately && isPostgresPurchaseCreateReceivedEnabled()) {
       let poNumber = await getNextPoNumber(storeId);
@@ -186,45 +177,37 @@ export async function POST(request: Request) {
         poNumber = `${poNumberBase}-${suffix}`;
       }
 
-      try {
-        const purchaseOrder = await createPurchaseOrderReceivedInPostgres({
-          storeId,
-          userId: session.userId,
-          storeCurrency: storeCurrency as "LAK" | "THB" | "USD",
-          poNumber,
-          payload: parsed.data,
-          actorName: session.displayName,
-          actorRole: session.activeRoleName,
-          requestContext,
-        });
+      const purchaseOrder = await createPurchaseOrderReceivedInPostgres({
+        storeId,
+        userId: session.userId,
+        storeCurrency,
+        poNumber,
+        payload: parsed.data,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        requestContext,
+      });
 
-        if (idempotencyRecordId) {
-          try {
-            await markIdempotencySucceeded({
-              recordId: idempotencyRecordId,
-              statusCode: 200,
-              body: {
-                ok: true,
-                purchaseOrder,
-              },
-            });
-          } catch (error) {
-            console.error(
-              `[purchase.write.pg] idempotency mark failed action=po.create poNumber=${poNumber}: ${
-                error instanceof Error ? error.message : "unknown"
-              }`,
-            );
-          }
+      if (idempotencyRecordId) {
+        try {
+          await markIdempotencySucceeded({
+            recordId: idempotencyRecordId,
+            statusCode: 200,
+            body: {
+              ok: true,
+              purchaseOrder,
+            },
+          });
+        } catch (error) {
+          console.error(
+            `[purchase.write.pg] idempotency mark failed action=po.create poNumber=${poNumber}: ${
+              error instanceof Error ? error.message : "unknown"
+            }`,
+          );
         }
-
-        return NextResponse.json({ ok: true, purchaseOrder });
-      } catch (error) {
-        console.warn(
-          `[purchase.write.pg] fallback to turso for po.create receiveImmediately poNumber=${poNumber}: ${
-            error instanceof Error ? error.message : "unknown"
-          }`,
-        );
       }
+
+      return NextResponse.json({ ok: true, purchaseOrder });
     }
 
     const po = await createPurchaseOrder({

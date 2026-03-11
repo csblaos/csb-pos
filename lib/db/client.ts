@@ -14,7 +14,6 @@ const authToken = process.env.TURSO_AUTH_TOKEN;
 
 const globalForDb = globalThis as unknown as {
   libsqlClient?: Client;
-  libsqlConnectionProbe?: Promise<void>;
 };
 
 const getDatabaseMode = () => (databaseUrl.startsWith("file:") ? "local" : "turso");
@@ -32,16 +31,9 @@ const getDatabaseTarget = () => {
   }
 };
 
-const logDbConnectionInfo = (message: string) => {
-  console.info(
-    `[db] ${message} mode=${getDatabaseMode()} target=${getDatabaseTarget()}`,
-  );
-};
-
 const getClient = () => {
   if (!globalForDb.libsqlClient) {
     try {
-      logDbConnectionInfo("initializing client");
       globalForDb.libsqlClient = createClient({
         url: databaseUrl,
         authToken,
@@ -54,21 +46,6 @@ const getClient = () => {
       );
       throw error;
     }
-  }
-
-  if (!globalForDb.libsqlConnectionProbe) {
-    globalForDb.libsqlConnectionProbe = globalForDb.libsqlClient
-      .execute("select 1 as health_check")
-      .then(() => {
-        logDbConnectionInfo("connection success");
-      })
-      .catch((error) => {
-        console.error(
-          `[db] connection failed mode=${getDatabaseMode()} target=${getDatabaseTarget()}: ${
-            error instanceof Error ? error.message : "unknown error"
-          }`,
-        );
-      });
   }
 
   return globalForDb.libsqlClient;

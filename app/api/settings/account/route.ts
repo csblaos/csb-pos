@@ -11,7 +11,7 @@ import {
   SessionStoreUnavailableError,
 } from "@/lib/auth/session";
 import { buildSessionForUser } from "@/lib/auth/session-db";
-import { db } from "@/lib/db/client";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { users } from "@/lib/db/schema";
 import { safeLogAuditEvent } from "@/server/services/audit.service";
 
@@ -37,6 +37,7 @@ export async function GET() {
     return NextResponse.json({ message: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
   }
 
+  const db = await getTursoDb();
   const [user] = await db
     .select({
       id: users.id,
@@ -70,6 +71,7 @@ export async function PATCH(request: Request) {
   let auditAction = "account.settings.update";
 
   try {
+    const db = await getTursoDb();
     const payload = patchAccountSchema.safeParse(await request.json());
     if (!payload.success) {
       await safeLogAuditEvent({

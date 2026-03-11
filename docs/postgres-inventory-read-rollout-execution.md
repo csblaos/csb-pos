@@ -58,20 +58,14 @@ POSTGRES_INVENTORY_READ_ENABLED=1
 2. `POSTGRES_ORDERS_READ_ENABLED=1` ใช้งานนิ่ง
 3. `POSTGRES_REPORTS_READ_ENABLED=1` หรืออย่างน้อย reports parity ผ่านแล้ว
 4. compare/smoke ของ order + purchase + inventory ผ่านครบ
+5. `POSTGRES_AUTH_RBAC_READ_ENABLED=1` ผ่าน canary แล้ว หรืออย่างน้อย read path นิ่งพอ
 
 ## Preflight Commands
 
 รันก่อนแตะ env ทุกครั้ง:
 
 ```bash
-npm run db:check:postgres
-npm run db:migrate:postgres
-npm run db:compare:postgres:orders-read
-npm run db:compare:postgres:purchase-read
-npm run db:compare:postgres:inventory
 npm run smoke:postgres:inventory-read-gate
-npm run lint
-npm run build
 ```
 
 ถ้า command ใด fail:
@@ -180,6 +174,7 @@ npm run db:compare:postgres:inventory
 2. search product
 3. เปรียบเทียบค่ากับ baseline ที่รู้แน่
 4. ตรวจ low stock cases
+5. เทียบ app shell/store context หลัง branch/session load
 
 ### UAT Set B: Order Reserve/Out
 
@@ -222,7 +217,6 @@ POSTGRES_INVENTORY_READ_ENABLED=0
 2. rerun:
 
 ```bash
-npm run db:compare:postgres:inventory
 npm run smoke:postgres:inventory-read-gate
 ```
 

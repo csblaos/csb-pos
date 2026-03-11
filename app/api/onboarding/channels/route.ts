@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import {
   getOnboardingStoreTypeFromPostgres,
   logProductsOnboardingReadFallback,
@@ -29,7 +30,7 @@ async function getStoreType(storeId: string) {
     logProductsOnboardingReadFallback("onboarding.channels.store-type", error);
   }
 
-  const { db } = await import("@/lib/db/client");
+  const db = await getTursoDb();
   const { stores } = await import("@/lib/db/schema");
   const [store] = await db
     .select({

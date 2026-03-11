@@ -2,7 +2,7 @@ import "server-only";
 
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 
-import { db } from "@/lib/db/client";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import {
   notificationInbox,
   notificationEntityTypeEnum,
@@ -12,6 +12,14 @@ import {
   stores,
 } from "@/lib/db/schema";
 import {
+  getNotificationInboxFromPostgres,
+  isPostgresNotificationsEnabled,
+  logNotificationsFallback,
+  markNotificationActionInPostgres,
+  runPurchaseApReminderCronInPostgres,
+  updateNotificationRuleInPostgres,
+} from "@/lib/platform/postgres-notifications";
+import {
   getPurchaseApDueReminders,
   type PurchaseApReminderItem,
 } from "@/server/services/purchase-ap.service";
@@ -19,6 +27,7 @@ import {
 type NotificationTopic = (typeof notificationTopicEnum)[number];
 type NotificationEntityType = (typeof notificationEntityTypeEnum)[number];
 type NotificationStatus = (typeof notificationStatusEnum)[number];
+type TursoDb = Awaited<ReturnType<typeof getTursoDb>>;
 
 const AP_REMINDER_TOPIC: NotificationTopic = "PURCHASE_AP_DUE";
 const AP_REMINDER_ENTITY_TYPE: NotificationEntityType = "PURCHASE_ORDER";
@@ -163,7 +172,7 @@ function isRuleSuppressedNow(rule: StoredRule | undefined, now: Date): boolean {
   return false;
 }
 
-async function getInboxSummary(storeId: string): Promise<NotificationInboxSummary> {
+async function getInboxSummary(db: TursoDb, storeId: string): Promise<NotificationInboxSummary> {
   const [unreadRows, activeRows, resolvedRows] = await Promise.all([
     db
       .select({ count: sql<number>`count(*)` })
@@ -194,6 +203,22 @@ export async function getNotificationInbox(params: {
   filter?: NotificationFilter;
   limit?: number;
 }): Promise<NotificationInboxResult> {
+  if (isPostgresNotificationsEnabled()) {
+    try {
+      const pgResult = await getNotificationInboxFromPostgres({
+        storeId: params.storeId,
+        filter: params.filter,
+        limit: clampInboxLimit(params.limit, 50),
+      });
+      if (pgResult) {
+        return pgResult;
+      }
+    } catch (error) {
+      logNotificationsFallback("notifications.inbox.get", error);
+    }
+  }
+
+  const db = await getTursoDb();
   const filter = params.filter ?? "ACTIVE";
   const limit = clampInboxLimit(params.limit, 50);
   const filters = [eq(notificationInbox.storeId, params.storeId)];
@@ -300,7 +325,7 @@ export async function getNotificationInbox(params: {
     };
   });
 
-  const summary = await getInboxSummary(params.storeId);
+  const summary = await getInboxSummary(db, params.storeId);
   return { items, summary };
 }
 
@@ -309,6 +334,18 @@ export async function markNotificationAction(params: {
   action: "mark_read" | "mark_unread" | "resolve" | "mark_all_read";
   notificationId?: string;
 }) {
+  if (isPostgresNotificationsEnabled()) {
+    try {
+      const pgSummary = await markNotificationActionInPostgres(params);
+      if (pgSummary) {
+        return pgSummary;
+      }
+    } catch (error) {
+      logNotificationsFallback("notifications.inbox.patch", error);
+    }
+  }
+
+  const db = await getTursoDb();
   const now = new Date().toISOString();
 
   if (params.action === "mark_all_read") {
@@ -325,7 +362,7 @@ export async function markNotificationAction(params: {
           eq(notificationInbox.status, "UNREAD"),
         ),
       );
-    return getInboxSummary(params.storeId);
+    return getInboxSummary(db, params.storeId);
   }
 
   if (!params.notificationId) {
@@ -378,7 +415,7 @@ export async function markNotificationAction(params: {
       );
   }
 
-  return getInboxSummary(params.storeId);
+  return getInboxSummary(db, params.storeId);
 }
 
 export async function updateNotificationRule(params: {
@@ -392,6 +429,18 @@ export async function updateNotificationRule(params: {
   forever?: boolean;
   note?: string | null;
 }) {
+  if (isPostgresNotificationsEnabled()) {
+    try {
+      const pgResult = await updateNotificationRuleInPostgres(params);
+      if (pgResult) {
+        return pgResult;
+      }
+    } catch (error) {
+      logNotificationsFallback("notifications.rules.patch", error);
+    }
+  }
+
+  const db = await getTursoDb();
   const nowIso = new Date().toISOString();
   const now = new Date();
 
@@ -532,6 +581,7 @@ type StoreCronSyncResult = {
 };
 
 async function syncPurchaseApNotificationsForStore(
+  db: TursoDb,
   storeId: string,
   limitPerStore: number,
 ): Promise<StoreCronSyncResult> {
@@ -704,6 +754,18 @@ export async function runPurchaseApReminderCron(params?: {
   storeId?: string;
   limitPerStore?: number;
 }) {
+  if (isPostgresNotificationsEnabled()) {
+    try {
+      const pgSummary = await runPurchaseApReminderCronInPostgres(params);
+      if (pgSummary) {
+        return pgSummary;
+      }
+    } catch (error) {
+      logNotificationsFallback("notifications.cron.ap-reminders", error);
+    }
+  }
+
+  const db = await getTursoDb();
   const limitPerStore = clampCronLimitPerStore(params?.limitPerStore, 200);
 
   let storeIds: string[] = [];
@@ -716,7 +778,7 @@ export async function runPurchaseApReminderCron(params?: {
 
   const storesSummary: StoreCronSyncResult[] = [];
   for (const storeId of storeIds) {
-    const summary = await syncPurchaseApNotificationsForStore(storeId, limitPerStore);
+    const summary = await syncPurchaseApNotificationsForStore(db, storeId, limitPerStore);
     storesSummary.push(summary);
   }
 

@@ -1,13 +1,11 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { and, eq } from "drizzle-orm";
 import { ChevronRight, Shield } from "lucide-react";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 
 import { getSession } from "@/lib/auth/session";
-import { db } from "@/lib/db/client";
-import { permissions, rolePermissions, roles } from "@/lib/db/schema";
+import { queryMany, queryOne } from "@/lib/db/query";
 import { timeDbQuery, startServerRenderTimer } from "@/lib/perf/server";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 import { getPermissionCatalog } from "@/lib/rbac/queries";
@@ -55,16 +53,25 @@ async function RoleDetailContent({
   storeId: string;
   canManage: boolean;
 }) {
-  const [role] = await timeDbQuery("roles.detail.role", async () =>
-    db
-      .select({
-        id: roles.id,
-        name: roles.name,
-        isSystem: roles.isSystem,
-      })
-      .from(roles)
-      .where(and(eq(roles.id, roleId), eq(roles.storeId, storeId)))
-      .limit(1),
+  const role = await timeDbQuery("roles.detail.role", async () =>
+    queryOne<{
+      id: string;
+      name: string;
+      isSystem: boolean | null;
+    }>(
+      `
+        select
+          id,
+          name,
+          is_system as "isSystem"
+        from roles
+        where id = :roleId and store_id = :storeId
+        limit 1
+      `,
+      {
+        replacements: { roleId, storeId },
+      },
+    ),
   );
 
   if (!role) {
@@ -74,13 +81,18 @@ async function RoleDetailContent({
   const [allPermissions, assigned] = await Promise.all([
     getPermissionCatalog(),
     timeDbQuery("roles.detail.assignedPermissions", async () =>
-      db
-        .select({
-          key: permissions.key,
-        })
-        .from(rolePermissions)
-        .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id))
-        .where(eq(rolePermissions.roleId, role.id)),
+      queryMany<{ key: string }>(
+        `
+          select p.key as "key"
+          from role_permissions rp
+          inner join permissions p on rp.permission_id = p.id
+          where rp.role_id = :roleId
+          order by p.key asc
+        `,
+        {
+          replacements: { roleId: role.id },
+        },
+      ),
     ),
   ]);
 

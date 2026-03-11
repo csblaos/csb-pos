@@ -11,7 +11,7 @@ import {
   getSession,
   SessionStoreUnavailableError,
 } from "@/lib/auth/session";
-import { db } from "@/lib/db/client";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import {
   fbConnections,
   rolePermissions,
@@ -197,6 +197,7 @@ const createStoreSchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const db = await getTursoDb();
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ message: "กรุณาเข้าสู่ระบบ" }, { status: 401 });

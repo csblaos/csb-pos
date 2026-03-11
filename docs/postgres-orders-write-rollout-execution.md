@@ -43,7 +43,7 @@
 2. fulfillment transitions (`mark_packed`, `mark_shipped`) ใช้งานได้จริง
 3. return/cancel/pickup transitions ใช้งานได้จริง
 4. high-risk payment transitions (`submit_for_payment`, `confirm_paid`) ไม่ทำให้ stock/state เพี้ยน
-5. `orders-write-suite` ยังผ่านหลังเปิดแต่ละ wave
+5. `orders-write-suite` ยังผ่านหลังเปิดแต่ละ wave และยังผ่านในฐานะ preflight chain เดิม
 6. ไม่มี fallback warnings ต่อเนื่องจาก `orders.write.pg`
 7. order detail, stock state, reports และ inventory parity ยังสอดคล้องหลัง canary flows
 
@@ -106,26 +106,21 @@ POSTGRES_ORDERS_WRITE_CONFIRM_PAID_ENABLED=1
 
 1. purchase runtime rollout ผ่าน
 2. inventory read rollout ผ่าน
-3. `POSTGRES_ORDERS_READ_ENABLED=1` ใช้งานนิ่ง
-4. `POSTGRES_REPORTS_READ_ENABLED=1` ใช้งานนิ่ง
-5. `update_shipping` และ `submit_payment_slip` PostgreSQL path ไม่มีปัญหา
+3. `POSTGRES_AUTH_RBAC_READ_ENABLED=1` ใช้งานนิ่ง เพื่อให้ app shell/store context ไม่เพี้ยนระหว่าง UAT
+4. `POSTGRES_ORDERS_READ_ENABLED=1` ใช้งานนิ่ง
+5. `POSTGRES_REPORTS_READ_ENABLED=1` ใช้งานนิ่ง
+6. `update_shipping` และ `submit_payment_slip` PostgreSQL path ไม่มีปัญหา
 
 ## Preflight Commands
 
 รันก่อนแตะ env ทุกครั้ง:
 
 ```bash
-npm run db:check:postgres
-npm run db:migrate:postgres
-npm run db:compare:postgres:orders-read
-npm run db:compare:postgres:inventory
-npm run db:compare:postgres:reports-read
 npm run smoke:postgres:orders-write-suite
-npm run smoke:postgres:inventory-read-gate
-npm run smoke:postgres:reports-read-gate
-npm run lint
-npm run build
 ```
+
+หมายเหตุ:
+- `npm run smoke:postgres:orders-write-suite` ตอนนี้เป็น preflight chain ของ orders write rollout แล้ว โดยรวม `db:check:postgres`, `db:migrate:postgres`, `db:compare:postgres:auth-rbac-read`, `db:compare:postgres:orders-read`, `db:compare:postgres:purchase-read`, `db:compare:postgres:inventory`, `db:compare:postgres:reports-read`, order write smokes ทั้งชุด, `lint`, และ `build`
 
 ถ้า command ใด fail:
 - หยุด rollout

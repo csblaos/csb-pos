@@ -1,24 +1,21 @@
 import "server-only";
-
-import { eq, sql } from "drizzle-orm";
-
-import { systemConfig } from "@/lib/db/schema";
 import {
   getGlobalPaymentPolicyFromPostgres,
   getGlobalSessionPolicyFromPostgres,
   getGlobalStoreLogoPolicyFromPostgres,
-  logAuthRbacReadFallback,
 } from "@/lib/platform/postgres-auth-rbac";
+import {
+  upsertGlobalPaymentPolicyInPostgres,
+  upsertGlobalSessionPolicyInPostgres,
+  upsertGlobalStoreLogoPolicyInPostgres,
+} from "@/lib/platform/postgres-settings-admin-write";
 
-const GLOBAL_CONFIG_ID = "global";
 const DEFAULT_SESSION_LIMIT = 1;
 const DEFAULT_PAYMENT_MAX_ACCOUNTS_PER_STORE = 5;
 const DEFAULT_PAYMENT_REQUIRE_SLIP_FOR_LAO_QR = true;
 const DEFAULT_STORE_LOGO_MAX_SIZE_MB = 5;
 const DEFAULT_STORE_LOGO_AUTO_RESIZE = true;
 const DEFAULT_STORE_LOGO_RESIZE_MAX_WIDTH = 1280;
-
-const getTursoDb = async () => (await import("@/lib/db/client")).db;
 
 const toPositiveIntOrNull = (value: unknown) => {
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
@@ -53,130 +50,48 @@ export type GlobalPaymentPolicy = {
 };
 
 export async function getGlobalSessionPolicy(): Promise<GlobalSessionPolicy> {
-  try {
-    const postgresPolicy = await getGlobalSessionPolicyFromPostgres();
-    if (postgresPolicy) {
-      return postgresPolicy;
-    }
-  } catch (error) {
-    logAuthRbacReadFallback("system-config.session-policy", error);
+  const postgresPolicy = await getGlobalSessionPolicyFromPostgres();
+  if (postgresPolicy) {
+    return postgresPolicy;
   }
-
-  const db = await getTursoDb();
-  const [row] = await db
-    .select({
-      defaultSessionLimit: systemConfig.defaultSessionLimit,
-    })
-    .from(systemConfig)
-    .where(eq(systemConfig.id, GLOBAL_CONFIG_ID))
-    .limit(1);
-
   return {
-    defaultSessionLimit: toPositiveIntOrNull(row?.defaultSessionLimit) ?? DEFAULT_SESSION_LIMIT,
+    defaultSessionLimit: DEFAULT_SESSION_LIMIT,
   };
 }
 
 export async function getGlobalStoreLogoPolicy(): Promise<GlobalStoreLogoPolicy> {
-  try {
-    const postgresPolicy = await getGlobalStoreLogoPolicyFromPostgres();
-    if (postgresPolicy) {
-      return postgresPolicy;
-    }
-  } catch (error) {
-    logAuthRbacReadFallback("system-config.store-logo-policy", error);
+  const postgresPolicy = await getGlobalStoreLogoPolicyFromPostgres();
+  if (postgresPolicy) {
+    return postgresPolicy;
   }
-
-  try {
-    const db = await getTursoDb();
-    const [row] = await db
-      .select({
-        maxSizeMb: systemConfig.storeLogoMaxSizeMb,
-        autoResize: systemConfig.storeLogoAutoResize,
-        resizeMaxWidth: systemConfig.storeLogoResizeMaxWidth,
-      })
-      .from(systemConfig)
-      .where(eq(systemConfig.id, GLOBAL_CONFIG_ID))
-      .limit(1);
-
-    return {
-      maxSizeMb:
-        toIntInRangeOrNull(row?.maxSizeMb, 1, 20) ?? DEFAULT_STORE_LOGO_MAX_SIZE_MB,
-      autoResize:
-        typeof row?.autoResize === "boolean"
-          ? row.autoResize
-          : DEFAULT_STORE_LOGO_AUTO_RESIZE,
-      resizeMaxWidth:
-        toIntInRangeOrNull(row?.resizeMaxWidth, 256, 4096) ??
-        DEFAULT_STORE_LOGO_RESIZE_MAX_WIDTH,
-    };
-  } catch {
-    // fallback for environments that have not applied latest migration yet
-    return {
-      maxSizeMb: DEFAULT_STORE_LOGO_MAX_SIZE_MB,
-      autoResize: DEFAULT_STORE_LOGO_AUTO_RESIZE,
-      resizeMaxWidth: DEFAULT_STORE_LOGO_RESIZE_MAX_WIDTH,
-    };
-  }
+  return {
+    maxSizeMb: DEFAULT_STORE_LOGO_MAX_SIZE_MB,
+    autoResize: DEFAULT_STORE_LOGO_AUTO_RESIZE,
+    resizeMaxWidth: DEFAULT_STORE_LOGO_RESIZE_MAX_WIDTH,
+  };
 }
 
 export async function getGlobalPaymentPolicy(): Promise<GlobalPaymentPolicy> {
-  try {
-    const postgresPolicy = await getGlobalPaymentPolicyFromPostgres();
-    if (postgresPolicy) {
-      return postgresPolicy;
-    }
-  } catch (error) {
-    logAuthRbacReadFallback("system-config.payment-policy", error);
+  const postgresPolicy = await getGlobalPaymentPolicyFromPostgres();
+  if (postgresPolicy) {
+    return postgresPolicy;
   }
-
-  try {
-    const db = await getTursoDb();
-    const [row] = await db
-      .select({
-        maxAccountsPerStore: systemConfig.paymentMaxAccountsPerStore,
-        requireSlipForLaoQr: systemConfig.paymentRequireSlipForLaoQr,
-      })
-      .from(systemConfig)
-      .where(eq(systemConfig.id, GLOBAL_CONFIG_ID))
-      .limit(1);
-
-    return {
-      maxAccountsPerStore:
-        toIntInRangeOrNull(row?.maxAccountsPerStore, 1, 20) ??
-        DEFAULT_PAYMENT_MAX_ACCOUNTS_PER_STORE,
-      requireSlipForLaoQr:
-        typeof row?.requireSlipForLaoQr === "boolean"
-          ? row.requireSlipForLaoQr
-          : DEFAULT_PAYMENT_REQUIRE_SLIP_FOR_LAO_QR,
-    };
-  } catch {
-    return {
-      maxAccountsPerStore: DEFAULT_PAYMENT_MAX_ACCOUNTS_PER_STORE,
-      requireSlipForLaoQr: DEFAULT_PAYMENT_REQUIRE_SLIP_FOR_LAO_QR,
-    };
-  }
+  return {
+    maxAccountsPerStore: DEFAULT_PAYMENT_MAX_ACCOUNTS_PER_STORE,
+    requireSlipForLaoQr: DEFAULT_PAYMENT_REQUIRE_SLIP_FOR_LAO_QR,
+  };
 }
 
 export async function upsertGlobalSessionPolicy(input: GlobalSessionPolicy) {
   const defaultSessionLimit = toPositiveIntOrNull(input.defaultSessionLimit) ?? DEFAULT_SESSION_LIMIT;
 
-  const db = await getTursoDb();
-  await db
-    .insert(systemConfig)
-    .values({
-      id: GLOBAL_CONFIG_ID,
-      defaultCanCreateBranches: true,
-      defaultMaxBranchesPerStore: 1,
-      defaultSessionLimit,
-      updatedAt: sql`(CURRENT_TIMESTAMP)`,
-    })
-    .onConflictDoUpdate({
-      target: systemConfig.id,
-      set: {
-        defaultSessionLimit,
-        updatedAt: sql`(CURRENT_TIMESTAMP)`,
-      },
-    });
+  const postgresPolicy = await upsertGlobalSessionPolicyInPostgres({
+    defaultSessionLimit,
+  });
+  if (postgresPolicy) {
+    return;
+  }
+  throw new Error("POSTGRES_SETTINGS_SYSTEM_ADMIN_WRITE_ENABLED is required for session policy update");
 }
 
 export async function upsertGlobalStoreLogoPolicy(input: GlobalStoreLogoPolicy) {
@@ -190,28 +105,15 @@ export async function upsertGlobalStoreLogoPolicy(input: GlobalStoreLogoPolicy) 
     toIntInRangeOrNull(input.resizeMaxWidth, 256, 4096) ??
     DEFAULT_STORE_LOGO_RESIZE_MAX_WIDTH;
 
-  const db = await getTursoDb();
-  await db
-    .insert(systemConfig)
-    .values({
-      id: GLOBAL_CONFIG_ID,
-      defaultCanCreateBranches: true,
-      defaultMaxBranchesPerStore: 1,
-      defaultSessionLimit: 1,
-      storeLogoMaxSizeMb: maxSizeMb,
-      storeLogoAutoResize: autoResize,
-      storeLogoResizeMaxWidth: resizeMaxWidth,
-      updatedAt: sql`(CURRENT_TIMESTAMP)`,
-    })
-    .onConflictDoUpdate({
-      target: systemConfig.id,
-      set: {
-        storeLogoMaxSizeMb: maxSizeMb,
-        storeLogoAutoResize: autoResize,
-        storeLogoResizeMaxWidth: resizeMaxWidth,
-        updatedAt: sql`(CURRENT_TIMESTAMP)`,
-      },
-    });
+  const postgresPolicy = await upsertGlobalStoreLogoPolicyInPostgres({
+    maxSizeMb,
+    autoResize,
+    resizeMaxWidth,
+  });
+  if (postgresPolicy) {
+    return;
+  }
+  throw new Error("POSTGRES_SETTINGS_SYSTEM_ADMIN_WRITE_ENABLED is required for store logo policy update");
 }
 
 export async function upsertGlobalPaymentPolicy(input: GlobalPaymentPolicy) {
@@ -223,24 +125,12 @@ export async function upsertGlobalPaymentPolicy(input: GlobalPaymentPolicy) {
       ? input.requireSlipForLaoQr
       : DEFAULT_PAYMENT_REQUIRE_SLIP_FOR_LAO_QR;
 
-  const db = await getTursoDb();
-  await db
-    .insert(systemConfig)
-    .values({
-      id: GLOBAL_CONFIG_ID,
-      defaultCanCreateBranches: true,
-      defaultMaxBranchesPerStore: 1,
-      defaultSessionLimit: 1,
-      paymentMaxAccountsPerStore: maxAccountsPerStore,
-      paymentRequireSlipForLaoQr: requireSlipForLaoQr,
-      updatedAt: sql`(CURRENT_TIMESTAMP)`,
-    })
-    .onConflictDoUpdate({
-      target: systemConfig.id,
-      set: {
-        paymentMaxAccountsPerStore: maxAccountsPerStore,
-        paymentRequireSlipForLaoQr: requireSlipForLaoQr,
-        updatedAt: sql`(CURRENT_TIMESTAMP)`,
-      },
-    });
+  const postgresPolicy = await upsertGlobalPaymentPolicyInPostgres({
+    maxAccountsPerStore,
+    requireSlipForLaoQr,
+  });
+  if (postgresPolicy) {
+    return;
+  }
+  throw new Error("POSTGRES_SETTINGS_SYSTEM_ADMIN_WRITE_ENABLED is required for payment policy update");
 }

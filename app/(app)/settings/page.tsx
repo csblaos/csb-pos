@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { eq } from "drizzle-orm";
 import {
   Bell,
   CheckCircle2,
@@ -24,8 +23,10 @@ import {
 import { LogoutButton } from "@/components/app/logout-button";
 import { getSession } from "@/lib/auth/session";
 import { getUserSystemRole } from "@/lib/auth/system-admin";
-import { db } from "@/lib/db/client";
-import { fbConnections, stores, waConnections } from "@/lib/db/schema";
+import {
+  getStoreChannelConnectionsFromPostgres,
+  getStoreSettingsHomeSummaryFromPostgres,
+} from "@/lib/platform/postgres-store-settings";
 import {
   getUserPermissionsForCurrentSession,
   isPermissionGranted,
@@ -131,48 +132,20 @@ export default async function SettingsPage() {
   }
 
   const activeStoreId = session?.activeStoreId ?? null;
-
-  const [storeSummary, fbConnection, waConnection] = activeStoreId
+  const [storeSummary, channelConnections] = activeStoreId
     ? await Promise.all([
-        db
-          .select({
-            name: stores.name,
-            storeType: stores.storeType,
-            currency: stores.currency,
-            address: stores.address,
-            phoneNumber: stores.phoneNumber,
-          })
-          .from(stores)
-          .where(eq(stores.id, activeStoreId))
-          .limit(1)
-          .then((rows) => rows[0] ?? null),
+        getStoreSettingsHomeSummaryFromPostgres(activeStoreId),
         canViewConnections
-          ? db
-              .select({
-                status: fbConnections.status,
-                pageName: fbConnections.pageName,
-              })
-              .from(fbConnections)
-              .where(eq(fbConnections.storeId, activeStoreId))
-              .limit(1)
-              .then((rows) => rows[0] ?? null)
-          : Promise.resolve(null),
-        canViewConnections
-          ? db
-              .select({
-                status: waConnections.status,
-                phoneNumber: waConnections.phoneNumber,
-              })
-              .from(waConnections)
-              .where(eq(waConnections.storeId, activeStoreId))
-              .limit(1)
-              .then((rows) => rows[0] ?? null)
+          ? getStoreChannelConnectionsFromPostgres(activeStoreId)
           : Promise.resolve(null),
       ])
-    : [null, null, null];
+    : [null, null];
+  const fbConnection = channelConnections?.fbConnection ?? null;
+  const waConnection = channelConnections?.waConnection ?? null;
 
   const fbStatus: ChannelStatus = fbConnection?.status ?? "DISCONNECTED";
   const waStatus: ChannelStatus = waConnection?.status ?? "DISCONNECTED";
+  const storeTypeKey = storeSummary?.storeType ?? null;
 
   const managementLinks: SettingsLinkItem[] = [
     {
@@ -324,9 +297,10 @@ export default async function SettingsPage() {
     },
   ];
 
-  const storeTypeLabel = storeSummary
-    ? storeTypeLabels[storeSummary.storeType] ?? storeSummary.storeType
-    : "ยังไม่ระบุ";
+  const storeTypeLabel =
+    storeTypeKey && storeTypeKey in storeTypeLabels
+      ? storeTypeLabels[storeTypeKey]
+      : storeTypeKey ?? "ยังไม่ระบุ";
 
   return (
     <section className="space-y-5">

@@ -1,9 +1,9 @@
-import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { getSession } from "@/lib/auth/session";
-import { db } from "@/lib/db/client";
-import { storePaymentAccounts } from "@/lib/db/schema";
+import {
+  getStorePaymentAccountQrImageMetaFromPostgres,
+} from "@/lib/platform/postgres-store-settings";
 import { hasPermission, RBACError, toRBACErrorResponse } from "@/lib/rbac/access";
 import { resolvePaymentQrImageUrl } from "@/lib/storage/r2";
 
@@ -54,18 +54,7 @@ export async function GET(
     }
 
     const { accountId } = await context.params;
-    const [account] = await db
-      .select({
-        id: storePaymentAccounts.id,
-        displayName: storePaymentAccounts.displayName,
-        qrImageUrl: storePaymentAccounts.qrImageUrl,
-        promptpayId: storePaymentAccounts.promptpayId,
-      })
-      .from(storePaymentAccounts)
-      .where(
-        and(eq(storePaymentAccounts.id, accountId), eq(storePaymentAccounts.storeId, storeId)),
-      )
-      .limit(1);
+    const account = await getStorePaymentAccountQrImageMetaFromPostgres(storeId, accountId);
 
     if (!account) {
       return NextResponse.json({ message: "ไม่พบบัญชี QR" }, { status: 404 });

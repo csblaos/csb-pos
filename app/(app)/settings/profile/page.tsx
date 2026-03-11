@@ -1,13 +1,11 @@
 import Link from "next/link";
-import { eq } from "drizzle-orm";
 import { ChevronRight, Lock, UserRound } from "lucide-react";
 import { redirect } from "next/navigation";
 
 import { AccountPasswordSettings } from "@/components/app/account-password-settings";
 import { AccountProfileSettings } from "@/components/app/account-profile-settings";
 import { getSession } from "@/lib/auth/session";
-import { db } from "@/lib/db/client";
-import { users } from "@/lib/db/schema";
+import { queryOne } from "@/lib/db/query";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 
 export default async function SettingsProfilePage() {
@@ -35,15 +33,24 @@ export default async function SettingsProfilePage() {
     );
   }
 
-  const [account] = await db
-    .select({
-      name: users.name,
-      email: users.email,
-      mustChangePassword: users.mustChangePassword,
-    })
-    .from(users)
-    .where(eq(users.id, session.userId))
-    .limit(1);
+  const account = await queryOne<{
+    name: string;
+    email: string;
+    mustChangePassword: boolean | null;
+  }>(
+    `
+      select
+        name,
+        email,
+        must_change_password as "mustChangePassword"
+      from users
+      where id = :userId
+      limit 1
+    `,
+    {
+      replacements: { userId: session.userId },
+    },
+  );
 
   if (!account) {
     return (
@@ -71,7 +78,7 @@ export default async function SettingsProfilePage() {
 
       <div className="space-y-2">
         <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">ความปลอดภัย</p>
-        <AccountPasswordSettings mustChangePassword={account.mustChangePassword} />
+        <AccountPasswordSettings mustChangePassword={account.mustChangePassword === true} />
       </div>
 
       <div className="space-y-2">

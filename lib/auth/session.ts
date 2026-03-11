@@ -1,6 +1,5 @@
 import { cookies, headers } from "next/headers";
 import { cache } from "react";
-import { eq } from "drizzle-orm";
 
 import { redisDelete, redisGetJson, redisSetJson } from "@/lib/cache/redis";
 import {
@@ -15,11 +14,7 @@ import {
   verifySessionTokenClaims,
 } from "@/lib/auth/session-token";
 import { sessionSchema, type AppSession } from "@/lib/auth/session-types";
-import { users } from "@/lib/db/schema";
-import {
-  getUserSessionLimitOverrideFromPostgres,
-  logAuthRbacReadFallback,
-} from "@/lib/platform/postgres-auth-rbac";
+import { getUserSessionLimitOverrideFromPostgres } from "@/lib/platform/postgres-auth-rbac";
 import { getGlobalSessionPolicy } from "@/lib/system-config/policy";
 
 export type { AppSession } from "@/lib/auth/session-types";
@@ -64,14 +59,6 @@ const parseTokenVersion = (rawValue: unknown) => {
   return rawValue;
 };
 
-const parseSessionLimit = (rawValue: unknown) => {
-  if (typeof rawValue !== "number" || !Number.isInteger(rawValue) || rawValue <= 0) {
-    return null;
-  }
-
-  return rawValue;
-};
-
 const isActiveSessionRef = (rawValue: unknown): rawValue is ActiveSessionRef => {
   if (typeof rawValue !== "object" || rawValue === null) {
     return false;
@@ -107,8 +94,6 @@ const normalizeActiveSessionRefs = (rawValue: unknown): ActiveSessionRef[] => {
   return [...dedup.values()].sort((a, b) => a.issuedAt - b.issuedAt);
 };
 
-const getTursoDb = async () => (await import("@/lib/db/client")).db;
-
 const readActiveSessionRefs = async (userId: string) => {
   const raw = await redisGetJson<unknown>(userActiveSessionsCacheKey(userId));
   return normalizeActiveSessionRefs(raw);
@@ -137,23 +122,11 @@ const pruneMissingActiveSessionRefs = async (refs: ActiveSessionRef[]) => {
 };
 
 const getUserSessionLimitOverride = async (userId: string) => {
-  try {
-    const postgresOverride = await getUserSessionLimitOverrideFromPostgres(userId);
-    if (postgresOverride !== undefined) {
-      return postgresOverride;
-    }
-  } catch (error) {
-    logAuthRbacReadFallback("session.user-session-limit", error);
+  const postgresOverride = await getUserSessionLimitOverrideFromPostgres(userId);
+  if (postgresOverride !== undefined) {
+    return postgresOverride;
   }
-
-  const db = await getTursoDb();
-  const [row] = await db
-    .select({ sessionLimit: users.sessionLimit })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
-
-  return parseSessionLimit(row?.sessionLimit);
+  return null;
 };
 
 const getEffectiveSessionLimit = async (userId: string) => {

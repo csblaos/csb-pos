@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getSession } from "@/lib/auth/session";
 import { getUserSystemRole } from "@/lib/auth/system-admin";
 import { getGlobalPaymentPolicy, upsertGlobalPaymentPolicy } from "@/lib/system-config/policy";
+import { upsertGlobalPaymentPolicyInPostgres } from "@/lib/platform/postgres-settings-admin-write";
 import { safeLogAuditEvent } from "@/server/services/audit.service";
 
 const updateGlobalPaymentPolicySchema = z.object({
@@ -77,8 +78,11 @@ export async function PATCH(request: Request) {
     }
 
     const before = await getGlobalPaymentPolicy();
-    await upsertGlobalPaymentPolicy(payload.data);
-    const policy = await getGlobalPaymentPolicy();
+    const postgresPolicy = await upsertGlobalPaymentPolicyInPostgres(payload.data);
+    if (!postgresPolicy) {
+      await upsertGlobalPaymentPolicy(payload.data);
+    }
+    const policy = postgresPolicy ?? (await getGlobalPaymentPolicy());
 
     await safeLogAuditEvent({
       scope: "SYSTEM",

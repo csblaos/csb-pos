@@ -3,9 +3,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { enforceSystemAdminSession, toSystemAdminErrorResponse } from "@/lib/auth/system-admin";
-import { db } from "@/lib/db/client";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { stores } from "@/lib/db/schema";
 import { storeCurrencyValues } from "@/lib/finance/store-financial";
+import {
+  findStoreByIdFromPostgres,
+  logSettingsSystemAdminWriteFallback,
+  updateSystemAdminStoreConfigInPostgres,
+} from "@/lib/platform/postgres-settings-admin-write";
 
 const updateStoreConfigSchema = z
   .object({
@@ -43,6 +48,30 @@ export async function PATCH(
       return NextResponse.json({ message: "ข้อมูลตั้งค่าร้านไม่ถูกต้อง" }, { status: 400 });
     }
 
+    try {
+      const targetStore = await findStoreByIdFromPostgres(storeId);
+      if (targetStore !== undefined) {
+        if (!targetStore) {
+          return NextResponse.json({ message: "ไม่พบร้านค้า" }, { status: 404 });
+        }
+
+        await updateSystemAdminStoreConfigInPostgres({
+          storeId,
+          name: payload.data.name,
+          storeType: payload.data.storeType,
+          currency: payload.data.currency,
+          vatEnabled: payload.data.vatEnabled,
+          vatRate: payload.data.vatRate,
+          maxBranchesOverride: payload.data.maxBranchesOverride,
+        });
+
+        return NextResponse.json({ ok: true });
+      }
+    } catch (error) {
+      logSettingsSystemAdminWriteFallback("system-admin.config-store.update", error);
+    }
+
+    const db = await getTursoDb();
     const [targetStore] = await db
       .select({ id: stores.id })
       .from(stores)

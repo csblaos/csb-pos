@@ -2,7 +2,7 @@ import "server-only";
 
 import { and, eq, inArray, sql } from "drizzle-orm";
 
-import { db } from "@/server/db/client";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { timeDb } from "@/server/perf/perf";
 import { orders } from "@/lib/db/schema";
 import {
@@ -15,6 +15,7 @@ const paidStatuses = ["PAID", "PACKED", "SHIPPED"] as const;
 const pendingStatuses = ["PENDING_PAYMENT", "READY_FOR_PICKUP"] as const;
 
 export async function getTodaySales(storeId: string) {
+  const db = await getTursoDb();
   const [row] = await timeDb("dashboard.repo.todaySales", async () =>
     db
       .select({
@@ -35,6 +36,7 @@ export async function getTodaySales(storeId: string) {
 }
 
 export async function getOrdersCountToday(storeId: string) {
+  const db = await getTursoDb();
   const [row] = await timeDb("dashboard.repo.ordersCountToday", async () =>
     db
       .select({
@@ -54,6 +56,7 @@ export async function getOrdersCountToday(storeId: string) {
 }
 
 export async function getPendingPaymentCount(storeId: string) {
+  const db = await getTursoDb();
   const [row] = await timeDb("dashboard.repo.pendingPaymentCount", async () =>
     db
       .select({

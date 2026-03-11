@@ -1,10 +1,11 @@
-import { eq } from "drizzle-orm";
 import { notFound, redirect } from "next/navigation";
 
 import { getSession } from "@/lib/auth/session";
-import { db } from "@/lib/db/client";
-import { stores } from "@/lib/db/schema";
 import { currencySymbol } from "@/lib/finance/store-financial";
+import {
+  getStoreFinancialConfigFromPostgres,
+  getStoreProfileFromPostgres,
+} from "@/lib/platform/postgres-store-settings";
 import {
   getUserPermissionsForCurrentSession,
   isPermissionGranted,
@@ -38,22 +39,16 @@ export default async function PrintPurchaseOrderPage({
     redirect("/stock");
   }
 
-  const [storeRow] = await db
-    .select({
-      name: stores.name,
-      address: stores.address,
-      phoneNumber: stores.phoneNumber,
-      currency: stores.currency,
-    })
-    .from(stores)
-    .where(eq(stores.id, session.activeStoreId))
-    .limit(1);
+  const [storeProfile, storeFinancial] = await Promise.all([
+    getStoreProfileFromPostgres(session.activeStoreId),
+    getStoreFinancialConfigFromPostgres(session.activeStoreId),
+  ]);
 
-  if (!storeRow) {
+  if (!storeProfile) {
     notFound();
   }
 
-  const symbol = currencySymbol(storeRow.currency);
+  const symbol = currencySymbol(storeFinancial?.currency ?? "LAK");
   const formatMoney = (value: number) => `${symbol}${value.toLocaleString("th-TH")}`;
   const grandTotal = po.totalCostBase + po.shippingCost + po.otherCost;
 
@@ -64,9 +59,9 @@ export default async function PrintPurchaseOrderPage({
         <h1 className="text-2xl font-semibold">ใบสั่งซื้อ (PO)</h1>
         <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
           <div>
-            <p className="font-medium">{storeRow.name}</p>
-            <p className="text-slate-600">{storeRow.address || "-"}</p>
-            <p className="text-slate-600">โทร {storeRow.phoneNumber || "-"}</p>
+            <p className="font-medium">{storeProfile.name}</p>
+            <p className="text-slate-600">{storeProfile.address || "-"}</p>
+            <p className="text-slate-600">โทร {storeProfile.phoneNumber || "-"}</p>
           </div>
           <div className="space-y-1 text-sm sm:text-right">
             <p>

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { enforceSystemAdminSession, toSystemAdminErrorResponse } from "@/lib/auth/system-admin";
 import { getGlobalSessionPolicy, upsertGlobalSessionPolicy } from "@/lib/system-config/policy";
+import { upsertGlobalSessionPolicyInPostgres } from "@/lib/platform/postgres-settings-admin-write";
 import { safeLogAuditEvent } from "@/server/services/audit.service";
 
 const updateGlobalSessionPolicySchema = z.object({
@@ -47,8 +48,11 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ message: "ข้อมูลตั้งค่าไม่ถูกต้อง" }, { status: 400 });
     }
 
-    await upsertGlobalSessionPolicy(payload.data);
-    const config = await getGlobalSessionPolicy();
+    const postgresConfig = await upsertGlobalSessionPolicyInPostgres(payload.data);
+    if (!postgresConfig) {
+      await upsertGlobalSessionPolicy(payload.data);
+    }
+    const config = postgresConfig ?? (await getGlobalSessionPolicy());
 
     await safeLogAuditEvent({
       scope: "SYSTEM",

@@ -4,6 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { productCategories } from "@/lib/db/schema";
 import {
   createCategoryInPostgres,
@@ -14,8 +15,6 @@ import {
 } from "@/lib/platform/postgres-products-onboarding-write";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { listCategories } from "@/lib/products/service";
-
-const getTursoDb = async () => (await import("@/lib/db/client")).db;
 
 const createCategorySchema = z.object({
   name: z.string().trim().min(1, "กรุณากรอกชื่อหมวดหมู่").max(120),

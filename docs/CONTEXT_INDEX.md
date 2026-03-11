@@ -24,14 +24,19 @@
 18. `docs/postgres-inventory-read-rollout-execution.md`
 19. `docs/postgres-auth-rbac-read-rollout-execution.md`
 20. `docs/postgres-settings-system-admin-read-rollout-execution.md`
-21. `docs/postgres-products-units-onboarding-read-rollout-execution.md`
-22. `docs/postgres-products-units-onboarding-write-rollout-execution.md`
-23. `docs/postgres-orders-write-rollout-execution.md`
-24. `docs/postgres-stock-movement-rollout-execution.md`
-25. `docs/postgres-all-postgres-observe-fallback-removal.md`
-26. `docs/postgres-turso-drizzle-retirement-plan.md`
-27. `docs/postgres-turso-runtime-dependency-audit.md`
-28. `docs/express-readiness-plan.md`
+21. `docs/postgres-settings-system-admin-write-rollout-execution.md`
+22. `docs/postgres-branches-rollout-execution.md`
+23. `docs/postgres-store-settings-rollout-execution.md`
+24. `docs/postgres-notifications-rollout-execution.md`
+25. `docs/postgres-products-units-onboarding-read-rollout-execution.md`
+26. `docs/postgres-products-units-onboarding-write-rollout-execution.md`
+27. `docs/postgres-products-write-rollout-execution.md`
+28. `docs/postgres-orders-write-rollout-execution.md`
+29. `docs/postgres-stock-movement-rollout-execution.md`
+30. `docs/postgres-all-postgres-observe-fallback-removal.md`
+31. `docs/postgres-turso-drizzle-retirement-plan.md`
+32. `docs/postgres-turso-runtime-dependency-audit.md`
+33. `docs/express-readiness-plan.md`
 
 ## What Each File Is For
 
@@ -75,10 +80,20 @@
   - checklist ปฏิบัติจริงสำหรับเปิด auth/session + RBAC + app shell read path บน staging ผ่าน `POSTGRES_AUTH_RBAC_READ_ENABLED`
 - `docs/postgres-settings-system-admin-read-rollout-execution.md`
   - checklist ปฏิบัติจริงสำหรับเปิด settings/system-admin read path บน staging ผ่าน `POSTGRES_SETTINGS_SYSTEM_ADMIN_READ_ENABLED`
+- `docs/postgres-settings-system-admin-write-rollout-execution.md`
+  - checklist ปฏิบัติจริงสำหรับเปิด settings/system-admin write path บน staging ผ่าน `POSTGRES_SETTINGS_SYSTEM_ADMIN_WRITE_ENABLED`
+- `docs/postgres-branches-rollout-execution.md`
+  - checklist ปฏิบัติจริงสำหรับเปิด branch policy + branches runtime บน staging ผ่าน `POSTGRES_BRANCHES_ENABLED`
+- `docs/postgres-store-settings-rollout-execution.md`
+  - checklist ปฏิบัติจริงสำหรับเปิด store settings + payment accounts read/write path บน staging ผ่าน `POSTGRES_STORE_SETTINGS_READ_ENABLED`, `POSTGRES_STORE_SETTINGS_WRITE_ENABLED`, และ `POSTGRES_STORE_PAYMENT_ACCOUNTS_WRITE_ENABLED`
+- `docs/postgres-notifications-rollout-execution.md`
+  - checklist ปฏิบัติจริงสำหรับเปิด notifications runtime บน staging ผ่าน `POSTGRES_NOTIFICATIONS_ENABLED`
 - `docs/postgres-products-units-onboarding-read-rollout-execution.md`
   - checklist ปฏิบัติจริงสำหรับเปิด products page, units/categories, และ onboarding read path บน staging ผ่าน `POSTGRES_PRODUCTS_ONBOARDING_READ_ENABLED`
 - `docs/postgres-products-units-onboarding-write-rollout-execution.md`
   - checklist ปฏิบัติจริงสำหรับเปิด units/categories/onboarding low-risk write path บน staging ผ่าน `POSTGRES_PRODUCTS_ONBOARDING_WRITE_ENABLED`
+- `docs/postgres-products-write-rollout-execution.md`
+  - checklist ปฏิบัติจริงสำหรับเปิด product CRUD + variant persistence write path บน staging ผ่าน `POSTGRES_PRODUCTS_WRITE_ENABLED`
 - `docs/postgres-orders-write-rollout-execution.md`
   - checklist ปฏิบัติจริงสำหรับเปิด order lifecycle writes บน staging แบบ wave-by-wave พร้อม UAT, compare, และ rollback
 - `docs/postgres-stock-movement-rollout-execution.md`

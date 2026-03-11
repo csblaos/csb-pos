@@ -7,12 +7,12 @@ import { enforceUserSessionLimitNow, invalidateUserSessions } from "@/lib/auth/s
 import {
   ensureMainBranchExists,
   getMemberBranchAccess,
+  listStoreBranches,
   replaceMemberBranchAccess,
 } from "@/lib/branches/access";
-import { db } from "@/lib/db/client";
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import {
   roles,
-  storeBranches,
   storeMembers,
   users,
 } from "@/lib/db/schema";
@@ -43,6 +43,7 @@ const updateUserSchema = z.discriminatedUnion("action", [
 ]);
 
 const activeOwnerCount = async (storeId: string) => {
+  const db = await getTursoDb();
   const [row] = await db
     .select({ count: sql<number>`count(*)` })
     .from(storeMembers)
@@ -65,6 +66,7 @@ export async function GET(
   try {
     const { storeId } = await enforcePermission("members.view");
     const { userId } = await context.params;
+    const db = await getTursoDb();
     await ensureMainBranchExists(storeId);
 
     const [membership] = await db
@@ -78,10 +80,7 @@ export async function GET(
     }
 
     const [branches, branchAccess] = await Promise.all([
-      db
-        .select({ id: storeBranches.id })
-        .from(storeBranches)
-        .where(eq(storeBranches.storeId, storeId)),
+      listStoreBranches(storeId),
       getMemberBranchAccess(userId, storeId),
     ]);
 
@@ -119,6 +118,7 @@ export async function PATCH(
   try {
     const { storeId, session } = await enforcePermission("members.update");
     const { userId } = await context.params;
+    const db = await getTursoDb();
     auditContext = {
       storeId,
       actorUserId: session.userId,

@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq, or } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
+import { getTursoDb } from "@/lib/db/turso-lazy";
 import { units } from "@/lib/db/schema";
 import {
   createUnitInPostgres,
@@ -12,8 +13,6 @@ import {
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { listUnits } from "@/lib/products/service";
 import { createUnitSchema, normalizeUnitPayload } from "@/lib/products/validation";
-
-const getTursoDb = async () => (await import("@/lib/db/client")).db;
 
 export async function GET() {
   try {

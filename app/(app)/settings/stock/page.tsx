@@ -1,11 +1,9 @@
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
 
 import { StoreInventorySettings } from "@/components/app/store-inventory-settings";
 import { getSession } from "@/lib/auth/session";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
-import { db } from "@/lib/db/client";
-import { stores } from "@/lib/db/schema";
+import { getStoreProfileFromPostgres } from "@/lib/platform/postgres-store-settings";
 
 export default async function SettingsStockPage() {
   const session = await getSession();
@@ -30,14 +28,7 @@ export default async function SettingsStockPage() {
     );
   }
 
-  const [store] = await db
-    .select({
-      outStockThreshold: stores.outStockThreshold,
-      lowStockThreshold: stores.lowStockThreshold,
-    })
-    .from(stores)
-    .where(eq(stores.id, session.activeStoreId))
-    .limit(1);
+  const store = await getStoreProfileFromPostgres(session.activeStoreId);
 
   return (
     <section className="space-y-4">

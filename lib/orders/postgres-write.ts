@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomUUID } from "node:crypto";
 
-import { execute, queryOne } from "@/lib/db/query";
+import { execute, queryMany, queryOne } from "@/lib/db/query";
 import { isPostgresConfigured } from "@/lib/db/sequelize";
 import { runInTransaction } from "@/lib/db/transaction";
 import type { RequestContext } from "@/lib/http/request-context";
@@ -296,6 +296,20 @@ type MarkShippedInput = {
   requestContext?: RequestContext | null;
 };
 
+type BulkCodReconcileInput = {
+  storeId: string;
+  actorUserId: string;
+  actorName: string | null;
+  actorRole: string | null;
+  items: Array<{
+    orderId: string;
+    codAmount: number;
+    codFee: number;
+  }>;
+  request?: Request | null;
+  requestContext?: RequestContext | null;
+};
+
 export const isPostgresUpdateShippingEnabled = () =>
   process.env.POSTGRES_ORDERS_WRITE_UPDATE_SHIPPING_ENABLED === "1" && isPostgresConfigured();
 
@@ -346,6 +360,34 @@ export const orderNoExistsInPostgres = async (storeId: string, orderNo: string) 
   );
 
   return Boolean(row?.value);
+};
+
+export const generateOrderNoInPostgres = async (storeId: string) => {
+  const start = new Date();
+  start.setUTCHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 1);
+
+  const counterRow = await queryOne<{ count: number | string }>(
+    `
+      select count(*)::int as count
+      from orders
+      where store_id = :storeId
+        and created_at >= :startOfDay
+        and created_at < :endOfDay
+    `,
+    {
+      replacements: {
+        storeId,
+        startOfDay: start.toISOString(),
+        endOfDay: end.toISOString(),
+      },
+    },
+  );
+
+  const count = Number(counterRow?.count ?? 0) + 1;
+  const datePart = start.toISOString().slice(0, 10).replaceAll("-", "");
+  return `SO-${datePart}-${String(count).padStart(4, "0")}`;
 };
 
 const insertInventoryMovementsInPostgres = async (
@@ -1371,4 +1413,157 @@ export const markOrderShippedInPostgres = async (input: MarkShippedInput) => {
 
     await insertAuditEventInPostgres(tx, auditValues);
   });
+};
+
+export const bulkSettleCodReconcileInPostgres = async (input: BulkCodReconcileInput) => {
+  const orderIds = Array.from(new Set(input.items.map((item) => item.orderId)));
+  const orderRows = await queryMany<{
+    id: string;
+    orderNo: string;
+    status:
+      | "DRAFT"
+      | "PENDING_PAYMENT"
+      | "READY_FOR_PICKUP"
+      | "PICKED_UP_PENDING_PAYMENT"
+      | "PAID"
+      | "PACKED"
+      | "SHIPPED"
+      | "COD_RETURNED"
+      | "CANCELLED";
+    paymentStatus:
+      | "UNPAID"
+      | "PENDING_PROOF"
+      | "PAID"
+      | "COD_PENDING_SETTLEMENT"
+      | "COD_SETTLED"
+      | "FAILED";
+    paymentMethod: "CASH" | "LAO_QR" | "ON_CREDIT" | "COD" | "BANK_TRANSFER";
+    paidAt: string | null;
+  }>(
+    `
+      select
+        id,
+        order_no as "orderNo",
+        status,
+        payment_status as "paymentStatus",
+        payment_method as "paymentMethod",
+        paid_at as "paidAt"
+      from orders
+      where store_id = :storeId
+        and id = any(:orderIds)
+    `,
+    {
+      replacements: {
+        storeId: input.storeId,
+        orderIds,
+      },
+    },
+  );
+
+  const orderMap = new Map(orderRows.map((row) => [row.id, row]));
+  const results: Array<{
+    orderId: string;
+    orderNo: string | null;
+    ok: boolean;
+    message?: string;
+  }> = [];
+
+  let successCount = 0;
+
+  await runInTransaction(async (tx) => {
+    for (const item of input.items) {
+      const order = orderMap.get(item.orderId);
+      if (!order) {
+        results.push({
+          orderId: item.orderId,
+          orderNo: null,
+          ok: false,
+          message: "ไม่พบออเดอร์",
+        });
+        continue;
+      }
+
+      if (
+        order.paymentMethod !== "COD" ||
+        order.status !== "SHIPPED" ||
+        order.paymentStatus !== "COD_PENDING_SETTLEMENT"
+      ) {
+        results.push({
+          orderId: order.id,
+          orderNo: order.orderNo,
+          ok: false,
+          message: "สถานะไม่พร้อมปิดยอด COD",
+        });
+        continue;
+      }
+
+      const codAmount = Math.max(0, Math.trunc(item.codAmount));
+      const codFee = Math.max(0, Math.trunc(item.codFee));
+      const now = new Date().toISOString();
+
+      await execute(
+        `
+          update orders
+          set
+            payment_status = 'COD_SETTLED',
+            cod_settled_at = :codSettledAt,
+            paid_at = :paidAt,
+            cod_amount = :codAmount,
+            cod_fee = :codFee
+          where
+            id = :orderId
+            and store_id = :storeId
+            and status = 'SHIPPED'
+            and payment_method = 'COD'
+            and payment_status = 'COD_PENDING_SETTLEMENT'
+        `,
+        {
+          transaction: tx,
+          replacements: {
+            storeId: input.storeId,
+            orderId: order.id,
+            codSettledAt: now,
+            paidAt: order.paidAt ?? now,
+            codAmount,
+            codFee,
+          },
+        },
+      );
+
+      await insertAuditEventInPostgres(
+        tx,
+        buildAuditEventValues({
+          scope: "STORE",
+          storeId: input.storeId,
+          actorUserId: input.actorUserId,
+          actorName: input.actorName,
+          actorRole: input.actorRole,
+          action: "order.confirm_paid.bulk_cod_reconcile",
+          entityType: "order",
+          entityId: order.id,
+          metadata: {
+            orderNo: order.orderNo,
+            toPaymentStatus: "COD_SETTLED",
+            codAmount,
+            codFee,
+          },
+          requestContext: input.requestContext,
+          request: input.request,
+        }),
+      );
+
+      successCount += 1;
+      results.push({
+        orderId: order.id,
+        orderNo: order.orderNo,
+        ok: true,
+      });
+    }
+  });
+
+  return {
+    settledCount: successCount,
+    failedCount: results.length - successCount,
+    results,
+  };
 };
