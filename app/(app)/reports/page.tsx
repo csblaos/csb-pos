@@ -1,9 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
-import { getSession } from "@/lib/auth/session";
+import { getAppShellContext } from "@/lib/app-shell/context";
 import {
-  getUserPermissionsForCurrentSession,
   isPermissionGranted,
 } from "@/lib/rbac/access";
 import { getReportsViewData } from "@/server/services/reports.service";
@@ -17,10 +16,7 @@ const fmtSigned = (value: number) =>
   `${value > 0 ? "+" : value < 0 ? "-" : ""}${Math.abs(value).toLocaleString("th-TH")}`;
 
 export default async function ReportsPage() {
-  const [session, permissionKeys] = await Promise.all([
-    getSession(),
-    getUserPermissionsForCurrentSession(),
-  ]);
+  const { session, permissionKeys } = await getAppShellContext();
   if (!session) {
     redirect("/login");
   }

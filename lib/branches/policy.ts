@@ -1,19 +1,13 @@
 import "server-only";
 
-import { and, eq, sql } from "drizzle-orm";
-
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import { roles, storeBranches, storeMembers, stores, systemConfig, users } from "@/lib/db/schema";
 import {
   getGlobalBranchPolicyFromPostgres,
   listBranchesByStoreFromPostgres,
   loadBranchCreationPolicyInputsFromPostgres,
-  logBranchesFallback,
   upsertGlobalBranchPolicyInPostgres,
 } from "@/lib/platform/postgres-branches";
 
 export const GLOBAL_BRANCH_CONFIG_ID = "global";
-const DEFAULT_GLOBAL_BRANCH_MAX = 1;
 
 export type BranchLimitSource =
   | "STORE_OVERRIDE"
@@ -93,192 +87,62 @@ const resolveMaxBranchesPerStore = (params: {
 };
 
 export async function getGlobalBranchPolicy(): Promise<GlobalBranchPolicy> {
-  try {
-    const postgresPolicy = await getGlobalBranchPolicyFromPostgres();
-    if (postgresPolicy !== undefined) {
-      return postgresPolicy;
-    }
-  } catch (error) {
-    logBranchesFallback("policy.global.read", error);
+  const postgresPolicy = await getGlobalBranchPolicyFromPostgres();
+  if (postgresPolicy === undefined) {
+    throw new Error("PostgreSQL branch policy is not available");
   }
-
-  const db = await getTursoDb();
-  const [row] = await db
-    .select({
-      defaultCanCreateBranches: systemConfig.defaultCanCreateBranches,
-      defaultMaxBranchesPerStore: systemConfig.defaultMaxBranchesPerStore,
-    })
-    .from(systemConfig)
-    .where(eq(systemConfig.id, GLOBAL_BRANCH_CONFIG_ID))
-    .limit(1);
-
-  if (!row) {
-    return {
-      defaultCanCreateBranches: true,
-      defaultMaxBranchesPerStore: DEFAULT_GLOBAL_BRANCH_MAX,
-    };
-  }
-
-  return {
-    defaultCanCreateBranches:
-      typeof row.defaultCanCreateBranches === "boolean"
-        ? row.defaultCanCreateBranches
-        : true,
-    defaultMaxBranchesPerStore:
-      row.defaultMaxBranchesPerStore === null
-        ? null
-        : toNonNegativeIntOrNull(row.defaultMaxBranchesPerStore) ?? DEFAULT_GLOBAL_BRANCH_MAX,
-  };
+  return postgresPolicy;
 }
 
 export async function upsertGlobalBranchPolicy(input: GlobalBranchPolicy) {
   const defaultCanCreateBranches = input.defaultCanCreateBranches;
   const defaultMaxBranchesPerStore = toNonNegativeIntOrNull(input.defaultMaxBranchesPerStore);
 
-  try {
-    const updated = await upsertGlobalBranchPolicyInPostgres({
-      defaultCanCreateBranches,
-      defaultMaxBranchesPerStore,
-    });
-    if (updated !== undefined) {
-      return;
-    }
-  } catch (error) {
-    logBranchesFallback("policy.global.write", error);
+  const updated = await upsertGlobalBranchPolicyInPostgres({
+    defaultCanCreateBranches,
+    defaultMaxBranchesPerStore,
+  });
+  if (updated === undefined) {
+    throw new Error("PostgreSQL branch policy update is not available");
   }
-
-  const db = await getTursoDb();
-  await db
-    .insert(systemConfig)
-    .values({
-      id: GLOBAL_BRANCH_CONFIG_ID,
-      defaultCanCreateBranches,
-      defaultMaxBranchesPerStore,
-      updatedAt: sql`(CURRENT_TIMESTAMP)`,
-    })
-    .onConflictDoUpdate({
-      target: systemConfig.id,
-      set: {
-        defaultCanCreateBranches,
-        defaultMaxBranchesPerStore,
-        updatedAt: sql`(CURRENT_TIMESTAMP)`,
-      },
-    });
 }
 
 export async function getBranchCreationPolicy(
   userId: string,
   storeId: string,
 ): Promise<BranchCreationPolicy> {
-  try {
-    const postgresInputs = await loadBranchCreationPolicyInputsFromPostgres(userId, storeId);
-    if (postgresInputs !== undefined) {
-      const isSuperadmin = postgresInputs.user?.systemRole === "SUPERADMIN";
-      const superadminCanCreateBranchesOverride = toBooleanOrNull(
-        postgresInputs.user?.canCreateBranches,
-      );
-      const superadminMaxBranchesPerStoreOverride = toNonNegativeIntOrNull(
-        postgresInputs.user?.maxBranchesPerStore,
-      );
-      const storeMaxBranchesOverride = toNonNegativeIntOrNull(
-        postgresInputs.store?.maxBranchesOverride,
-      );
-
-      const effectiveCanCreateBranches =
-        superadminCanCreateBranchesOverride ??
-        postgresInputs.globalPolicy.defaultCanCreateBranches;
-
-      const { effectiveMaxBranchesPerStore, effectiveLimitSource } = resolveMaxBranchesPerStore({
-        storeMaxBranchesOverride,
-        superadminMaxBranchesPerStoreOverride,
-        globalDefaultMaxBranchesPerStore: postgresInputs.globalPolicy.defaultMaxBranchesPerStore,
-      });
-
-      return {
-        storeExists: Boolean(postgresInputs.store),
-        isSuperadmin,
-        isStoreOwner: postgresInputs.isStoreOwner,
-        currentBranchCount: postgresInputs.currentBranchCount,
-        globalDefaultCanCreateBranches: postgresInputs.globalPolicy.defaultCanCreateBranches,
-        globalDefaultMaxBranchesPerStore:
-          postgresInputs.globalPolicy.defaultMaxBranchesPerStore,
-        superadminCanCreateBranchesOverride,
-        superadminMaxBranchesPerStoreOverride,
-        storeMaxBranchesOverride,
-        effectiveCanCreateBranches,
-        effectiveMaxBranchesPerStore,
-        effectiveLimitSource,
-      };
-    }
-  } catch (error) {
-    logBranchesFallback("policy.creation", error);
+  const postgresInputs = await loadBranchCreationPolicyInputsFromPostgres(userId, storeId);
+  if (postgresInputs === undefined) {
+    throw new Error("PostgreSQL branch creation policy is not available");
   }
 
-  const db = await getTursoDb();
-  const [globalPolicy, userRows, storeRows, ownerRows, branchCountRows] = await Promise.all([
-    getGlobalBranchPolicy(),
-    db
-      .select({
-        systemRole: users.systemRole,
-        canCreateBranches: users.canCreateBranches,
-        maxBranchesPerStore: users.maxBranchesPerStore,
-      })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1),
-    db
-      .select({
-        id: stores.id,
-        maxBranchesOverride: stores.maxBranchesOverride,
-      })
-      .from(stores)
-      .where(eq(stores.id, storeId))
-      .limit(1),
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(storeMembers)
-      .innerJoin(roles, eq(storeMembers.roleId, roles.id))
-      .where(
-        and(
-          eq(storeMembers.userId, userId),
-          eq(storeMembers.storeId, storeId),
-          eq(storeMembers.status, "ACTIVE"),
-          eq(roles.name, "Owner"),
-        ),
-      ),
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(storeBranches)
-      .where(eq(storeBranches.storeId, storeId)),
-  ]);
-
-  const userRow = userRows[0];
-  const storeRow = storeRows[0];
-  const isSuperadmin = userRow?.systemRole === "SUPERADMIN";
-  const isStoreOwner = Number(ownerRows[0]?.count ?? 0) > 0;
-
-  const superadminCanCreateBranchesOverride = toBooleanOrNull(userRow?.canCreateBranches);
-  const superadminMaxBranchesPerStoreOverride = toNonNegativeIntOrNull(
-    userRow?.maxBranchesPerStore,
+  const isSuperadmin = postgresInputs.user?.systemRole === "SUPERADMIN";
+  const superadminCanCreateBranchesOverride = toBooleanOrNull(
+    postgresInputs.user?.canCreateBranches,
   );
-  const storeMaxBranchesOverride = toNonNegativeIntOrNull(storeRow?.maxBranchesOverride);
+  const superadminMaxBranchesPerStoreOverride = toNonNegativeIntOrNull(
+    postgresInputs.user?.maxBranchesPerStore,
+  );
+  const storeMaxBranchesOverride = toNonNegativeIntOrNull(
+    postgresInputs.store?.maxBranchesOverride,
+  );
 
   const effectiveCanCreateBranches =
-    superadminCanCreateBranchesOverride ?? globalPolicy.defaultCanCreateBranches;
+    superadminCanCreateBranchesOverride ?? postgresInputs.globalPolicy.defaultCanCreateBranches;
 
   const { effectiveMaxBranchesPerStore, effectiveLimitSource } = resolveMaxBranchesPerStore({
     storeMaxBranchesOverride,
     superadminMaxBranchesPerStoreOverride,
-    globalDefaultMaxBranchesPerStore: globalPolicy.defaultMaxBranchesPerStore,
+    globalDefaultMaxBranchesPerStore: postgresInputs.globalPolicy.defaultMaxBranchesPerStore,
   });
 
   return {
-    storeExists: Boolean(storeRow),
+    storeExists: Boolean(postgresInputs.store),
     isSuperadmin,
-    isStoreOwner,
-    currentBranchCount: Number(branchCountRows[0]?.count ?? 0),
-    globalDefaultCanCreateBranches: globalPolicy.defaultCanCreateBranches,
-    globalDefaultMaxBranchesPerStore: globalPolicy.defaultMaxBranchesPerStore,
+    isStoreOwner: postgresInputs.isStoreOwner,
+    currentBranchCount: postgresInputs.currentBranchCount,
+    globalDefaultCanCreateBranches: postgresInputs.globalPolicy.defaultCanCreateBranches,
+    globalDefaultMaxBranchesPerStore: postgresInputs.globalPolicy.defaultMaxBranchesPerStore,
     superadminCanCreateBranchesOverride,
     superadminMaxBranchesPerStoreOverride,
     storeMaxBranchesOverride,
@@ -349,29 +213,9 @@ export function formatBranchQuotaSummary(policy: BranchCreationPolicy) {
 }
 
 export async function listBranchesByStore(storeId: string) {
-  try {
-    const postgresBranches = await listBranchesByStoreFromPostgres(storeId);
-    if (postgresBranches !== undefined) {
-      return postgresBranches;
-    }
-  } catch (error) {
-    logBranchesFallback("branches.list-policy", error);
+  const postgresBranches = await listBranchesByStoreFromPostgres(storeId);
+  if (postgresBranches === undefined) {
+    throw new Error("PostgreSQL branch list is not available");
   }
-
-  const db = await getTursoDb();
-  return db
-    .select({
-      id: storeBranches.id,
-      storeId: storeBranches.storeId,
-      name: storeBranches.name,
-      code: storeBranches.code,
-      address: storeBranches.address,
-      sourceBranchId: storeBranches.sourceBranchId,
-      sharingMode: storeBranches.sharingMode,
-      sharingConfig: storeBranches.sharingConfig,
-      createdAt: storeBranches.createdAt,
-    })
-    .from(storeBranches)
-    .where(eq(storeBranches.storeId, storeId))
-    .orderBy(storeBranches.createdAt, storeBranches.name);
+  return postgresBranches;
 }

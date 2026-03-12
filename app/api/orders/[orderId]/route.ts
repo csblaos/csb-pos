@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { verifyPassword } from "@/lib/auth/password";
+import {
+  claimIdempotencyForRoute,
+  readJsonRouteRequest,
+} from "@/lib/http/route-handler";
 import { buildRequestContext } from "@/lib/http/request-context";
 import { findActiveCancelApproverByEmailFromPostgres } from "@/lib/platform/postgres-auth-rbac";
 import { findActiveLaoQrPaymentAccountFromPostgres } from "@/lib/platform/postgres-store-settings";
@@ -36,9 +40,6 @@ import { getInventoryBalancesByStore, getOrderStockStateForOrder } from "@/lib/i
 import { safeLogAuditEvent } from "@/server/services/audit.service";
 import { invalidateDashboardSummaryCache } from "@/server/services/dashboard.service";
 import {
-  claimIdempotency,
-  getIdempotencyKeyFromHeaders,
-  hashRequestBody,
   markIdempotencySucceeded,
   safeMarkIdempotencyFailed,
 } from "@/server/services/idempotency.service";
@@ -164,6 +165,40 @@ const invalidateOrderCaches = async (storeId: string) => {
   ]);
 };
 
+const toOrderMutationItems = (
+  items: Array<{ productId: string; qtyBase: number }>,
+) =>
+  items.map((item) => ({
+    productId: item.productId,
+    qtyBase: item.qtyBase,
+  }));
+
+const completeOrderAction = async (input: {
+  storeId: string;
+  orderId: string;
+  action: string;
+  idempotencyRecordId: string | null;
+}) => {
+  if (input.idempotencyRecordId) {
+    try {
+      await markIdempotencySucceeded({
+        recordId: input.idempotencyRecordId,
+        statusCode: 200,
+        body: { ok: true },
+      });
+    } catch (error) {
+      console.error(
+        `[orders.write.pg] idempotency mark failed action=${input.action} orderId=${input.orderId}: ${
+          error instanceof Error ? error.message : "unknown"
+        }`,
+      );
+    }
+  }
+
+  await invalidateOrderCaches(input.storeId);
+  return NextResponse.json({ ok: true });
+};
+
 export async function GET(
   _request: Request,
   context: { params: Promise<{ orderId: string }> },
@@ -224,10 +259,9 @@ export async function PATCH(
   try {
     const { session, storeId } = await enforcePermission("orders.view");
     const { orderId } = await context.params;
-    const rawBody = await request.text();
-    requestContext = buildRequestContext(request);
-    const idempotencyKey = getIdempotencyKeyFromHeaders(request.headers);
-    const requestHash = hashRequestBody(rawBody);
+    const requestEnvelope = await readJsonRouteRequest(request);
+    requestContext = requestEnvelope.value.requestContext;
+    const { idempotencyKey, requestHash } = requestEnvelope.value;
 
     const logActionFail = async (
       action: string,
@@ -249,63 +283,43 @@ export async function PATCH(
         requestContext,
       });
 
-    let body: unknown;
-    try {
-      body = rawBody ? JSON.parse(rawBody) : {};
-    } catch {
+    if (!requestEnvelope.ok) {
       if (idempotencyKey) {
-        const claim = await claimIdempotency({
+        const claimResult = await claimIdempotencyForRoute({
           storeId,
           action: fallbackIdempotencyAction,
           idempotencyKey,
           requestHash,
           createdBy: session.userId,
         });
-        if (claim.kind === "replay") {
-          return NextResponse.json(claim.body, { status: claim.statusCode });
+        if (!claimResult.ok) {
+          return claimResult.response;
         }
-        if (claim.kind === "processing") {
-          return NextResponse.json({ message: "คำขอนี้กำลังประมวลผลอยู่" }, { status: 409 });
-        }
-        if (claim.kind === "conflict") {
-          return NextResponse.json(
-            { message: "Idempotency-Key นี้ถูกใช้กับข้อมูลคำขออื่นแล้ว" },
-            { status: 409 },
-          );
-        }
-        idempotencyRecordId = claim.recordId;
+        idempotencyRecordId = claimResult.claim.recordId;
         await safeMarkIdempotencyFailed({
-          recordId: claim.recordId,
+          recordId: claimResult.claim.recordId,
           statusCode: 400,
           body: { message: "รูปแบบ JSON ไม่ถูกต้อง" },
         });
       }
-      return NextResponse.json({ message: "รูปแบบ JSON ไม่ถูกต้อง" }, { status: 400 });
+      return requestEnvelope.response;
     }
+    const body = requestEnvelope.value.body;
 
     const payload = updateOrderSchema.safeParse(body);
     if (!payload.success) {
       if (idempotencyKey && !idempotencyRecordId) {
-        const claim = await claimIdempotency({
+        const claimResult = await claimIdempotencyForRoute({
           storeId,
           action: fallbackIdempotencyAction,
           idempotencyKey,
           requestHash,
           createdBy: session.userId,
         });
-        if (claim.kind === "replay") {
-          return NextResponse.json(claim.body, { status: claim.statusCode });
+        if (!claimResult.ok) {
+          return claimResult.response;
         }
-        if (claim.kind === "processing") {
-          return NextResponse.json({ message: "คำขอนี้กำลังประมวลผลอยู่" }, { status: 409 });
-        }
-        if (claim.kind === "conflict") {
-          return NextResponse.json(
-            { message: "Idempotency-Key นี้ถูกใช้กับข้อมูลคำขออื่นแล้ว" },
-            { status: 409 },
-          );
-        }
-        idempotencyRecordId = claim.recordId;
+        idempotencyRecordId = claimResult.claim.recordId;
       }
       if (idempotencyRecordId) {
         await safeMarkIdempotencyFailed({
@@ -322,27 +336,18 @@ export async function PATCH(
     const action = payload.data.action;
 
     if (idempotencyKey) {
-      const claim = await claimIdempotency({
+      const claimResult = await claimIdempotencyForRoute({
         storeId,
         action: `order.${action}`,
         idempotencyKey,
         requestHash,
         createdBy: session.userId,
       });
-      if (claim.kind === "replay") {
-        return NextResponse.json(claim.body, { status: claim.statusCode });
-      }
-      if (claim.kind === "processing") {
-        return NextResponse.json({ message: "คำขอนี้กำลังประมวลผลอยู่" }, { status: 409 });
-      }
-      if (claim.kind === "conflict") {
-        return NextResponse.json(
-          { message: "Idempotency-Key นี้ถูกใช้กับข้อมูลคำขออื่นแล้ว" },
-          { status: 409 },
-        );
+      if (!claimResult.ok) {
+        return claimResult.response;
       }
 
-      idempotencyRecordId = claim.recordId;
+      idempotencyRecordId = claimResult.claim.recordId;
     }
 
     auditContext = {
@@ -420,24 +425,12 @@ export async function PATCH(
         requestContext,
       });
 
-      if (idempotencyRecordId) {
-        try {
-          await markIdempotencySucceeded({
-            recordId: idempotencyRecordId,
-            statusCode: 200,
-            body: { ok: true },
-          });
-        } catch (error) {
-          console.error(
-            `[orders.write.pg] idempotency mark failed action=update_shipping orderId=${order.id}: ${
-              error instanceof Error ? error.message : "unknown"
-            }`,
-          );
-        }
-      }
-
-      await invalidateOrderCaches(storeId);
-      return NextResponse.json({ ok: true });
+      return completeOrderAction({
+        storeId,
+        orderId: order.id,
+        action: "update_shipping",
+        idempotencyRecordId,
+      });
     }
 
     const orderItems = await getOrderItemsForOrder(order.id);
@@ -498,31 +491,16 @@ export async function PATCH(
         actorRole: session.activeRoleName,
         orderNo: order.orderNo,
         paymentMethod: order.paymentMethod,
-        items: orderItems.map((item) => ({
-          productId: item.productId,
-          qtyBase: item.qtyBase,
-        })),
+        items: toOrderMutationItems(orderItems),
         requestContext,
       });
 
-      if (idempotencyRecordId) {
-        try {
-          await markIdempotencySucceeded({
-            recordId: idempotencyRecordId,
-            statusCode: 200,
-            body: { ok: true },
-          });
-        } catch (error) {
-          console.error(
-            `[orders.write.pg] idempotency mark failed action=submit_for_payment orderId=${order.id}: ${
-              error instanceof Error ? error.message : "unknown"
-            }`,
-          );
-        }
-      }
-
-      await invalidateOrderCaches(storeId);
-      return NextResponse.json({ ok: true });
+      return completeOrderAction({
+        storeId,
+        orderId: order.id,
+        action: "submit_for_payment",
+        idempotencyRecordId,
+      });
     }
 
     if (payload.data.action === "submit_payment_slip") {
@@ -565,24 +543,12 @@ export async function PATCH(
         requestContext,
       });
 
-      if (idempotencyRecordId) {
-        try {
-          await markIdempotencySucceeded({
-            recordId: idempotencyRecordId,
-            statusCode: 200,
-            body: { ok: true },
-          });
-        } catch (error) {
-          console.error(
-            `[orders.write.pg] idempotency mark failed action=submit_payment_slip orderId=${order.id}: ${
-              error instanceof Error ? error.message : "unknown"
-            }`,
-          );
-        }
-      }
-
-      await invalidateOrderCaches(storeId);
-      return NextResponse.json({ ok: true });
+      return completeOrderAction({
+        storeId,
+        orderId: order.id,
+        action: "submit_payment_slip",
+        idempotencyRecordId,
+      });
     }
 
     if (action === "confirm_paid") {
@@ -707,31 +673,16 @@ export async function PATCH(
         isPickupPaymentConfirm,
         isPickupCompleteAfterPrepaid,
         shouldOnlyUpdatePaymentAfterReceived,
-        items: orderItems.map((item) => ({
-          productId: item.productId,
-          qtyBase: item.qtyBase,
-        })),
+        items: toOrderMutationItems(orderItems),
         requestContext,
       });
 
-      if (idempotencyRecordId) {
-        try {
-          await markIdempotencySucceeded({
-            recordId: idempotencyRecordId,
-            statusCode: 200,
-            body: { ok: true },
-          });
-        } catch (error) {
-          console.error(
-            `[orders.write.pg] idempotency mark failed action=confirm_paid orderId=${order.id}: ${
-              error instanceof Error ? error.message : "unknown"
-            }`,
-          );
-        }
-      }
-
-      await invalidateOrderCaches(storeId);
-      return NextResponse.json({ ok: true });
+      return completeOrderAction({
+        storeId,
+        orderId: order.id,
+        action: "confirm_paid",
+        idempotencyRecordId,
+      });
     }
 
     if (action === "mark_picked_up_unpaid") {
@@ -765,31 +716,16 @@ export async function PATCH(
         orderNo: order.orderNo,
         currentStatus: order.status,
         currentPaymentStatus: order.paymentStatus,
-        items: orderItems.map((item) => ({
-          productId: item.productId,
-          qtyBase: item.qtyBase,
-        })),
+        items: toOrderMutationItems(orderItems),
         requestContext,
       });
 
-      if (idempotencyRecordId) {
-        try {
-          await markIdempotencySucceeded({
-            recordId: idempotencyRecordId,
-            statusCode: 200,
-            body: { ok: true },
-          });
-        } catch (error) {
-          console.error(
-            `[orders.write.pg] idempotency mark failed action=mark_picked_up_unpaid orderId=${order.id}: ${
-              error instanceof Error ? error.message : "unknown"
-            }`,
-          );
-        }
-      }
-
-      await invalidateOrderCaches(storeId);
-      return NextResponse.json({ ok: true });
+      return completeOrderAction({
+        storeId,
+        orderId: order.id,
+        action: "mark_picked_up_unpaid",
+        idempotencyRecordId,
+      });
     }
 
     if (action === "mark_packed") {
@@ -815,31 +751,16 @@ export async function PATCH(
         orderNo: order.orderNo,
         currentStatus: order.status,
         canPackCodFromPending,
-        items: orderItems.map((item) => ({
-          productId: item.productId,
-          qtyBase: item.qtyBase,
-        })),
+        items: toOrderMutationItems(orderItems),
         requestContext,
       });
 
-      if (idempotencyRecordId) {
-        try {
-          await markIdempotencySucceeded({
-            recordId: idempotencyRecordId,
-            statusCode: 200,
-            body: { ok: true },
-          });
-        } catch (error) {
-          console.error(
-            `[orders.write.pg] idempotency mark failed action=mark_packed orderId=${order.id}: ${
-              error instanceof Error ? error.message : "unknown"
-            }`,
-          );
-        }
-      }
-
-      await invalidateOrderCaches(storeId);
-      return NextResponse.json({ ok: true });
+      return completeOrderAction({
+        storeId,
+        orderId: order.id,
+        action: "mark_packed",
+        idempotencyRecordId,
+      });
     }
 
     if (action === "mark_shipped") {
@@ -860,24 +781,12 @@ export async function PATCH(
         requestContext,
       });
 
-      if (idempotencyRecordId) {
-        try {
-          await markIdempotencySucceeded({
-            recordId: idempotencyRecordId,
-            statusCode: 200,
-            body: { ok: true },
-          });
-        } catch (error) {
-          console.error(
-            `[orders.write.pg] idempotency mark failed action=mark_shipped orderId=${order.id}: ${
-              error instanceof Error ? error.message : "unknown"
-            }`,
-          );
-        }
-      }
-
-      await invalidateOrderCaches(storeId);
-      return NextResponse.json({ ok: true });
+      return completeOrderAction({
+        storeId,
+        orderId: order.id,
+        action: "mark_shipped",
+        idempotencyRecordId,
+      });
     }
 
     if (action === "mark_cod_returned") {
@@ -910,31 +819,16 @@ export async function PATCH(
         normalizedCodFee:
           typeof codReturnPayload.codFee === "number" ? codReturnPayload.codFee : 0,
         normalizedCodReturnNote: codReturnPayload.codReturnNote?.trim() || null,
-        items: orderItems.map((item) => ({
-          productId: item.productId,
-          qtyBase: item.qtyBase,
-        })),
+        items: toOrderMutationItems(orderItems),
         requestContext,
       });
 
-      if (idempotencyRecordId) {
-        try {
-          await markIdempotencySucceeded({
-            recordId: idempotencyRecordId,
-            statusCode: 200,
-            body: { ok: true },
-          });
-        } catch (error) {
-          console.error(
-            `[orders.write.pg] idempotency mark failed action=mark_cod_returned orderId=${order.id}: ${
-              error instanceof Error ? error.message : "unknown"
-            }`,
-          );
-        }
-      }
-
-      await invalidateOrderCaches(storeId);
-      return NextResponse.json({ ok: true });
+      return completeOrderAction({
+        storeId,
+        orderId: order.id,
+        action: "mark_cod_returned",
+        idempotencyRecordId,
+      });
     }
 
     if (action !== "cancel") {
@@ -1032,31 +926,16 @@ export async function PATCH(
       approvalMode: approver.approvalMode,
       shouldReleaseReservedOnCancel,
       shouldReturnStockOnCancel,
-      items: orderItems.map((item) => ({
-        productId: item.productId,
-        qtyBase: item.qtyBase,
-      })),
+      items: toOrderMutationItems(orderItems),
       requestContext,
     });
 
-    if (idempotencyRecordId) {
-      try {
-        await markIdempotencySucceeded({
-          recordId: idempotencyRecordId,
-          statusCode: 200,
-          body: { ok: true },
-        });
-      } catch (error) {
-        console.error(
-          `[orders.write.pg] idempotency mark failed action=cancel orderId=${order.id}: ${
-            error instanceof Error ? error.message : "unknown"
-          }`,
-        );
-      }
-    }
-
-    await invalidateOrderCaches(storeId);
-    return NextResponse.json({ ok: true });
+    return completeOrderAction({
+      storeId,
+      orderId: order.id,
+      action: "cancel",
+      idempotencyRecordId,
+    });
   } catch (error) {
     if (idempotencyRecordId) {
       const statusCode = error instanceof RBACError ? error.status : 500;

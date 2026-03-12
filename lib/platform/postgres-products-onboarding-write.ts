@@ -36,7 +36,7 @@ type CategoryWriteResult =
   | { ok: false; error: "NOT_FOUND" | "CONFLICT" };
 
 export const isPostgresProductsOnboardingWriteEnabled = () =>
-  process.env.POSTGRES_PRODUCTS_ONBOARDING_WRITE_ENABLED === "1" && isPostgresConfigured();
+  isPostgresConfigured();
 
 export const logProductsOnboardingWriteFallback = (operation: string, error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);

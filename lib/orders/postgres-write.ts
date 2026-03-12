@@ -311,36 +311,34 @@ type BulkCodReconcileInput = {
 };
 
 export const isPostgresUpdateShippingEnabled = () =>
-  process.env.POSTGRES_ORDERS_WRITE_UPDATE_SHIPPING_ENABLED === "1" && isPostgresConfigured();
+  isPostgresConfigured();
 
 export const isPostgresCreateOrderEnabled = () =>
-  process.env.POSTGRES_ORDERS_WRITE_CREATE_ENABLED === "1" && isPostgresConfigured();
+  isPostgresConfigured();
 
 export const isPostgresSubmitPaymentSlipEnabled = () =>
-  process.env.POSTGRES_ORDERS_WRITE_SUBMIT_PAYMENT_SLIP_ENABLED === "1" &&
   isPostgresConfigured();
 
 export const isPostgresSubmitForPaymentEnabled = () =>
-  process.env.POSTGRES_ORDERS_WRITE_SUBMIT_FOR_PAYMENT_ENABLED === "1" && isPostgresConfigured();
+  isPostgresConfigured();
 
 export const isPostgresConfirmPaidEnabled = () =>
-  process.env.POSTGRES_ORDERS_WRITE_CONFIRM_PAID_ENABLED === "1" && isPostgresConfigured();
+  isPostgresConfigured();
 
 export const isPostgresMarkPickedUpUnpaidEnabled = () =>
-  process.env.POSTGRES_ORDERS_WRITE_MARK_PICKED_UP_UNPAID_ENABLED === "1" &&
   isPostgresConfigured();
 
 export const isPostgresCancelEnabled = () =>
-  process.env.POSTGRES_ORDERS_WRITE_CANCEL_ENABLED === "1" && isPostgresConfigured();
+  isPostgresConfigured();
 
 export const isPostgresMarkCodReturnedEnabled = () =>
-  process.env.POSTGRES_ORDERS_WRITE_MARK_COD_RETURNED_ENABLED === "1" && isPostgresConfigured();
+  isPostgresConfigured();
 
 export const isPostgresMarkPackedEnabled = () =>
-  process.env.POSTGRES_ORDERS_WRITE_MARK_PACKED_ENABLED === "1" && isPostgresConfigured();
+  isPostgresConfigured();
 
 export const isPostgresMarkShippedEnabled = () =>
-  process.env.POSTGRES_ORDERS_WRITE_MARK_SHIPPED_ENABLED === "1" && isPostgresConfigured();
+  isPostgresConfigured();
 
 export const orderNoExistsInPostgres = async (storeId: string, orderNo: string) => {
   const row = await queryOne<{ value: number }>(
@@ -1450,7 +1448,7 @@ export const bulkSettleCodReconcileInPostgres = async (input: BulkCodReconcileIn
         paid_at as "paidAt"
       from orders
       where store_id = :storeId
-        and id = any(:orderIds)
+        and id in (:orderIds)
     `,
     {
       replacements: {

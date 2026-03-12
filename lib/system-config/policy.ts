@@ -91,7 +91,7 @@ export async function upsertGlobalSessionPolicy(input: GlobalSessionPolicy) {
   if (postgresPolicy) {
     return;
   }
-  throw new Error("POSTGRES_SETTINGS_SYSTEM_ADMIN_WRITE_ENABLED is required for session policy update");
+  throw new Error("PostgreSQL session policy update is not available");
 }
 
 export async function upsertGlobalStoreLogoPolicy(input: GlobalStoreLogoPolicy) {
@@ -113,7 +113,7 @@ export async function upsertGlobalStoreLogoPolicy(input: GlobalStoreLogoPolicy) 
   if (postgresPolicy) {
     return;
   }
-  throw new Error("POSTGRES_SETTINGS_SYSTEM_ADMIN_WRITE_ENABLED is required for store logo policy update");
+  throw new Error("PostgreSQL store logo policy update is not available");
 }
 
 export async function upsertGlobalPaymentPolicy(input: GlobalPaymentPolicy) {
@@ -132,5 +132,5 @@ export async function upsertGlobalPaymentPolicy(input: GlobalPaymentPolicy) {
   if (postgresPolicy) {
     return;
   }
-  throw new Error("POSTGRES_SETTINGS_SYSTEM_ADMIN_WRITE_ENABLED is required for payment policy update");
+  throw new Error("PostgreSQL payment policy update is not available");
 }

@@ -1,12 +1,10 @@
-import { eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { buildSessionForUser, getUserMembershipFlags } from "@/lib/auth/session-db";
 import { createSessionCookie, SessionStoreUnavailableError } from "@/lib/auth/session";
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import { users } from "@/lib/db/schema";
+import { execute, queryOne } from "@/lib/db/query";
 import { getUserPermissions } from "@/lib/rbac/access";
 import { getStorefrontEntryRoute } from "@/lib/storefront/routing";
 
@@ -31,24 +29,36 @@ const blockedLoginResponse = (status: BlockedAccountStatus, message: string) =>
   });
 
 export async function POST(request: Request) {
-  const db = await getTursoDb();
   const payload = loginSchema.safeParse(await request.json());
   if (!payload.success) {
     return NextResponse.json({ message: "ข้อมูลเข้าสู่ระบบไม่ถูกต้อง" }, { status: 400 });
   }
 
-  const [user] = await db
-    .select({
-      id: users.id,
-      email: users.email,
-      name: users.name,
-      passwordHash: users.passwordHash,
-      mustChangePassword: users.mustChangePassword,
-      systemRole: users.systemRole,
-    })
-    .from(users)
-    .where(eq(users.email, payload.data.email.toLowerCase()))
-    .limit(1);
+  const normalizedEmail = payload.data.email.trim().toLowerCase();
+  const user = await queryOne<{
+    id: string;
+    email: string;
+    name: string;
+    passwordHash: string;
+    mustChangePassword: boolean;
+    systemRole: "USER" | "SUPERADMIN" | "SYSTEM_ADMIN";
+  }>(
+    `
+      select
+        id,
+        email,
+        name,
+        password_hash as "passwordHash",
+        must_change_password as "mustChangePassword",
+        system_role as "systemRole"
+      from users
+      where email = :email
+      limit 1
+    `,
+    {
+      replacements: { email: normalizedEmail },
+    },
+  );
 
   if (!user) {
     return NextResponse.json({ message: "ไม่พบบัญชีผู้ใช้" }, { status: 404 });
@@ -79,14 +89,22 @@ export async function POST(request: Request) {
     }
 
     const nextPasswordHash = await hashPassword(nextPassword);
-    await db
-      .update(users)
-      .set({
-        passwordHash: nextPasswordHash,
-        mustChangePassword: false,
-        passwordUpdatedAt: sql`CURRENT_TIMESTAMP`,
-      })
-      .where(eq(users.id, user.id));
+    await execute(
+      `
+        update users
+        set
+          password_hash = :passwordHash,
+          must_change_password = false,
+          password_updated_at = current_timestamp
+        where id = :userId
+      `,
+      {
+        replacements: {
+          userId: user.id,
+          passwordHash: nextPasswordHash,
+        },
+      },
+    );
   }
 
   const membershipFlags = await getUserMembershipFlags(user.id);

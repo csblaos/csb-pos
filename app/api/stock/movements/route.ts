@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 
-import { buildRequestContext } from "@/lib/http/request-context";
+import {
+  claimIdempotencyForRoute,
+  readJsonRouteRequest,
+} from "@/lib/http/route-handler";
+import {
+  buildRequestContext,
+  type RequestContext,
+} from "@/lib/http/request-context";
 import {
   enforcePermission,
   toRBACErrorResponse,
@@ -14,9 +21,6 @@ import {
 } from "@/server/services/stock.service";
 import { safeLogAuditEvent } from "@/server/services/audit.service";
 import {
-  claimIdempotency,
-  getIdempotencyKeyFromHeaders,
-  hashRequestBody,
   safeMarkIdempotencyFailed,
 } from "@/server/services/idempotency.service";
 
@@ -63,6 +67,50 @@ const getForbiddenStockMovementFields = (payload: unknown): string[] => {
   return Object.keys(payload).filter((field) =>
     FORBIDDEN_STOCK_MOVEMENT_FIELDS.has(field),
   );
+};
+
+type StockMovementAuditContext = {
+  storeId: string;
+  userId: string;
+  actorName: string | null;
+  actorRole: string | null;
+};
+
+const failStockMovementRequest = async (input: {
+  status: number;
+  body: { message: string };
+  recordId?: string | null;
+  audit?: StockMovementAuditContext | null;
+  action: string;
+  requestContext: RequestContext;
+  reasonCode: "VALIDATION_ERROR" | "BUSINESS_RULE" | "INTERNAL_ERROR";
+  metadata?: Record<string, unknown>;
+}) => {
+  if (input.recordId) {
+    await safeMarkIdempotencyFailed({
+      recordId: input.recordId,
+      statusCode: input.status,
+      body: input.body,
+    });
+  }
+
+  if (input.audit) {
+    await safeLogAuditEvent({
+      scope: "STORE",
+      storeId: input.audit.storeId,
+      actorUserId: input.audit.userId,
+      actorName: input.audit.actorName,
+      actorRole: input.audit.actorRole,
+      action: input.action,
+      entityType: "inventory_movement",
+      result: "FAIL",
+      reasonCode: input.reasonCode,
+      metadata: input.metadata,
+      requestContext: input.requestContext,
+    });
+  }
+
+  return NextResponse.json(input.body, { status: input.status });
 };
 
 export async function GET(request: Request) {
@@ -145,17 +193,11 @@ export async function POST(request: Request) {
   const action = "stock.movement.create";
 
   let requestContext = buildRequestContext(null);
-  let auditContext: {
-    storeId: string;
-    userId: string;
-    actorName: string | null;
-    actorRole: string | null;
-  } | null = null;
+  let auditContext: StockMovementAuditContext | null = null;
   let idempotencyRecordId: string | null = null;
 
   try {
     const { session, storeId } = await enforcePermission("inventory.create");
-    requestContext = buildRequestContext(request);
     auditContext = {
       storeId,
       userId: session.userId,
@@ -163,125 +205,85 @@ export async function POST(request: Request) {
       actorRole: session.activeRoleName,
     };
 
-    const rawBody = await request.text();
-    const idempotencyKey = getIdempotencyKeyFromHeaders(request.headers);
-    const requestHash = hashRequestBody(rawBody);
-    let body: unknown;
+    const requestEnvelope = await readJsonRouteRequest(request);
+    requestContext = requestEnvelope.value.requestContext;
+    const { idempotencyKey, requestHash } = requestEnvelope.value;
 
-    try {
-      body = rawBody ? JSON.parse(rawBody) : {};
-    } catch {
+    if (!requestEnvelope.ok) {
       if (idempotencyKey) {
-        const claim = await claimIdempotency({
+        const claimResult = await claimIdempotencyForRoute({
           storeId,
           action,
           idempotencyKey,
           requestHash,
           createdBy: session.userId,
         });
-        if (claim.kind === "replay") {
-          return NextResponse.json(claim.body, { status: claim.statusCode });
-        }
-        if (claim.kind === "processing") {
-          return NextResponse.json({ message: "คำขอนี้กำลังประมวลผลอยู่" }, { status: 409 });
-        }
-        if (claim.kind === "conflict") {
-          return NextResponse.json(
-            { message: "Idempotency-Key นี้ถูกใช้กับข้อมูลคำขออื่นแล้ว" },
-            { status: 409 },
-          );
+        if (!claimResult.ok) {
+          return claimResult.response;
         }
 
-        idempotencyRecordId = claim.recordId;
-        await safeMarkIdempotencyFailed({
-          recordId: claim.recordId,
-          statusCode: 400,
-          body: { message: "รูปแบบ JSON ไม่ถูกต้อง" },
-        });
+        idempotencyRecordId = claimResult.claim.recordId;
       }
-      return NextResponse.json({ message: "รูปแบบ JSON ไม่ถูกต้อง" }, { status: 400 });
+      return failStockMovementRequest({
+        status: 400,
+        body: { message: "รูปแบบ JSON ไม่ถูกต้อง" },
+        recordId: idempotencyRecordId,
+        audit: auditContext,
+        action,
+        requestContext,
+        reasonCode: "VALIDATION_ERROR",
+      });
     }
 
+    const body = requestEnvelope.value.body;
+
     if (idempotencyKey) {
-      const claim = await claimIdempotency({
+      const claimResult = await claimIdempotencyForRoute({
         storeId,
         action,
         idempotencyKey,
         requestHash,
         createdBy: session.userId,
       });
-      if (claim.kind === "replay") {
-        return NextResponse.json(claim.body, { status: claim.statusCode });
+      if (!claimResult.ok) {
+        return claimResult.response;
       }
-      if (claim.kind === "processing") {
-        return NextResponse.json({ message: "คำขอนี้กำลังประมวลผลอยู่" }, { status: 409 });
-      }
-      if (claim.kind === "conflict") {
-        return NextResponse.json(
-          { message: "Idempotency-Key นี้ถูกใช้กับข้อมูลคำขออื่นแล้ว" },
-          { status: 409 },
-        );
-      }
-      idempotencyRecordId = claim.recordId;
+      idempotencyRecordId = claimResult.claim.recordId;
     }
 
     const forbiddenFields = getForbiddenStockMovementFields(body);
     if (forbiddenFields.length > 0) {
-      const responseBody = {
-        message:
-          "แท็บบันทึกสต็อกไม่รองรับต้นทุน/อัตราแลกเปลี่ยน กรุณาใช้แท็บสั่งซื้อ (PO) หรือ Month-End Close",
-      };
-      if (idempotencyRecordId) {
-        await safeMarkIdempotencyFailed({
-          recordId: idempotencyRecordId,
-          statusCode: 400,
-          body: responseBody,
-        });
-      }
-      await safeLogAuditEvent({
-        scope: "STORE",
-        storeId,
-        actorUserId: session.userId,
-        actorName: session.displayName,
-        actorRole: session.activeRoleName,
+      return failStockMovementRequest({
+        status: 400,
+        body: {
+          message:
+            "แท็บบันทึกสต็อกไม่รองรับต้นทุน/อัตราแลกเปลี่ยน กรุณาใช้แท็บสั่งซื้อ (PO) หรือ Month-End Close",
+        },
+        recordId: idempotencyRecordId,
+        audit: auditContext,
         action,
-        entityType: "inventory_movement",
-        result: "FAIL",
+        requestContext,
         reasonCode: "VALIDATION_ERROR",
         metadata: {
           issues: forbiddenFields,
         },
-        requestContext,
       });
-      return NextResponse.json(responseBody, { status: 400 });
     }
 
     const parsed = stockMovementSchema.safeParse(body);
     if (!parsed.success) {
-      const responseBody = { message: "ข้อมูลการเคลื่อนไหวสต็อกไม่ถูกต้อง" };
-      if (idempotencyRecordId) {
-        await safeMarkIdempotencyFailed({
-          recordId: idempotencyRecordId,
-          statusCode: 400,
-          body: responseBody,
-        });
-      }
-      await safeLogAuditEvent({
-        scope: "STORE",
-        storeId,
-        actorUserId: session.userId,
-        actorName: session.displayName,
-        actorRole: session.activeRoleName,
+      return failStockMovementRequest({
+        status: 400,
+        body: { message: "ข้อมูลการเคลื่อนไหวสต็อกไม่ถูกต้อง" },
+        recordId: idempotencyRecordId,
+        audit: auditContext,
         action,
-        entityType: "inventory_movement",
-        result: "FAIL",
+        requestContext,
         reasonCode: "VALIDATION_ERROR",
         metadata: {
           issues: parsed.error.issues.map((issue) => issue.path.join(".")).slice(0, 5),
         },
-        requestContext,
       });
-      return NextResponse.json(responseBody, { status: 400 });
     }
 
     const { balance } = await postStockMovement({
@@ -303,59 +305,32 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, balance });
   } catch (error) {
     if (error instanceof StockServiceError) {
-      const responseBody = { message: error.message };
-      if (idempotencyRecordId) {
-        await safeMarkIdempotencyFailed({
-          recordId: idempotencyRecordId,
-          statusCode: error.status,
-          body: responseBody,
-        });
-      }
-      if (auditContext) {
-        await safeLogAuditEvent({
-          scope: "STORE",
-          storeId: auditContext.storeId,
-          actorUserId: auditContext.userId,
-          actorName: auditContext.actorName,
-          actorRole: auditContext.actorRole,
-          action,
-          entityType: "inventory_movement",
-          result: "FAIL",
-          reasonCode: "BUSINESS_RULE",
-          metadata: {
-            message: error.message,
-          },
-          requestContext,
-        });
-      }
-      return NextResponse.json(responseBody, { status: error.status });
-    }
-
-    if (idempotencyRecordId) {
-      await safeMarkIdempotencyFailed({
+      return failStockMovementRequest({
+        status: error.status,
+        body: { message: error.message },
         recordId: idempotencyRecordId,
-        statusCode: 500,
-        body: { message: "เกิดข้อผิดพลาดภายในระบบ" },
+        audit: auditContext,
+        action,
+        requestContext,
+        reasonCode: "BUSINESS_RULE",
+        metadata: {
+          message: error.message,
+        },
       });
     }
 
-    if (auditContext) {
-      await safeLogAuditEvent({
-        scope: "STORE",
-        storeId: auditContext.storeId,
-        actorUserId: auditContext.userId,
-        actorName: auditContext.actorName,
-        actorRole: auditContext.actorRole,
-        action,
-        entityType: "inventory_movement",
-        result: "FAIL",
-        reasonCode: "INTERNAL_ERROR",
-        metadata: {
-          message: error instanceof Error ? error.message : "unknown",
-        },
-        requestContext,
-      });
-    }
+    await failStockMovementRequest({
+      status: 500,
+      body: { message: "เกิดข้อผิดพลาดภายในระบบ" },
+      recordId: idempotencyRecordId,
+      audit: auditContext,
+      action,
+      requestContext,
+      reasonCode: "INTERNAL_ERROR",
+      metadata: {
+        message: error instanceof Error ? error.message : "unknown",
+      },
+    });
 
     return toRBACErrorResponse(error);
   }

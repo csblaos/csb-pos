@@ -27,7 +27,7 @@ export async function ensureMainBranchExists(storeId: string) {
   if (postgresMainBranch !== undefined) {
     return postgresMainBranch;
   }
-  throw new Error("POSTGRES_BRANCHES_ENABLED is required for ensuring main branch");
+  throw new Error("PostgreSQL branch bootstrap is not available");
 }
 
 export async function listStoreBranches(storeId: string): Promise<StoreBranchAccessItem[]> {
@@ -35,7 +35,7 @@ export async function listStoreBranches(storeId: string): Promise<StoreBranchAcc
   if (postgresBranches !== undefined) {
     return postgresBranches;
   }
-  throw new Error("POSTGRES_BRANCHES_ENABLED is required for listing store branches");
+  throw new Error("PostgreSQL branch listing is not available");
 }
 
 export async function getMemberBranchAccess(
@@ -46,7 +46,7 @@ export async function getMemberBranchAccess(
   if (postgresAccess !== undefined) {
     return postgresAccess;
   }
-  throw new Error("POSTGRES_BRANCHES_ENABLED is required for branch access lookup");
+  throw new Error("PostgreSQL branch access lookup is not available");
 }
 
 export async function listAccessibleBranchesForMember(
@@ -94,7 +94,7 @@ export async function canMemberAccessBranch(
   if (postgresAccess !== undefined) {
     return postgresAccess;
   }
-  throw new Error("POSTGRES_BRANCHES_ENABLED is required for branch access check");
+  throw new Error("PostgreSQL branch access check is not available");
 }
 
 export async function replaceMemberBranchAccess(params: {
@@ -107,5 +107,5 @@ export async function replaceMemberBranchAccess(params: {
   if (postgresResult !== undefined) {
     return;
   }
-  throw new Error("POSTGRES_BRANCHES_ENABLED is required for replacing branch access");
+  throw new Error("PostgreSQL branch access update is not available");
 }

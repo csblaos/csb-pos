@@ -1,28 +1,40 @@
-import { randomUUID } from "node:crypto";
-
-import { and, eq, inArray, or } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import { productUnits, products, units } from "@/lib/db/schema";
-import {
-  createProductInPostgres,
-  isPostgresProductsWriteEnabled,
-  logProductsWriteFallback,
-} from "@/lib/platform/postgres-products-write";
+import { createProductInPostgres } from "@/lib/platform/postgres-products-write";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import {
-  buildVariantColumns,
-  isVariantCombinationUniqueError,
-} from "@/lib/products/variant-persistence";
-import {
   getStoreProductSummaryCounts,
-  listStoreProducts,
   listStoreProductsPage,
   type ProductSortOption,
   type ProductStatusFilter,
 } from "@/lib/products/service";
 import { normalizeProductPayload, productUpsertSchema } from "@/lib/products/validation";
+
+function toProductWriteErrorResponse(error: string) {
+  if (error === "CONFLICT_SKU") {
+    return NextResponse.json({ message: "SKU นี้มีอยู่แล้วในร้าน" }, { status: 409 });
+  }
+
+  if (error === "INVALID_UNIT") {
+    return NextResponse.json({ message: "พบหน่วยสินค้าที่ไม่ถูกต้อง" }, { status: 400 });
+  }
+
+  if (error === "INVALID_CATEGORY") {
+    return NextResponse.json({ message: "พบหมวดหมู่สินค้าที่ไม่ถูกต้อง" }, { status: 400 });
+  }
+
+  if (error === "VARIANT_CONFLICT") {
+    return NextResponse.json(
+      {
+        message:
+          "Variant นี้ซ้ำกับสินค้าใน Model เดียวกัน กรุณาเปลี่ยนตัวเลือก/ชื่อ Variant",
+      },
+      { status: 409 },
+    );
+  }
+
+  return NextResponse.json({ message: "บันทึกสินค้าไม่สำเร็จ" }, { status: 400 });
+}
 
 export async function GET(request: Request) {
   try {
@@ -88,135 +100,16 @@ export async function POST(request: Request) {
     }
 
     const payload = normalizeProductPayload(parsed.data);
+    const result = await createProductInPostgres({
+      storeId,
+      payload,
+    });
 
-    if (isPostgresProductsWriteEnabled()) {
-      try {
-        const result = await createProductInPostgres({
-          storeId,
-          payload,
-        });
-
-        if (!result.ok) {
-          if (result.error === "CONFLICT_SKU") {
-            return NextResponse.json({ message: "SKU นี้มีอยู่แล้วในร้าน" }, { status: 409 });
-          }
-
-          if (result.error === "INVALID_UNIT") {
-            return NextResponse.json({ message: "พบหน่วยสินค้าที่ไม่ถูกต้อง" }, { status: 400 });
-          }
-
-          if (result.error === "INVALID_CATEGORY") {
-            return NextResponse.json({ message: "พบหมวดหมู่สินค้าที่ไม่ถูกต้อง" }, { status: 400 });
-          }
-
-          if (result.error === "VARIANT_CONFLICT") {
-            return NextResponse.json(
-              {
-                message:
-                  "Variant นี้ซ้ำกับสินค้าใน Model เดียวกัน กรุณาเปลี่ยนตัวเลือก/ชื่อ Variant",
-              },
-              { status: 409 },
-            );
-          }
-
-          return NextResponse.json({ message: "บันทึกสินค้าไม่สำเร็จ" }, { status: 400 });
-        }
-
-        return NextResponse.json({ ok: true, product: result.product }, { status: 201 });
-      } catch (error) {
-        logProductsWriteFallback("products.create", error);
-      }
+    if (!result.ok) {
+      return toProductWriteErrorResponse(result.error);
     }
 
-    const db = await getTursoDb();
-
-    const [existingSku] = await db
-      .select({ id: products.id })
-      .from(products)
-      .where(and(eq(products.storeId, storeId), eq(products.sku, payload.sku)))
-      .limit(1);
-
-    if (existingSku) {
-      return NextResponse.json({ message: "SKU นี้มีอยู่แล้วในร้าน" }, { status: 409 });
-    }
-
-    const unitIds = [...new Set([payload.baseUnitId, ...payload.conversions.map((item) => item.unitId)])];
-
-    const unitRows = await db
-      .select({ id: units.id })
-      .from(units)
-      .where(
-        and(
-          inArray(units.id, unitIds),
-          or(
-            eq(units.scope, "SYSTEM"),
-            and(eq(units.scope, "STORE"), eq(units.storeId, storeId)),
-          ),
-        ),
-      );
-
-    if (unitRows.length !== unitIds.length) {
-      return NextResponse.json({ message: "พบหน่วยสินค้าที่ไม่ถูกต้อง" }, { status: 400 });
-    }
-
-    const productId = randomUUID();
-
-    try {
-      await db.transaction(async (tx) => {
-        const variantColumns = await buildVariantColumns(tx, {
-          storeId,
-          categoryId: payload.categoryId,
-          variant: payload.variant,
-        });
-
-        await tx.insert(products).values({
-          id: productId,
-          storeId,
-          sku: payload.sku,
-          name: payload.name,
-          barcode: payload.barcode,
-          modelId: variantColumns.modelId,
-          variantLabel: variantColumns.variantLabel,
-          variantOptionsJson: variantColumns.variantOptionsJson,
-          variantSortOrder: variantColumns.variantSortOrder,
-          baseUnitId: payload.baseUnitId,
-          priceBase: payload.priceBase,
-          costBase: payload.costBase,
-          outStockThreshold: payload.outStockThreshold,
-          lowStockThreshold: payload.lowStockThreshold,
-          categoryId: payload.categoryId,
-          active: true,
-        });
-
-        if (payload.conversions.length > 0) {
-          await tx.insert(productUnits).values(
-            payload.conversions.map((conversion) => ({
-              id: randomUUID(),
-              productId,
-              unitId: conversion.unitId,
-              multiplierToBase: conversion.multiplierToBase,
-              pricePerUnit: conversion.pricePerUnit ?? null,
-            })),
-          );
-        }
-      });
-    } catch (error) {
-      if (isVariantCombinationUniqueError(error)) {
-        return NextResponse.json(
-          {
-            message:
-              "Variant นี้ซ้ำกับสินค้าใน Model เดียวกัน กรุณาเปลี่ยนตัวเลือก/ชื่อ Variant",
-          },
-          { status: 409 },
-        );
-      }
-      throw error;
-    }
-
-    const createdItems = await listStoreProducts(storeId);
-    const created = createdItems.find((item) => item.id === productId);
-
-    return NextResponse.json({ ok: true, product: created }, { status: 201 });
+    return NextResponse.json({ ok: true, product: result.product }, { status: 201 });
   } catch (error) {
     return toRBACErrorResponse(error);
   }

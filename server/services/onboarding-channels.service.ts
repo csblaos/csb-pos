@@ -3,7 +3,6 @@ import "server-only";
 import {
   connectOnboardingChannelInPostgres,
   isPostgresProductsOnboardingWriteEnabled,
-  logProductsOnboardingWriteFallback,
 } from "@/lib/platform/postgres-products-onboarding-write";
 import { createPerfScope, timePerf } from "@/server/perf/perf";
 import {
@@ -28,13 +27,9 @@ export async function connectOnboardingChannel(
 
     try {
       if (isPostgresProductsOnboardingWriteEnabled()) {
-        try {
-          return await scope.step("pg.connectChannel", async () =>
-            connectOnboardingChannelInPostgres(storeId, channel),
-          );
-        } catch (error) {
-          logProductsOnboardingWriteFallback("onboarding.channels.connect", error);
-        }
+        return await scope.step("pg.connectChannel", async () =>
+          connectOnboardingChannelInPostgres(storeId, channel),
+        );
       }
 
       const now = new Date().toISOString();

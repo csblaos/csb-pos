@@ -1,5 +1,7 @@
 # PostgreSQL Inventory/Reporting Cutover Plan
 
+> Historical reference: cutover plan นี้ถูกเก็บไว้เป็นบันทึก migration หลัง runtime หลักย้ายเป็น PostgreSQL-only แล้ว
+
 เอกสารนี้ใช้วางแผน cutover หลังจาก phase `orders write`, `purchase read/write`, และ `inventory read` พร้อมใช้งานบน PostgreSQL แล้ว
 
 ## เป้าหมาย

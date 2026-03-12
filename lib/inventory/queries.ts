@@ -432,7 +432,7 @@ export async function getStockProductsForStorePage(
           pu.multiplier_to_base as "multiplierToBase"
         from product_units pu
         inner join units u on pu.unit_id = u.id
-        where pu.product_id = any(:productIds)
+        where pu.product_id in (:productIds)
       `,
       { replacements: { productIds } },
     ),

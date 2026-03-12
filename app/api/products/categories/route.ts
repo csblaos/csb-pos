@@ -1,16 +1,9 @@
-import { randomUUID } from "node:crypto";
-
-import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import { productCategories } from "@/lib/db/schema";
 import {
   createCategoryInPostgres,
   deleteCategoryInPostgres,
-  isPostgresProductsOnboardingWriteEnabled,
-  logProductsOnboardingWriteFallback,
   updateCategoryInPostgres,
 } from "@/lib/platform/postgres-products-onboarding-write";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
@@ -44,68 +37,22 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const { storeId } = await enforcePermission("products.create");
-    const db = await getTursoDb();
-
     const parsed = createCategorySchema.safeParse(await request.json());
     if (!parsed.success) {
-      return NextResponse.json(
-        { message: "ข้อมูลหมวดหมู่ไม่ถูกต้อง" },
-        { status: 400 },
-      );
+      return NextResponse.json({ message: "ข้อมูลหมวดหมู่ไม่ถูกต้อง" }, { status: 400 });
     }
 
-    const name = parsed.data.name.trim();
-
-    if (isPostgresProductsOnboardingWriteEnabled()) {
-      try {
-        const result = await createCategoryInPostgres({
-          storeId,
-          name,
-          sortOrder: parsed.data.sortOrder,
-        });
-
-        if (!result.ok) {
-          return NextResponse.json(
-            { message: "ชื่อหมวดหมู่นี้มีอยู่แล้ว" },
-            { status: 409 },
-          );
-        }
-
-        return NextResponse.json({ ok: true, categories: result.categories }, { status: 201 });
-      } catch (error) {
-        logProductsOnboardingWriteFallback("categories.create", error);
-      }
-    }
-
-    // Check duplicate name
-    const [existing] = await db
-      .select({ id: productCategories.id })
-      .from(productCategories)
-      .where(
-        and(
-          eq(productCategories.storeId, storeId),
-          eq(productCategories.name, name),
-        ),
-      )
-      .limit(1);
-
-    if (existing) {
-      return NextResponse.json(
-        { message: "ชื่อหมวดหมู่นี้มีอยู่แล้ว" },
-        { status: 409 },
-      );
-    }
-
-    const id = randomUUID();
-    await db.insert(productCategories).values({
-      id,
+    const result = await createCategoryInPostgres({
       storeId,
-      name,
+      name: parsed.data.name.trim(),
       sortOrder: parsed.data.sortOrder,
     });
 
-    const categories = await listCategories(storeId);
-    return NextResponse.json({ ok: true, categories }, { status: 201 });
+    if (!result.ok) {
+      return NextResponse.json({ message: "ชื่อหมวดหมู่นี้มีอยู่แล้ว" }, { status: 409 });
+    }
+
+    return NextResponse.json({ ok: true, categories: result.categories }, { status: 201 });
   } catch (error) {
     return toRBACErrorResponse(error);
   }
@@ -114,104 +61,27 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const { storeId } = await enforcePermission("products.update");
-    const db = await getTursoDb();
-
     const parsed = updateCategorySchema.safeParse(await request.json());
     if (!parsed.success) {
-      return NextResponse.json(
-        { message: "ข้อมูลไม่ถูกต้อง" },
-        { status: 400 },
-      );
+      return NextResponse.json({ message: "ข้อมูลไม่ถูกต้อง" }, { status: 400 });
     }
 
-    const { id, name, sortOrder } = parsed.data;
+    const result = await updateCategoryInPostgres({
+      storeId,
+      id: parsed.data.id,
+      name: parsed.data.name?.trim(),
+      sortOrder: parsed.data.sortOrder,
+    });
 
-    if (isPostgresProductsOnboardingWriteEnabled()) {
-      try {
-        const result = await updateCategoryInPostgres({
-          storeId,
-          id,
-          name: name?.trim(),
-          sortOrder,
-        });
-
-        if (!result.ok) {
-          if (result.error === "NOT_FOUND") {
-            return NextResponse.json(
-              { message: "ไม่พบหมวดหมู่" },
-              { status: 404 },
-            );
-          }
-
-          return NextResponse.json(
-            { message: "ชื่อหมวดหมู่นี้มีอยู่แล้ว" },
-            { status: 409 },
-          );
-        }
-
-        return NextResponse.json({ ok: true, categories: result.categories });
-      } catch (error) {
-        logProductsOnboardingWriteFallback("categories.update", error);
+    if (!result.ok) {
+      if (result.error === "NOT_FOUND") {
+        return NextResponse.json({ message: "ไม่พบหมวดหมู่" }, { status: 404 });
       }
+
+      return NextResponse.json({ message: "ชื่อหมวดหมู่นี้มีอยู่แล้ว" }, { status: 409 });
     }
 
-    const [target] = await db
-      .select({ id: productCategories.id })
-      .from(productCategories)
-      .where(
-        and(
-          eq(productCategories.id, id),
-          eq(productCategories.storeId, storeId),
-        ),
-      )
-      .limit(1);
-
-    if (!target) {
-      return NextResponse.json(
-        { message: "ไม่พบหมวดหมู่" },
-        { status: 404 },
-      );
-    }
-
-    // Check name conflict
-    if (name) {
-      const [dup] = await db
-        .select({ id: productCategories.id })
-        .from(productCategories)
-        .where(
-          and(
-            eq(productCategories.storeId, storeId),
-            eq(productCategories.name, name.trim()),
-          ),
-        )
-        .limit(1);
-
-      if (dup && dup.id !== id) {
-        return NextResponse.json(
-          { message: "ชื่อหมวดหมู่นี้มีอยู่แล้ว" },
-          { status: 409 },
-        );
-      }
-    }
-
-    const updates: Record<string, unknown> = {};
-    if (name !== undefined) updates.name = name.trim();
-    if (sortOrder !== undefined) updates.sortOrder = sortOrder;
-
-    if (Object.keys(updates).length > 0) {
-      await db
-        .update(productCategories)
-        .set(updates)
-        .where(
-          and(
-            eq(productCategories.id, id),
-            eq(productCategories.storeId, storeId),
-          ),
-        );
-    }
-
-    const categories = await listCategories(storeId);
-    return NextResponse.json({ ok: true, categories });
+    return NextResponse.json({ ok: true, categories: result.categories });
   } catch (error) {
     return toRBACErrorResponse(error);
   }
@@ -220,43 +90,20 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const { storeId } = await enforcePermission("products.delete");
-    const db = await getTursoDb();
-
     const parsed = deleteCategorySchema.safeParse(await request.json());
     if (!parsed.success) {
-      return NextResponse.json(
-        { message: "ข้อมูลไม่ถูกต้อง" },
-        { status: 400 },
-      );
+      return NextResponse.json({ message: "ข้อมูลไม่ถูกต้อง" }, { status: 400 });
     }
 
-    if (isPostgresProductsOnboardingWriteEnabled()) {
-      try {
-        const result = await deleteCategoryInPostgres({
-          storeId,
-          id: parsed.data.id,
-        });
+    const result = await deleteCategoryInPostgres({
+      storeId,
+      id: parsed.data.id,
+    });
 
-        return NextResponse.json({
-          ok: true,
-          categories: result.ok ? result.categories : [],
-        });
-      } catch (error) {
-        logProductsOnboardingWriteFallback("categories.delete", error);
-      }
-    }
-
-    await db
-      .delete(productCategories)
-      .where(
-        and(
-          eq(productCategories.id, parsed.data.id),
-          eq(productCategories.storeId, storeId),
-        ),
-      );
-
-    const categories = await listCategories(storeId);
-    return NextResponse.json({ ok: true, categories });
+    return NextResponse.json({
+      ok: true,
+      categories: result.ok ? result.categories : [],
+    });
   } catch (error) {
     return toRBACErrorResponse(error);
   }

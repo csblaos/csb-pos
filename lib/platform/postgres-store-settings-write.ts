@@ -152,10 +152,10 @@ const ensureDefaultActiveAccount = async (tx: PostgresTransaction, storeId: stri
 };
 
 export const isPostgresStoreSettingsWriteEnabled = () =>
-  process.env.POSTGRES_STORE_SETTINGS_WRITE_ENABLED === "1" && isPostgresConfigured();
+  isPostgresConfigured();
 
 export const isPostgresStorePaymentAccountsWriteEnabled = () =>
-  process.env.POSTGRES_STORE_PAYMENT_ACCOUNTS_WRITE_ENABLED === "1" && isPostgresConfigured();
+  isPostgresConfigured();
 
 export const logStoreSettingsWriteFallback = (operation: string, error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);

@@ -1,20 +1,12 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import { storePaymentAccounts } from "@/lib/db/schema";
 import { normalizeLaosBankStorageValue } from "@/lib/payments/laos-banks";
 import { paymentAccountTypeValues, type PaymentAccountType } from "@/lib/payments/store-payment";
-import {
-  listStorePaymentAccountsFromPostgres,
-  logStoreSettingsReadFallback,
-} from "@/lib/platform/postgres-store-settings";
+import { listStorePaymentAccountsFromPostgres } from "@/lib/platform/postgres-store-settings";
 import {
   createStorePaymentAccountInPostgres,
   deleteStorePaymentAccountInPostgres,
-  isPostgresStorePaymentAccountsWriteEnabled,
-  logStoreSettingsWriteFallback,
   updateStorePaymentAccountInPostgres,
 } from "@/lib/platform/postgres-store-settings-write";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
@@ -22,7 +14,6 @@ import {
   deletePaymentQrImageFromR2,
   isPaymentQrR2Configured,
   normalizePaymentQrImageStorageValue,
-  resolvePaymentQrImageUrl,
   uploadPaymentQrImageToR2,
 } from "@/lib/storage/r2";
 import { getGlobalPaymentPolicy } from "@/lib/system-config/policy";
@@ -135,13 +126,6 @@ const normalizeBankNameForStorage = (value: string | null | undefined) => {
   }
 
   return { value: normalized, error: null as string | null };
-};
-
-const normalizeAccountType = (value: unknown): PaymentAccountType => {
-  if (value === "LAO_QR" || value === "PROMPTPAY") {
-    return "LAO_QR";
-  }
-  return "BANK";
 };
 
 const validateByType = (params: {
@@ -405,102 +389,14 @@ async function parseUpdatePayload(request: Request) {
 }
 
 async function listPaymentAccounts(storeId: string) {
-  const db = await getTursoDb();
-  const rows = await db
-    .select({
-      id: storePaymentAccounts.id,
-      displayName: storePaymentAccounts.displayName,
-      accountType: storePaymentAccounts.accountType,
-      bankName: storePaymentAccounts.bankName,
-      accountName: storePaymentAccounts.accountName,
-      accountNumber: storePaymentAccounts.accountNumber,
-      qrImageUrl: storePaymentAccounts.qrImageUrl,
-      promptpayId: storePaymentAccounts.promptpayId,
-      isDefault: storePaymentAccounts.isDefault,
-      isActive: storePaymentAccounts.isActive,
-      createdAt: storePaymentAccounts.createdAt,
-      updatedAt: storePaymentAccounts.updatedAt,
-    })
-    .from(storePaymentAccounts)
-    .where(eq(storePaymentAccounts.storeId, storeId))
-    .orderBy(
-      desc(storePaymentAccounts.isDefault),
-      desc(storePaymentAccounts.isActive),
-      asc(storePaymentAccounts.createdAt),
-    );
-
-  return rows.map((row) => ({
-    id: row.id,
-    displayName: row.displayName,
-    accountType: normalizeAccountType(row.accountType),
-    bankName: row.bankName,
-    accountName: row.accountName,
-    accountNumber: row.accountNumber,
-    qrImageUrl: resolvePaymentQrImageUrl(row.qrImageUrl ?? row.promptpayId ?? null),
-    isDefault: row.isDefault,
-    isActive: row.isActive,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  }));
-}
-
-async function ensureDefaultAccount(storeId: string) {
-  const db = await getTursoDb();
-  const [existingDefault] = await db
-    .select({ id: storePaymentAccounts.id })
-    .from(storePaymentAccounts)
-    .where(
-      and(
-        eq(storePaymentAccounts.storeId, storeId),
-        eq(storePaymentAccounts.isActive, true),
-        eq(storePaymentAccounts.isDefault, true),
-      ),
-    )
-    .limit(1);
-
-  if (existingDefault) {
-    return;
-  }
-
-  const [fallback] = await db
-    .select({ id: storePaymentAccounts.id })
-    .from(storePaymentAccounts)
-    .where(
-      and(eq(storePaymentAccounts.storeId, storeId), eq(storePaymentAccounts.isActive, true)),
-    )
-    .orderBy(asc(storePaymentAccounts.createdAt))
-    .limit(1);
-
-  if (!fallback) {
-    return;
-  }
-
-  await db
-    .update(storePaymentAccounts)
-    .set({
-      isDefault: true,
-      updatedAt: sql`(CURRENT_TIMESTAMP)`,
-    })
-    .where(eq(storePaymentAccounts.id, fallback.id));
+  return (await listStorePaymentAccountsFromPostgres(storeId)) ?? [];
 }
 
 export async function GET() {
   try {
     const { storeId } = await enforcePermission("settings.view");
     try {
-      const accounts = await (async () => {
-        try {
-          const postgresAccounts = await listStorePaymentAccountsFromPostgres(storeId);
-          if (postgresAccounts !== undefined) {
-            return postgresAccounts;
-          }
-        } catch (error) {
-          logStoreSettingsReadFallback("settings.store.payment-accounts.get", error);
-        }
-
-        return listPaymentAccounts(storeId);
-      })();
-
+      const accounts = await listPaymentAccounts(storeId);
       const policy = await getGlobalPaymentPolicy();
       return NextResponse.json({ ok: true, accounts, policy });
     } catch {
@@ -583,16 +479,12 @@ export async function POST(request: Request) {
     const nextQrImageUrl = payload.accountType === "LAO_QR" ? uploadedQrImageRef ?? qrImageUrl : null;
 
     try {
-      const db = await getTursoDb();
-      const [policy, countRows] = await Promise.all([
+      const [policy, existingAccounts] = await Promise.all([
         getGlobalPaymentPolicy(),
-        db
-          .select({ value: sql<number>`count(*)` })
-          .from(storePaymentAccounts)
-          .where(eq(storePaymentAccounts.storeId, storeId)),
+        listPaymentAccounts(storeId),
       ]);
 
-      const currentCount = Number(countRows[0]?.value ?? 0);
+      const currentCount = existingAccounts.length;
       if (currentCount >= policy.maxAccountsPerStore) {
         if (uploadedQrImageRef) {
           try {
@@ -629,91 +521,7 @@ export async function POST(request: Request) {
         );
       }
 
-      if (isPostgresStorePaymentAccountsWriteEnabled()) {
-        try {
-          const pgResult = await createStorePaymentAccountInPostgres({
-            storeId,
-            displayName: payload.displayName.trim(),
-            accountType: payload.accountType,
-            bankName,
-            accountName: payload.accountName.trim(),
-            accountNumber,
-            qrImageUrl: nextQrImageUrl,
-            isDefault: nextIsDefault,
-            isActive: nextIsActive,
-            maxAccountsPerStore: policy.maxAccountsPerStore,
-          });
-
-          if (!pgResult.ok) {
-            if (pgResult.error === "CONFLICT_LIMIT") {
-              if (uploadedQrImageRef) {
-                try {
-                  await deletePaymentQrImageFromR2({ qrImageUrl: uploadedQrImageRef });
-                } catch {}
-              }
-              return NextResponse.json(
-                { message: `ร้านนี้มีบัญชีรับเงินครบเพดานแล้ว (${policy.maxAccountsPerStore} บัญชี)` },
-                { status: 409 },
-              );
-            }
-            if (pgResult.error === "INVALID_DEFAULT_INACTIVE") {
-              if (uploadedQrImageRef) {
-                try {
-                  await deletePaymentQrImageFromR2({ qrImageUrl: uploadedQrImageRef });
-                } catch {}
-              }
-              return NextResponse.json(
-                { message: "ไม่สามารถตั้งเป็นบัญชีหลักพร้อมกับปิดการใช้งานได้" },
-                { status: 400 },
-              );
-            }
-          } else {
-            await safeLogAuditEvent({
-              scope: "STORE",
-              storeId,
-              actorUserId: session.userId,
-              actorName: session.displayName,
-              actorRole: session.activeRoleName,
-              action: PAYMENT_ACCOUNT_CREATE_ACTION,
-              entityType: "store_payment_account",
-              metadata: {
-                displayName: payload.displayName.trim(),
-                accountType: payload.accountType,
-                bankName,
-                accountName: payload.accountName.trim(),
-                accountNumberMasked: maskAccountNumber(accountNumber),
-                isDefault: pgResult.created?.isDefault ?? nextIsDefault,
-                isActive: pgResult.created?.isActive ?? nextIsActive,
-                hasQrImage: Boolean(nextQrImageUrl),
-              },
-              after: {
-                displayName: payload.displayName.trim(),
-                accountType: payload.accountType,
-                bankName,
-                accountName: payload.accountName.trim(),
-                accountNumberMasked: maskAccountNumber(accountNumber),
-                isDefault: pgResult.created?.isDefault ?? nextIsDefault,
-                isActive: pgResult.created?.isActive ?? nextIsActive,
-                hasQrImage: Boolean(nextQrImageUrl),
-              },
-              request,
-            });
-
-            return NextResponse.json({ ok: true, accounts: pgResult.accounts, policy });
-          }
-        } catch (error) {
-          logStoreSettingsWriteFallback("settings.store.payment-accounts.create", error);
-        }
-      }
-
-      if (nextIsDefault) {
-        await db
-          .update(storePaymentAccounts)
-          .set({ isDefault: false, updatedAt: sql`(CURRENT_TIMESTAMP)` })
-          .where(eq(storePaymentAccounts.storeId, storeId));
-      }
-
-      await db.insert(storePaymentAccounts).values({
+      const pgResult = await createStorePaymentAccountInPostgres({
         storeId,
         displayName: payload.displayName.trim(),
         accountType: payload.accountType,
@@ -721,14 +529,44 @@ export async function POST(request: Request) {
         accountName: payload.accountName.trim(),
         accountNumber,
         qrImageUrl: nextQrImageUrl,
-        promptpayId: null,
         isDefault: nextIsDefault,
         isActive: nextIsActive,
-        updatedAt: sql`(CURRENT_TIMESTAMP)`,
+        maxAccountsPerStore: policy.maxAccountsPerStore,
       });
 
-      await ensureDefaultAccount(storeId);
-      const accounts = await listPaymentAccounts(storeId);
+      if (!pgResult.ok) {
+        if (pgResult.error === "CONFLICT_LIMIT") {
+          if (uploadedQrImageRef) {
+            try {
+              await deletePaymentQrImageFromR2({ qrImageUrl: uploadedQrImageRef });
+            } catch {}
+          }
+          return NextResponse.json(
+            { message: `ร้านนี้มีบัญชีรับเงินครบเพดานแล้ว (${policy.maxAccountsPerStore} บัญชี)` },
+            { status: 409 },
+          );
+        }
+        if (pgResult.error === "INVALID_DEFAULT_INACTIVE") {
+          if (uploadedQrImageRef) {
+            try {
+              await deletePaymentQrImageFromR2({ qrImageUrl: uploadedQrImageRef });
+            } catch {}
+          }
+          return NextResponse.json(
+            { message: "ไม่สามารถตั้งเป็นบัญชีหลักพร้อมกับปิดการใช้งานได้" },
+            { status: 400 },
+          );
+        }
+
+        if (uploadedQrImageRef) {
+          try {
+            await deletePaymentQrImageFromR2({ qrImageUrl: uploadedQrImageRef });
+          } catch {}
+        }
+
+        return NextResponse.json({ message: "ไม่สามารถบันทึกบัญชีรับเงินได้" }, { status: 500 });
+      }
+
       await safeLogAuditEvent({
         scope: "STORE",
         storeId,
@@ -743,8 +581,8 @@ export async function POST(request: Request) {
           bankName,
           accountName: payload.accountName.trim(),
           accountNumberMasked: maskAccountNumber(accountNumber),
-          isDefault: nextIsDefault,
-          isActive: nextIsActive,
+          isDefault: pgResult.created?.isDefault ?? nextIsDefault,
+          isActive: pgResult.created?.isActive ?? nextIsActive,
           hasQrImage: Boolean(nextQrImageUrl),
         },
         after: {
@@ -753,14 +591,14 @@ export async function POST(request: Request) {
           bankName,
           accountName: payload.accountName.trim(),
           accountNumberMasked: maskAccountNumber(accountNumber),
-          isDefault: nextIsDefault,
-          isActive: nextIsActive,
+          isDefault: pgResult.created?.isDefault ?? nextIsDefault,
+          isActive: pgResult.created?.isActive ?? nextIsActive,
           hasQrImage: Boolean(nextQrImageUrl),
         },
         request,
       });
 
-      return NextResponse.json({ ok: true, accounts, policy });
+      return NextResponse.json({ ok: true, accounts: pgResult.accounts, policy });
     } catch (error) {
       if (uploadedQrImageRef) {
         try {
@@ -848,28 +686,7 @@ export async function PATCH(request: Request) {
     let didPersistUpdate = false;
 
     try {
-      const db = await getTursoDb();
-      const [target] = await db
-        .select({
-          id: storePaymentAccounts.id,
-          accountType: storePaymentAccounts.accountType,
-          displayName: storePaymentAccounts.displayName,
-          bankName: storePaymentAccounts.bankName,
-          accountName: storePaymentAccounts.accountName,
-          accountNumber: storePaymentAccounts.accountNumber,
-          qrImageUrl: storePaymentAccounts.qrImageUrl,
-          promptpayId: storePaymentAccounts.promptpayId,
-          isDefault: storePaymentAccounts.isDefault,
-          isActive: storePaymentAccounts.isActive,
-        })
-        .from(storePaymentAccounts)
-        .where(
-          and(
-            eq(storePaymentAccounts.id, payload.id),
-            eq(storePaymentAccounts.storeId, storeId),
-          ),
-        )
-        .limit(1);
+      const target = (await listPaymentAccounts(storeId)).find((account) => account.id === payload.id);
 
       if (!target) {
         await safeLogAuditEvent({
@@ -888,8 +705,8 @@ export async function PATCH(request: Request) {
         return NextResponse.json({ message: "ไม่พบบัญชีรับเงินที่ต้องการแก้ไข" }, { status: 404 });
       }
 
-      const previousQrImageUrl = target.qrImageUrl ?? target.promptpayId ?? null;
-      const nextAccountType = payload.accountType ?? normalizeAccountType(target.accountType);
+      const previousQrImageUrl = target.qrImageUrl ?? null;
+      const nextAccountType = payload.accountType ?? target.accountType;
       let nextBankName = target.bankName;
       if (payload.bankName !== undefined) {
         const bankNameNormalizedResult = normalizeBankNameForStorage(payload.bankName);
@@ -975,106 +792,44 @@ export async function PATCH(request: Request) {
         );
       }
 
-      if (isPostgresStorePaymentAccountsWriteEnabled()) {
-        try {
-          const pgResult = await updateStorePaymentAccountInPostgres({
-            storeId,
-            accountId: target.id,
-            displayName: payload.displayName?.trim() ?? target.displayName,
-            accountType: nextAccountType,
-            bankName: nextBankName,
-            accountName: nextAccountName,
-            accountNumber: nextAccountNumber,
-            qrImageUrl: nextQrImageUrl,
-            isDefault: nextIsDefault,
-            isActive: nextIsActive,
-          });
+      const pgResult = await updateStorePaymentAccountInPostgres({
+        storeId,
+        accountId: target.id,
+        displayName: payload.displayName?.trim() ?? target.displayName,
+        accountType: nextAccountType,
+        bankName: nextBankName,
+        accountName: nextAccountName,
+        accountNumber: nextAccountNumber,
+        qrImageUrl: nextQrImageUrl,
+        isDefault: nextIsDefault,
+        isActive: nextIsActive,
+      });
 
-          if (!pgResult.ok) {
-            if (pgResult.error === "NOT_FOUND") {
-              return NextResponse.json({ message: "ไม่พบบัญชีรับเงินที่ต้องการแก้ไข" }, { status: 404 });
-            }
-            if (pgResult.error === "INVALID_DEFAULT_INACTIVE") {
-              if (uploadedQrImageRef) {
-                try {
-                  await deletePaymentQrImageFromR2({ qrImageUrl: uploadedQrImageRef });
-                } catch {}
-              }
-              return NextResponse.json(
-                { message: "ไม่สามารถตั้งเป็นบัญชีหลักพร้อมกับปิดการใช้งานได้" },
-                { status: 400 },
-              );
-            }
-          } else {
-            if (previousQrImageUrl && previousQrImageUrl !== nextQrImageUrl) {
-              try {
-                await deletePaymentQrImageFromR2({ qrImageUrl: previousQrImageUrl });
-              } catch {}
-            }
-
-            await safeLogAuditEvent({
-              scope: "STORE",
-              storeId,
-              actorUserId: session.userId,
-              actorName: session.displayName,
-              actorRole: session.activeRoleName,
-              action: PAYMENT_ACCOUNT_UPDATE_ACTION,
-              entityType: "store_payment_account",
-              entityId: target.id,
-              before: {
-                id: target.id,
-                displayName: target.displayName,
-                accountType: normalizeAccountType(target.accountType),
-                bankName: target.bankName,
-                accountName: target.accountName,
-                accountNumberMasked: maskAccountNumber(target.accountNumber),
-                qrImageUrl: target.qrImageUrl ?? target.promptpayId ?? null,
-                isDefault: target.isDefault,
-                isActive: target.isActive,
-              },
-              after: {
-                id: target.id,
-                displayName: payload.displayName?.trim() ?? target.displayName,
-                accountType: nextAccountType,
-                bankName: nextBankName,
-                accountName: nextAccountName,
-                accountNumberMasked: maskAccountNumber(nextAccountNumber),
-                qrImageUrl: nextQrImageUrl,
-                isDefault: nextIsDefault,
-                isActive: nextIsActive,
-              },
-              request,
-            });
-
-            return NextResponse.json({ ok: true, accounts: pgResult.accounts, policy: await getGlobalPaymentPolicy() });
-          }
-        } catch (error) {
-          logStoreSettingsWriteFallback("settings.store.payment-accounts.update", error);
+      if (!pgResult.ok) {
+        if (pgResult.error === "NOT_FOUND") {
+          return NextResponse.json({ message: "ไม่พบบัญชีรับเงินที่ต้องการแก้ไข" }, { status: 404 });
         }
+        if (pgResult.error === "INVALID_DEFAULT_INACTIVE") {
+          if (uploadedQrImageRef) {
+            try {
+              await deletePaymentQrImageFromR2({ qrImageUrl: uploadedQrImageRef });
+            } catch {}
+          }
+          return NextResponse.json(
+            { message: "ไม่สามารถตั้งเป็นบัญชีหลักพร้อมกับปิดการใช้งานได้" },
+            { status: 400 },
+          );
+        }
+
+        if (uploadedQrImageRef) {
+          try {
+            await deletePaymentQrImageFromR2({ qrImageUrl: uploadedQrImageRef });
+          } catch {}
+        }
+
+        return NextResponse.json({ message: "ไม่สามารถอัปเดตบัญชีรับเงินได้" }, { status: 500 });
       }
 
-      if (nextIsDefault) {
-        await db
-          .update(storePaymentAccounts)
-          .set({ isDefault: false, updatedAt: sql`(CURRENT_TIMESTAMP)` })
-          .where(eq(storePaymentAccounts.storeId, storeId));
-      }
-
-      await db
-        .update(storePaymentAccounts)
-        .set({
-          displayName: payload.displayName?.trim() ?? target.displayName,
-          accountType: nextAccountType,
-          bankName: nextBankName,
-          accountName: nextAccountName,
-          accountNumber: nextAccountNumber,
-          qrImageUrl: nextQrImageUrl,
-          promptpayId: null,
-          isDefault: nextIsDefault,
-          isActive: nextIsActive,
-          updatedAt: sql`(CURRENT_TIMESTAMP)`,
-        })
-        .where(eq(storePaymentAccounts.id, target.id));
       didPersistUpdate = true;
 
       if (previousQrImageUrl && previousQrImageUrl !== nextQrImageUrl) {
@@ -1085,9 +840,8 @@ export async function PATCH(request: Request) {
         }
       }
 
-      await ensureDefaultAccount(storeId);
       const [accounts, policy] = await Promise.all([
-        listPaymentAccounts(storeId),
+        Promise.resolve(pgResult.accounts),
         getGlobalPaymentPolicy(),
       ]);
 
@@ -1103,11 +857,11 @@ export async function PATCH(request: Request) {
         before: {
           id: target.id,
           displayName: target.displayName,
-          accountType: normalizeAccountType(target.accountType),
+          accountType: target.accountType,
           bankName: target.bankName,
           accountName: target.accountName,
           accountNumberMasked: maskAccountNumber(target.accountNumber),
-          qrImageUrl: target.qrImageUrl ?? target.promptpayId ?? null,
+          qrImageUrl: target.qrImageUrl,
           isDefault: target.isDefault,
           isActive: target.isActive,
         },
@@ -1208,18 +962,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ message: "ไม่พบรหัสบัญชีรับเงิน" }, { status: 400 });
     }
 
-    const db = await getTursoDb();
-    const [target] = await db
-      .select({
-        id: storePaymentAccounts.id,
-        qrImageUrl: storePaymentAccounts.qrImageUrl,
-        promptpayId: storePaymentAccounts.promptpayId,
-      })
-      .from(storePaymentAccounts)
-      .where(
-        and(eq(storePaymentAccounts.id, accountId), eq(storePaymentAccounts.storeId, storeId)),
-      )
-      .limit(1);
+    const target = (await listPaymentAccounts(storeId)).find((account) => account.id === accountId);
 
     if (!target) {
       await safeLogAuditEvent({
@@ -1238,54 +981,15 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ message: "ไม่พบบัญชีรับเงินที่ต้องการลบ" }, { status: 404 });
     }
 
-    const targetQrImageUrl = target.qrImageUrl ?? target.promptpayId ?? null;
+    const targetQrImageUrl = target.qrImageUrl ?? null;
+    const pgResult = await deleteStorePaymentAccountInPostgres({
+      storeId,
+      accountId: target.id,
+    });
 
-    if (isPostgresStorePaymentAccountsWriteEnabled()) {
-      try {
-        const pgResult = await deleteStorePaymentAccountInPostgres({
-          storeId,
-          accountId: target.id,
-        });
-
-        if (!pgResult.ok) {
-          return NextResponse.json({ message: "ไม่พบบัญชีรับเงินที่ต้องการลบ" }, { status: 404 });
-        }
-
-        if (targetQrImageUrl) {
-          try {
-            await deletePaymentQrImageFromR2({ qrImageUrl: targetQrImageUrl });
-          } catch {}
-        }
-
-        await safeLogAuditEvent({
-          scope: "STORE",
-          storeId,
-          actorUserId: session.userId,
-          actorName: session.displayName,
-          actorRole: session.activeRoleName,
-          action: PAYMENT_ACCOUNT_DELETE_ACTION,
-          entityType: "store_payment_account",
-          entityId: target.id,
-          before: {
-            id: target.id,
-            qrImageUrl: targetQrImageUrl,
-          },
-          after: {
-            id: target.id,
-            deleted: true,
-          },
-          request,
-        });
-
-        const policy = await getGlobalPaymentPolicy();
-        return NextResponse.json({ ok: true, accounts: pgResult.accounts, policy });
-      } catch (error) {
-        logStoreSettingsWriteFallback("settings.store.payment-accounts.delete", error);
-      }
+    if (!pgResult.ok) {
+      return NextResponse.json({ message: "ไม่พบบัญชีรับเงินที่ต้องการลบ" }, { status: 404 });
     }
-
-    await db.delete(storePaymentAccounts).where(eq(storePaymentAccounts.id, target.id));
-    await ensureDefaultAccount(storeId);
 
     if (targetQrImageUrl) {
       try {
@@ -1315,15 +1019,8 @@ export async function DELETE(request: Request) {
       request,
     });
 
-    try {
-      const [accounts, policy] = await Promise.all([
-        listPaymentAccounts(storeId),
-        getGlobalPaymentPolicy(),
-      ]);
-      return NextResponse.json({ ok: true, accounts, policy });
-    } catch {
-      return toSchemaOutdatedResponse();
-    }
+    const policy = await getGlobalPaymentPolicy();
+    return NextResponse.json({ ok: true, accounts: pgResult.accounts, policy });
   } catch (error) {
     if (auditContext) {
       await safeLogAuditEvent({

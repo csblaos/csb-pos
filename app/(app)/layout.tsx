@@ -2,30 +2,26 @@ import { redirect } from "next/navigation";
 
 import { AppTopNav } from "@/components/app/app-top-nav";
 import { BottomTabNav } from "@/components/app/bottom-tab-nav";
-import { getSession } from "@/lib/auth/session";
-import { getUserSystemRole } from "@/lib/auth/system-admin";
-import { getStoreShellProfileFromPostgres } from "@/lib/platform/postgres-auth-rbac";
-import { getUserPermissionsForCurrentSession } from "@/lib/rbac/access";
+import { getAppShellContext } from "@/lib/app-shell/context";
 import { getStorefrontLayoutPreset } from "@/lib/storefront/layout/registry";
-import { normalizeStoreType } from "@/lib/storefront/types";
-
-const getActiveStoreProfile = async (storeId: string) => {
-  const postgresProfile = await getStoreShellProfileFromPostgres(storeId);
-  if (postgresProfile !== undefined) {
-    return postgresProfile ?? null;
-  }
-  throw new Error("POSTGRES_AUTH_RBAC_READ_ENABLED is required for app shell store profile");
-};
 
 export default async function AppLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const session = await getSession();
+  const {
+    session,
+    systemRole,
+    permissionKeys,
+    activeStoreProfile,
+    activeStoreType,
+    activeStoreName,
+    canViewNotifications,
+  } = await getAppShellContext();
+
   if (!session) {
     redirect("/login");
   }
 
-  const systemRole = await getUserSystemRole(session.userId);
   if (systemRole === "SYSTEM_ADMIN") {
     redirect("/system-admin");
   }
@@ -37,13 +33,7 @@ export default async function AppLayout({
     redirect("/login");
   }
 
-  const [permissionKeys, activeStoreProfile] = await Promise.all([
-    getUserPermissionsForCurrentSession(),
-    getActiveStoreProfile(session.activeStoreId),
-  ]);
-  const activeStoreType = normalizeStoreType(session.activeStoreType);
   const layoutPreset = getStorefrontLayoutPreset(activeStoreType);
-  const activeStoreName = activeStoreProfile?.name ?? session.activeStoreName ?? "-";
 
   return (
     <div
@@ -57,9 +47,7 @@ export default async function AppLayout({
           activeStoreLogoUrl={activeStoreProfile?.logoUrl ?? null}
           activeBranchName={session.activeBranchName}
           shellTitle={layoutPreset.shellTitle}
-          canViewNotifications={
-            permissionKeys.includes("*") || permissionKeys.includes("settings.view")
-          }
+          canViewNotifications={canViewNotifications}
         />
         {layoutPreset.modeNoteText ? (
           <p className={`mt-2 text-xs ${layoutPreset.modeNoteClassName}`}>

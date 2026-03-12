@@ -1,6 +1,6 @@
 # Schema Map
 
-อ้างอิงจาก `lib/db/schema/tables.ts` และ migration ปัจจุบัน
+อ้างอิงจาก `postgres/migrations/` และ schema PostgreSQL ปัจจุบัน
 
 ## Migration Status
 
@@ -9,8 +9,8 @@
 - PostgreSQL query-first baseline:
   - runner: `scripts/migrate-postgres.mjs`
   - migrations path: `postgres/migrations/`
-  - current baseline: `0001_orders_read_foundation.sql`, `0002_inventory_movements_foundation.sql`, `0003_purchase_orders_foundation.sql`, `0004_auth_rbac_foundation.sql`, `0005_settings_system_admin_foundation.sql`, `0006_products_units_onboarding_foundation.sql`, `0007_products_variant_write_foundation.sql`, `0008_notifications_foundation.sql`
-  - scope ของ baseline นี้ขยายจาก `orders read` ไปถึง `inventory_movements`, purchase foundation tables, auth/RBAC foundation (`system_config`, `permissions`, `roles`, `store_members`, `store_branches`, `store_member_branches`, `role_permissions`), settings/system-admin foundation (`fb_connections`, `wa_connections`), products/units/onboarding foundation (`product_categories`, `product_models`, `product_units`), product CRUD + variant persistence foundation (`product_model_attributes`, `product_model_attribute_values`, `products_model_variant_options_unique`, `products_category_id_idx`, `products_model_id_idx`), และ notifications foundation (`notification_inbox`, `notification_rules`) แล้ว แต่ยังไม่ใช่ full cutover schema ทั้งระบบ
+  - current baseline: `0001_orders_read_foundation.sql`, `0002_inventory_movements_foundation.sql`, `0003_purchase_orders_foundation.sql`, `0004_auth_rbac_foundation.sql`, `0005_settings_system_admin_foundation.sql`, `0006_products_units_onboarding_foundation.sql`, `0007_products_variant_write_foundation.sql`, `0008_notifications_foundation.sql`, `0009_shipping_providers_foundation.sql`
+  - scope ของ baseline นี้ขยายจาก `orders read` ไปถึง `inventory_movements`, purchase foundation tables, auth/RBAC foundation (`system_config`, `permissions`, `roles`, `store_members`, `store_branches`, `store_member_branches`, `role_permissions`), settings/system-admin foundation (`fb_connections`, `wa_connections`), products/units/onboarding foundation (`product_categories`, `product_models`, `product_units`), product CRUD + variant persistence foundation (`product_model_attributes`, `product_model_attribute_values`, `products_model_variant_options_unique`, `products_category_id_idx`, `products_model_id_idx`), notifications foundation (`notification_inbox`, `notification_rules`), และ shipping providers foundation (`shipping_providers`) แล้ว แต่ยังไม่ใช่ full cutover schema ทั้งระบบ
 - latest focus:
   - โครงสร้างสินค้าแบบ Variant (Phase 1):
     - `product_models`
@@ -40,6 +40,8 @@
   - เพิ่ม `orders.cod_returned_at` สำหรับ timestamp ตอน COD ตีกลับ
   - เพิ่ม `orders.cod_return_note` สำหรับหมายเหตุสาเหตุ COD ตีกลับ
   - เพิ่มตาราง master `shipping_providers` ต่อร้าน
+    - baseline PostgreSQL เติมจริงใน `0009_shipping_providers_foundation.sql`
+    - migration นี้ seed ค่า default (`Houngaloun`, `Anousith`, `Mixay`) ให้ร้านเดิมด้วย
 
 ## Table Inventory (High-level)
 
@@ -267,23 +269,17 @@
 
 ## Schema Change Checklist
 
-1. แก้ `lib/db/schema/tables.ts`
-2. รัน `npm run db:generate`
-3. ตรวจไฟล์ที่ต้องเข้า commit:
-  - `drizzle/*.sql`
-  - `drizzle/meta/*_snapshot.json`
-  - `drizzle/meta/_journal.json`
-4. apply:
+1. แก้ PostgreSQL migration ใต้ `postgres/migrations/`
+2. apply:
 
 ```bash
 set -a
 source .env.local
 set +a
-npm run db:repair
-npm run db:migrate
+npm run legacy:db:migrate
 ```
 
-5. ตรวจคุณภาพ:
+3. ตรวจคุณภาพ:
 
 ```bash
 npm run lint

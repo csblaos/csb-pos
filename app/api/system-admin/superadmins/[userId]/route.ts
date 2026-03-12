@@ -1,13 +1,9 @@
-import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { enforceSystemAdminSession, toSystemAdminErrorResponse } from "@/lib/auth/system-admin";
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import { users } from "@/lib/db/schema";
 import {
   findUserByIdFromPostgres,
-  logSettingsSystemAdminWriteFallback,
   updateSuperadminConfigInPostgres,
 } from "@/lib/platform/postgres-settings-admin-write";
 
@@ -32,46 +28,10 @@ export async function PATCH(
       return NextResponse.json({ message: "ข้อมูลไม่ถูกต้อง" }, { status: 400 });
     }
 
-    try {
-      const targetUser = await findUserByIdFromPostgres(userId);
-      if (targetUser !== undefined) {
-        if (!targetUser) {
-          return NextResponse.json({ message: "ไม่พบบัญชีผู้ใช้" }, { status: 404 });
-        }
-
-        if (targetUser.systemRole !== "SUPERADMIN") {
-          return NextResponse.json(
-            { message: "อนุญาตแก้ไขเฉพาะบัญชี SUPERADMIN" },
-            { status: 400 },
-          );
-        }
-
-        await updateSuperadminConfigInPostgres({
-          userId,
-          canCreateStores: payload.data.canCreateStores,
-          maxStores: payload.data.canCreateStores ? payload.data.maxStores : null,
-          canCreateBranches: payload.data.canCreateBranches,
-          maxBranchesPerStore:
-            payload.data.canCreateBranches === false
-              ? null
-              : payload.data.maxBranchesPerStore,
-        });
-
-        return NextResponse.json({ ok: true });
-      }
-    } catch (error) {
-      logSettingsSystemAdminWriteFallback("system-admin.superadmins.update", error);
+    const targetUser = await findUserByIdFromPostgres(userId);
+    if (targetUser === undefined) {
+      throw new Error("PostgreSQL system-admin write path is not available");
     }
-
-    const db = await getTursoDb();
-    const [targetUser] = await db
-      .select({
-        id: users.id,
-        systemRole: users.systemRole,
-      })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
 
     if (!targetUser) {
       return NextResponse.json({ message: "ไม่พบบัญชีผู้ใช้" }, { status: 404 });
@@ -84,18 +44,16 @@ export async function PATCH(
       );
     }
 
-    await db
-      .update(users)
-      .set({
-        canCreateStores: payload.data.canCreateStores,
-        maxStores: payload.data.canCreateStores ? payload.data.maxStores : null,
-        canCreateBranches: payload.data.canCreateBranches,
-        maxBranchesPerStore:
-          payload.data.canCreateBranches === false
-            ? null
-            : payload.data.maxBranchesPerStore,
-      })
-      .where(eq(users.id, userId));
+    await updateSuperadminConfigInPostgres({
+      userId,
+      canCreateStores: payload.data.canCreateStores,
+      maxStores: payload.data.canCreateStores ? payload.data.maxStores : null,
+      canCreateBranches: payload.data.canCreateBranches,
+      maxBranchesPerStore:
+        payload.data.canCreateBranches === false
+          ? null
+          : payload.data.maxBranchesPerStore,
+    });
 
     return NextResponse.json({ ok: true });
   } catch (error) {

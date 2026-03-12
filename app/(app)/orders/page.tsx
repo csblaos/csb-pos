@@ -2,10 +2,9 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { redirect } from "next/navigation";
 
-import { getSession } from "@/lib/auth/session";
+import { getAppShellContext } from "@/lib/app-shell/context";
 import { startServerRenderTimer } from "@/lib/perf/server";
 import {
-  getUserPermissionsForCurrentSession,
   isPermissionGranted,
 } from "@/lib/rbac/access";
 import { getOrderCatalogForStore, type OrderListTab, listOrdersByTab } from "@/lib/orders/queries";
@@ -29,9 +28,8 @@ export default async function OrdersPage({
   const finishRenderTimer = startServerRenderTimer("page.orders");
 
   try {
-    const [session, permissionKeys, params] = await Promise.all([
-      getSession(),
-      getUserPermissionsForCurrentSession(),
+    const [{ session, permissionKeys }, params] = await Promise.all([
+      getAppShellContext(),
       searchParams,
     ]);
 

@@ -1,14 +1,12 @@
 import { randomUUID } from "node:crypto";
 
-import { eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { hashPassword } from "@/lib/auth/password";
 import { buildSessionForUser } from "@/lib/auth/session-db";
 import { createSessionCookie, SessionStoreUnavailableError } from "@/lib/auth/session";
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import { users } from "@/lib/db/schema";
+import { execute, queryOne } from "@/lib/db/query";
 
 const signupSchema = z.object({
   name: z.string().min(2).max(120),
@@ -17,7 +15,6 @@ const signupSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const db = await getTursoDb();
   const payload = signupSchema.safeParse(await request.json());
   if (!payload.success) {
     return NextResponse.json({ message: "ข้อมูลสมัครสมาชิกไม่ถูกต้อง" }, { status: 400 });
@@ -25,11 +22,17 @@ export async function POST(request: Request) {
 
   const normalizedEmail = payload.data.email.trim().toLowerCase();
 
-  const [existingUser] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.email, normalizedEmail))
-    .limit(1);
+  const existingUser = await queryOne<{ id: string }>(
+    `
+      select id
+      from users
+      where email = :email
+      limit 1
+    `,
+    {
+      replacements: { email: normalizedEmail },
+    },
+  );
 
   if (existingUser) {
     return NextResponse.json({ message: "อีเมลนี้ถูกใช้งานแล้ว" }, { status: 409 });
@@ -38,13 +41,32 @@ export async function POST(request: Request) {
   const userId = randomUUID();
   const passwordHash = await hashPassword(payload.data.password);
 
-  await db.insert(users).values({
-    id: userId,
-    email: normalizedEmail,
-    name: payload.data.name,
-    passwordHash,
-    passwordUpdatedAt: sql`CURRENT_TIMESTAMP`,
-  });
+  await execute(
+    `
+      insert into users (
+        id,
+        email,
+        name,
+        password_hash,
+        password_updated_at
+      )
+      values (
+        :id,
+        :email,
+        :name,
+        :passwordHash,
+        current_timestamp
+      )
+    `,
+    {
+      replacements: {
+        id: userId,
+        email: normalizedEmail,
+        name: payload.data.name,
+        passwordHash,
+      },
+    },
+  );
 
   const session = await buildSessionForUser({
     id: userId,

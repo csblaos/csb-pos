@@ -1,6 +1,3 @@
-import { randomUUID } from "node:crypto";
-
-import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -15,14 +12,11 @@ import {
   ensureMainBranchExists,
   listAccessibleBranchesForMember,
 } from "@/lib/branches/access";
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import { storeBranches } from "@/lib/db/schema";
 import {
   createBranchInPostgres,
   getBranchByCodeFromPostgres,
   getBranchByIdFromPostgres,
   getBranchByNameFromPostgres,
-  logBranchesFallback,
 } from "@/lib/platform/postgres-branches";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 
@@ -216,85 +210,17 @@ export async function POST(request: Request) {
       sourceBranchId = mainBranch.id;
     }
 
-    try {
-      const sameName = await getBranchByNameFromPostgres(storeId, payload.data.name);
-      if (sameName !== undefined) {
-        if (sameName) {
-          return NextResponse.json({ message: "มีชื่อสาขานี้อยู่แล้ว" }, { status: 409 });
-        }
-
-        if (normalizedCode) {
-          const sameCode = await getBranchByCodeFromPostgres(storeId, normalizedCode);
-          if (sameCode) {
-            return NextResponse.json(
-              { message: "รหัสสาขานี้ถูกใช้งานแล้ว" },
-              { status: 409 },
-            );
-          }
-        }
-
-        if (sourceBranchId) {
-          const sourceBranch = await getBranchByIdFromPostgres(storeId, sourceBranchId);
-          if (!sourceBranch) {
-            return NextResponse.json(
-              { message: "ไม่พบสาขาต้นทางสำหรับคัดลอกการตั้งค่า" },
-              { status: 404 },
-            );
-          }
-        }
-
-        await createBranchInPostgres({
-          storeId,
-          name: payload.data.name,
-          code: normalizedCode,
-          address: payload.data.address?.trim() || null,
-          sourceBranchId,
-          sharingMode,
-          sharingConfig: JSON.stringify(sharingConfig),
-        });
-
-        const [branches, refreshedPolicy] = await Promise.all([
-          listBranchesByStore(storeId),
-          getBranchCreationPolicy(session.userId, storeId),
-        ]);
-
-        return NextResponse.json({
-          ok: true,
-          branches: toBranchResponse(branches),
-          policy: toBranchPolicyResponse(refreshedPolicy),
-        });
-      }
-    } catch (error) {
-      logBranchesFallback("route.create-branch", error);
+    const sameName = await getBranchByNameFromPostgres(storeId, payload.data.name);
+    if (sameName === undefined) {
+      throw new Error("PostgreSQL branch create path is not available");
     }
-
-    const db = await getTursoDb();
-    const [sameName] = await db
-      .select({ id: storeBranches.id })
-      .from(storeBranches)
-      .where(
-        and(
-          eq(storeBranches.storeId, storeId),
-          eq(storeBranches.name, payload.data.name),
-        ),
-      )
-      .limit(1);
 
     if (sameName) {
       return NextResponse.json({ message: "มีชื่อสาขานี้อยู่แล้ว" }, { status: 409 });
     }
 
     if (normalizedCode) {
-      const [sameCode] = await db
-        .select({ id: storeBranches.id })
-        .from(storeBranches)
-        .where(
-          and(
-            eq(storeBranches.storeId, storeId),
-            eq(storeBranches.code, normalizedCode),
-          ),
-        )
-        .limit(1);
+      const sameCode = await getBranchByCodeFromPostgres(storeId, normalizedCode);
 
       if (sameCode) {
         return NextResponse.json({ message: "รหัสสาขานี้ถูกใช้งานแล้ว" }, { status: 409 });
@@ -302,11 +228,7 @@ export async function POST(request: Request) {
     }
 
     if (sourceBranchId) {
-      const [sourceBranch] = await db
-        .select({ id: storeBranches.id })
-        .from(storeBranches)
-        .where(and(eq(storeBranches.storeId, storeId), eq(storeBranches.id, sourceBranchId)))
-        .limit(1);
+      const sourceBranch = await getBranchByIdFromPostgres(storeId, sourceBranchId);
 
       if (!sourceBranch) {
         return NextResponse.json(
@@ -316,8 +238,7 @@ export async function POST(request: Request) {
       }
     }
 
-    await db.insert(storeBranches).values({
-      id: randomUUID(),
+    await createBranchInPostgres({
       storeId,
       name: payload.data.name,
       code: normalizedCode,

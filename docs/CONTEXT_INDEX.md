@@ -2,6 +2,25 @@
 
 ไฟล์นี้เป็นแผนที่รวม context ทั้งโปรเจกต์ เพื่อให้ AI/ทีมอ่านต่อได้เร็วและตรง
 
+## Current Status
+
+- runtime app เป็น `PostgreSQL-only`
+- tooling ปัจจุบันเป็น `PostgreSQL-only`
+- โปรเจกต์อยู่ในสถานะ `พร้อมพัฒนาฟีเจอร์ต่อ`
+- เอกสารในส่วน rollout/migration หลายไฟล์ด้านล่างเป็น `historical reference`
+
+## Current Source Of Truth
+
+1. `AI_CONTEXT.md`
+2. `docs/HANDOFF.md`
+3. `docs/ARCHITECTURE.md`
+4. `docs/CODEBASE_MAP.md`
+5. `docs/UI_ROUTE_MAP.md`
+6. `docs/API_INVENTORY.md`
+7. `docs/SCHEMA_MAP.md`
+8. `docs/DECISIONS.md`
+9. `docs/express-readiness-plan.md`
+
 ## Read Order (Recommended)
 
 1. `AI_CONTEXT.md`
@@ -12,31 +31,17 @@
 6. `docs/DECISIONS.md`
 7. `docs/API_INVENTORY.md`
 8. `docs/SCHEMA_MAP.md`
-9. `docs/drizzle-migrations.md`
+9. `docs/express-readiness-plan.md`
 10. `docs/orders-system-design.md`
 11. `docs/product-variants-plan.md`
 12. `docs/postgresql-sequelize-migration.md`
 13. `docs/postgres-staging-rollout.md`
-14. `docs/postgres-inventory-producers-audit.md`
-15. `docs/postgres-cutover-plan.md`
-16. `docs/postgres-full-cutover-checklist.md`
-17. `docs/postgres-purchase-rollout-execution.md`
-18. `docs/postgres-inventory-read-rollout-execution.md`
-19. `docs/postgres-auth-rbac-read-rollout-execution.md`
-20. `docs/postgres-settings-system-admin-read-rollout-execution.md`
-21. `docs/postgres-settings-system-admin-write-rollout-execution.md`
-22. `docs/postgres-branches-rollout-execution.md`
-23. `docs/postgres-store-settings-rollout-execution.md`
-24. `docs/postgres-notifications-rollout-execution.md`
-25. `docs/postgres-products-units-onboarding-read-rollout-execution.md`
-26. `docs/postgres-products-units-onboarding-write-rollout-execution.md`
-27. `docs/postgres-products-write-rollout-execution.md`
-28. `docs/postgres-orders-write-rollout-execution.md`
-29. `docs/postgres-stock-movement-rollout-execution.md`
-30. `docs/postgres-all-postgres-observe-fallback-removal.md`
-31. `docs/postgres-turso-drizzle-retirement-plan.md`
-32. `docs/postgres-turso-runtime-dependency-audit.md`
-33. `docs/express-readiness-plan.md`
+14. `docs/postgres-cutover-plan.md`
+15. `docs/postgres-full-cutover-checklist.md`
+16. `docs/postgres-turso-drizzle-retirement-plan.md`
+17. `docs/postgres-turso-runtime-dependency-audit.md`
+18. `docs/turso-legacy-tooling.md`
+19. `docs/archive/HANDOFF_HISTORY.md`
 
 ## What Each File Is For
 
@@ -56,56 +61,41 @@
   - แคตตาล็อก API route ทั้งระบบ พร้อม access control แบบย่อ
 - `docs/SCHEMA_MAP.md`
   - แผนผังตารางและความสัมพันธ์สำคัญ
-- `docs/drizzle-migrations.md`
-  - วิธีทำ migration และข้อควรระวัง
 - `docs/orders-system-design.md`
   - แผนออกแบบ `/orders` ระดับระบบสำหรับ roadmap
 - `docs/product-variants-plan.md`
   - แผนโครงสร้างสินค้าแบบ Variant (DB + UX + rollout phases)
-- `docs/postgresql-sequelize-migration.md`
-  - แผนย้ายไป `PostgreSQL + Sequelize.query(...)` และออกแบบให้ย้ายไป Express ได้ง่าย
-- `docs/postgres-staging-rollout.md`
-  - runbook เปิด PostgreSQL read/write flags บน staging แบบเป็น wave พร้อม preflight/rollback checklist
-- `docs/postgres-inventory-producers-audit.md`
-  - inventory movement producers ที่ยังค้างบน Turso และลำดับ migration หลังจบ order-route rollout
-- `docs/postgres-cutover-plan.md`
-  - แผน cutover ของ inventory/reporting หลังผ่าน staging rollout แล้ว
-- `docs/postgres-full-cutover-checklist.md`
-  - master checklist ของสถานะ PostgreSQL vs Turso ปัจจุบัน และลำดับเปิด flags จนถึงถอด fallback/retire Turso
-- `docs/postgres-purchase-rollout-execution.md`
-  - checklist ปฏิบัติจริงสำหรับเปิด purchase runtime บน staging แบบ wave-by-wave พร้อม UAT/log review/rollback
-- `docs/postgres-inventory-read-rollout-execution.md`
-  - checklist ปฏิบัติจริงสำหรับเปิด inventory read truth บน staging พร้อม canary flows, stock/order UAT, และ rollback
-- `docs/postgres-auth-rbac-read-rollout-execution.md`
-  - checklist ปฏิบัติจริงสำหรับเปิด auth/session + RBAC + app shell read path บน staging ผ่าน `POSTGRES_AUTH_RBAC_READ_ENABLED`
-- `docs/postgres-settings-system-admin-read-rollout-execution.md`
-  - checklist ปฏิบัติจริงสำหรับเปิด settings/system-admin read path บน staging ผ่าน `POSTGRES_SETTINGS_SYSTEM_ADMIN_READ_ENABLED`
-- `docs/postgres-settings-system-admin-write-rollout-execution.md`
-  - checklist ปฏิบัติจริงสำหรับเปิด settings/system-admin write path บน staging ผ่าน `POSTGRES_SETTINGS_SYSTEM_ADMIN_WRITE_ENABLED`
-- `docs/postgres-branches-rollout-execution.md`
-  - checklist ปฏิบัติจริงสำหรับเปิด branch policy + branches runtime บน staging ผ่าน `POSTGRES_BRANCHES_ENABLED`
-- `docs/postgres-store-settings-rollout-execution.md`
-  - checklist ปฏิบัติจริงสำหรับเปิด store settings + payment accounts read/write path บน staging ผ่าน `POSTGRES_STORE_SETTINGS_READ_ENABLED`, `POSTGRES_STORE_SETTINGS_WRITE_ENABLED`, และ `POSTGRES_STORE_PAYMENT_ACCOUNTS_WRITE_ENABLED`
-- `docs/postgres-notifications-rollout-execution.md`
-  - checklist ปฏิบัติจริงสำหรับเปิด notifications runtime บน staging ผ่าน `POSTGRES_NOTIFICATIONS_ENABLED`
-- `docs/postgres-products-units-onboarding-read-rollout-execution.md`
-  - checklist ปฏิบัติจริงสำหรับเปิด products page, units/categories, และ onboarding read path บน staging ผ่าน `POSTGRES_PRODUCTS_ONBOARDING_READ_ENABLED`
-- `docs/postgres-products-units-onboarding-write-rollout-execution.md`
-  - checklist ปฏิบัติจริงสำหรับเปิด units/categories/onboarding low-risk write path บน staging ผ่าน `POSTGRES_PRODUCTS_ONBOARDING_WRITE_ENABLED`
-- `docs/postgres-products-write-rollout-execution.md`
-  - checklist ปฏิบัติจริงสำหรับเปิด product CRUD + variant persistence write path บน staging ผ่าน `POSTGRES_PRODUCTS_WRITE_ENABLED`
-- `docs/postgres-orders-write-rollout-execution.md`
-  - checklist ปฏิบัติจริงสำหรับเปิด order lifecycle writes บน staging แบบ wave-by-wave พร้อม UAT, compare, และ rollback
-- `docs/postgres-stock-movement-rollout-execution.md`
-  - checklist ปฏิบัติจริงสำหรับเปิด manual stock movement writes บน staging พร้อม UAT, compare, และ rollback
-- `docs/postgres-all-postgres-observe-fallback-removal.md`
-  - runbook สำหรับช่วง observe หลังเปิด PostgreSQL runtime เกือบครบ และลำดับถอด fallback/Turso paths ทีละโดเมน
-- `docs/postgres-turso-drizzle-retirement-plan.md`
-  - แผนถอน Turso/Drizzle ออกจาก runtime, repositories, env, และ ops docs หลังจบ phase observe/fallback removal
-- `docs/postgres-turso-runtime-dependency-audit.md`
-  - audit ว่า runtime path ไหนยัง import/initialize Turso อยู่จริง, แยก temporary blockers กับกลุ่มที่พร้อมเข้า queue ถอดหลังเปิด PostgreSQL ครบ
 - `docs/express-readiness-plan.md`
   - แผนเตรียม boundary สำหรับย้าย API จาก Next.js ไป Express + TypeScript แบบค่อยเป็นค่อยไป
+- `docs/postgresql-sequelize-migration.md`
+  - historical migration record ของการย้ายไป `PostgreSQL + Sequelize.query(...)`
+- `docs/postgres-staging-rollout.md`
+  - historical rollout runbook ของช่วงเปิด PostgreSQL flags
+- `docs/postgres-cutover-plan.md`
+  - historical cutover plan ของ inventory/reporting
+- `docs/postgres-full-cutover-checklist.md`
+  - historical checklist ของ phase cutover/fallback removal
+- `docs/postgres-turso-drizzle-retirement-plan.md`
+  - historical retirement plan หลังจบ migration แล้ว
+- `docs/postgres-turso-runtime-dependency-audit.md`
+  - historical audit ของการถอด Turso runtime dependency
+- `docs/turso-legacy-tooling.md`
+  - historical note ของ phase แยก legacy tooling ออกจาก runtime
+- `docs/archive/HANDOFF_HISTORY.md`
+  - บันทึก handoff/migration log เดิมแบบเต็ม ใช้อ้างย้อนหลังเท่านั้น
+
+## Historical / Archive Docs
+
+ไฟล์กลุ่มนี้ใช้เพื่ออ้างย้อนหลัง ไม่ใช่คู่มือปัจจุบัน:
+
+- `docs/postgresql-sequelize-migration.md`
+- `docs/postgres-staging-rollout.md`
+- `docs/postgres-cutover-plan.md`
+- `docs/postgres-full-cutover-checklist.md`
+- `docs/postgres-turso-drizzle-retirement-plan.md`
+- `docs/postgres-turso-runtime-dependency-audit.md`
+- `docs/turso-legacy-tooling.md`
+- `docs/archive/HANDOFF_HISTORY.md`
 
 ## Maintenance Rules
 
@@ -116,6 +106,6 @@
 - ถ้าเปลี่ยน flow หน้า UI -> API:
   - ต้องอัปเดต `docs/UI_ROUTE_MAP.md`
 - ถ้าแก้ schema/migration:
-  - ต้องอัปเดต `docs/SCHEMA_MAP.md` และ `docs/drizzle-migrations.md` (เมื่อมีผลต่อวิธีทำงาน)
+  - ต้องอัปเดต `docs/SCHEMA_MAP.md`
 - ถ้าเปลี่ยน decision เชิงสถาปัตยกรรม:
   - ต้องอัปเดต `docs/DECISIONS.md`

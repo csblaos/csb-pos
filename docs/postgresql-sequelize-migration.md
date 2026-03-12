@@ -3,6 +3,19 @@
 เอกสารนี้อธิบายแนวทางย้ายจาก `Turso/LibSQL + Drizzle` ไปเป็น `Aiven PostgreSQL + Sequelize.query(...)`
 โดยออกแบบให้ย้ายไป `Express + TypeScript` ได้ง่ายในอนาคต
 
+## Current Status
+
+- phase migration ฐานข้อมูลถือว่า `complete` แล้วใน repo นี้
+- runtime app เป็น `PostgreSQL-only`
+- tooling ปัจจุบันเป็น `PostgreSQL-only`
+- Turso/LibSQL/Drizzle ถูกถอดออกจาก workflow ปัจจุบันแล้ว
+- schema source of truth คือ `postgres/migrations/`
+
+หมายเหตุ:
+
+- sections ด้านล่างถูกเก็บไว้เป็น historical migration record
+- ถ้าจะทำงานต่อจากจุดนี้ ให้ใช้ [docs/express-readiness-plan.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/express-readiness-plan.md) และ [docs/postgres-full-cutover-checklist.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-full-cutover-checklist.md) เป็นตัวนำแทน
+
 ## เป้าหมาย
 
 - ใช้ `PostgreSQL` เป็นฐานข้อมูลหลัก
@@ -48,7 +61,7 @@ lib/db/transaction.ts       -> transaction wrapper
 - ย้ายไป `Express + TypeScript` ได้โดยเปลี่ยนแค่ transport layer
 - อนาคตถ้าจะลด Sequelize ลงเหลือ `pg` ตรง ๆ ก็ reuse SQL ได้เกือบทั้งหมด
 
-## Migration Phases
+## Historical Phases
 
 ### Phase 0: Freeze Strategy
 

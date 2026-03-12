@@ -14,10 +14,8 @@
   - orchestration/business rule
 - `server/repositories/`
   - data access ที่ผูก DB query
-- `lib/db/schema/tables.ts`
-  - schema หลักของ Drizzle
-- `drizzle/`
-  - migration SQL + meta snapshot/journal
+- `postgres/migrations/`
+  - SQL migrations ของ PostgreSQL
 - `scripts/`
   - utility scripts (repair migration, smoke test, cleanup)
 
@@ -60,9 +58,9 @@
   - `lib/products/service.ts`
   - `lib/products/validation.ts`
   - `lib/products/variant-options.ts`
-  - `lib/products/variant-persistence.ts`
-  - `lib/db/schema/tables.ts` (ตาราง `products` + โครงสร้าง variant phase 1:
-    `product_models`, `product_model_attributes`, `product_model_attribute_values`)
+  - `lib/platform/postgres-products-write.ts`
+  - `postgres/migrations/0006_products_units_onboarding_foundation.sql`
+  - `postgres/migrations/0007_products_variant_write_foundation.sql`
 
 ### Stock / Purchase Orders
 
@@ -154,7 +152,7 @@
 - เพิ่ม/แก้ business flow:
   - route (`app/api/...`) -> service (`server/services/...`) -> repository (`server/repositories/...`)
 - แก้ schema:
-  - `lib/db/schema/tables.ts` -> generate migration -> update context docs
+  - `postgres/migrations/*.sql` -> update context docs
 - แก้ UI หน้าใดหน้าหนึ่ง:
   - ดู mapping ใน `docs/UI_ROUTE_MAP.md` ก่อน
 

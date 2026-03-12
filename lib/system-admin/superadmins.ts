@@ -18,5 +18,5 @@ export async function listSuperadmins(): Promise<SuperadminItem[]> {
   if (postgresRows) {
     return postgresRows;
   }
-  throw new Error("POSTGRES_SETTINGS_SYSTEM_ADMIN_READ_ENABLED is required for superadmin list");
+  throw new Error("PostgreSQL superadmin list is not available");
 }

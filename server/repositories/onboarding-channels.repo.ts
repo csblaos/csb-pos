@@ -1,14 +1,9 @@
 import "server-only";
 
-import { and, eq, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 
-import {
-  getOnboardingChannelStatusFromPostgres,
-  logProductsOnboardingReadFallback,
-} from "@/lib/platform/postgres-products-onboarding";
-import { getTursoDb } from "@/lib/db/turso-lazy";
+import { execute, queryOne } from "@/lib/db/query";
 import { createPerfScope, timeDb } from "@/server/perf/perf";
-import { fbConnections, waConnections } from "@/lib/db/schema";
 
 export type ChannelStatus = "DISCONNECTED" | "CONNECTED" | "ERROR";
 export type ChannelState = {
@@ -22,40 +17,62 @@ const getReadMode = (): ChannelStatusReadMode =>
   process.env.CHANNEL_STATUS_QUERY_MODE === "parallel" ? "parallel" : "combined";
 
 async function readStoreChannelStatusParallel(storeId: string): Promise<ChannelState> {
-  const db = await getTursoDb();
   const [fb, wa] = await Promise.all([
     timeDb("onboarding.channels.repo.readFacebook", async () =>
-      db
-        .select({ status: fbConnections.status })
-        .from(fbConnections)
-        .where(eq(fbConnections.storeId, storeId))
-        .limit(1),
+      queryOne<{ status: ChannelStatus | null }>(
+        `
+          select status
+          from fb_connections
+          where store_id = :storeId
+          limit 1
+        `,
+        {
+          replacements: { storeId },
+        },
+      ),
     ),
     timeDb("onboarding.channels.repo.readWhatsapp", async () =>
-      db
-        .select({ status: waConnections.status })
-        .from(waConnections)
-        .where(eq(waConnections.storeId, storeId))
-        .limit(1),
+      queryOne<{ status: ChannelStatus | null }>(
+        `
+          select status
+          from wa_connections
+          where store_id = :storeId
+          limit 1
+        `,
+        {
+          replacements: { storeId },
+        },
+      ),
     ),
   ]);
 
   return {
-    facebook: fb[0]?.status ?? "DISCONNECTED",
-    whatsapp: wa[0]?.status ?? "DISCONNECTED",
+    facebook: fb?.status ?? "DISCONNECTED",
+    whatsapp: wa?.status ?? "DISCONNECTED",
   };
 }
 
 async function readStoreChannelStatusCombined(storeId: string): Promise<ChannelState> {
-  const db = await getTursoDb();
-  const [row] = await timeDb("onboarding.channels.repo.readCombined", async () =>
-    db
-      .select({
-        facebook: sql<ChannelStatus>`coalesce((select status from fb_connections where store_id = ${storeId} limit 1), 'DISCONNECTED')`,
-        whatsapp: sql<ChannelStatus>`coalesce((select status from wa_connections where store_id = ${storeId} limit 1), 'DISCONNECTED')`,
-      })
-      .from(sql`(select 1) as probe`)
-      .limit(1),
+  const row = await timeDb("onboarding.channels.repo.readCombined", async () =>
+    queryOne<{
+      facebook: ChannelStatus | null;
+      whatsapp: ChannelStatus | null;
+    }>(
+      `
+        select
+          coalesce(
+            (select status from fb_connections where store_id = :storeId limit 1),
+            'DISCONNECTED'
+          ) as facebook,
+          coalesce(
+            (select status from wa_connections where store_id = :storeId limit 1),
+            'DISCONNECTED'
+          ) as whatsapp
+      `,
+      {
+        replacements: { storeId },
+      },
+    ),
   );
 
   return {
@@ -65,15 +82,6 @@ async function readStoreChannelStatusCombined(storeId: string): Promise<ChannelS
 }
 
 export async function readStoreChannelStatus(storeId: string): Promise<ChannelState> {
-  try {
-    const postgresStatus = await getOnboardingChannelStatusFromPostgres(storeId);
-    if (postgresStatus) {
-      return postgresStatus;
-    }
-  } catch (error) {
-    logProductsOnboardingReadFallback("onboarding.channels.status", error);
-  }
-
   const mode = getReadMode();
   const perf = createPerfScope(`onboarding.channels.repo.readStatus.${mode}`);
 
@@ -89,71 +97,140 @@ export async function readStoreChannelStatus(storeId: string): Promise<ChannelSt
 }
 
 export async function upsertFacebookConnected(storeId: string, connectedAt: string) {
-  const db = await getTursoDb();
-  const [existing] = await timeDb("onboarding.channels.repo.findFacebook", async () =>
-    db
-      .select({ id: fbConnections.id })
-      .from(fbConnections)
-      .where(eq(fbConnections.storeId, storeId))
-      .limit(1),
+  const existing = await timeDb("onboarding.channels.repo.findFacebook", async () =>
+    queryOne<{ id: string }>(
+      `
+        select id
+        from fb_connections
+        where store_id = :storeId
+        limit 1
+      `,
+      {
+        replacements: { storeId },
+      },
+    ),
   );
 
   if (existing) {
     await timeDb("onboarding.channels.repo.updateFacebook", async () =>
-      db
-        .update(fbConnections)
-        .set({
-          status: "CONNECTED",
-          pageName: "Demo Facebook Page",
-          pageId: "fb_demo_page",
-          connectedAt,
-        })
-        .where(and(eq(fbConnections.id, existing.id), eq(fbConnections.storeId, storeId))),
+      execute(
+        `
+          update fb_connections
+          set
+            status = 'CONNECTED',
+            page_name = 'Demo Facebook Page',
+            page_id = 'fb_demo_page',
+            connected_at = :connectedAt
+          where id = :id
+            and store_id = :storeId
+        `,
+        {
+          replacements: {
+            id: existing.id,
+            storeId,
+            connectedAt,
+          },
+        },
+      ),
     );
     return;
   }
 
   await timeDb("onboarding.channels.repo.insertFacebook", async () =>
-    db.insert(fbConnections).values({
-      storeId,
-      status: "CONNECTED",
-      pageName: "Demo Facebook Page",
-      pageId: "fb_demo_page",
-      connectedAt,
-    }),
+    execute(
+      `
+        insert into fb_connections (
+          id,
+          store_id,
+          status,
+          page_name,
+          page_id,
+          connected_at
+        )
+        values (
+          :id,
+          :storeId,
+          'CONNECTED',
+          'Demo Facebook Page',
+          'fb_demo_page',
+          :connectedAt
+        )
+      `,
+      {
+        replacements: {
+          id: randomUUID(),
+          storeId,
+          connectedAt,
+        },
+      },
+    ),
   );
 }
 
 export async function upsertWhatsappConnected(storeId: string, connectedAt: string) {
-  const db = await getTursoDb();
-  const [existing] = await timeDb("onboarding.channels.repo.findWhatsapp", async () =>
-    db
-      .select({ id: waConnections.id })
-      .from(waConnections)
-      .where(eq(waConnections.storeId, storeId))
-      .limit(1),
+  const existing = await timeDb("onboarding.channels.repo.findWhatsapp", async () =>
+    queryOne<{ id: string }>(
+      `
+        select id
+        from wa_connections
+        where store_id = :storeId
+        limit 1
+      `,
+      {
+        replacements: { storeId },
+      },
+    ),
   );
 
   if (existing) {
     await timeDb("onboarding.channels.repo.updateWhatsapp", async () =>
-      db
-        .update(waConnections)
-        .set({
-          status: "CONNECTED",
-          phoneNumber: "+8562099999999",
-          connectedAt,
-        })
-        .where(and(eq(waConnections.id, existing.id), eq(waConnections.storeId, storeId))),
+      execute(
+        `
+          update wa_connections
+          set
+            status = 'CONNECTED',
+            phone_number = '+8562099999999',
+            connected_at = :connectedAt
+          where id = :id
+            and store_id = :storeId
+        `,
+        {
+          replacements: {
+            id: existing.id,
+            storeId,
+            connectedAt,
+          },
+        },
+      ),
     );
     return;
   }
 
   await timeDb("onboarding.channels.repo.insertWhatsapp", async () =>
-    db.insert(waConnections).values({
-      storeId,
-      status: "CONNECTED",
-      phoneNumber: "+8562099999999",
-      connectedAt,
-    }),
+    execute(
+      `
+        insert into wa_connections (
+          id,
+          store_id,
+          status,
+          phone_number,
+          connected_at
+        )
+        values (
+          :id,
+          :storeId,
+          'CONNECTED',
+          '+8562099999999',
+          :connectedAt
+        )
+      `,
+      {
+        replacements: {
+          id: randomUUID(),
+          storeId,
+          connectedAt,
+        },
+      },
+    ),
   );
 }

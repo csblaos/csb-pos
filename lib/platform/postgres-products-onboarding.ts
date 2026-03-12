@@ -147,15 +147,8 @@ type CostTrackingRow = {
   occurredAt: string | null;
 };
 
-const isPostgresProductsOnboardingReadEnabled = () =>
-  process.env.POSTGRES_PRODUCTS_ONBOARDING_READ_ENABLED === "1";
-
 const getPostgresProductsOnboardingContext =
   async (): Promise<PostgresProductsOnboardingContext | null> => {
-    if (!isPostgresProductsOnboardingReadEnabled()) {
-      return null;
-    }
-
     const [{ queryMany, queryOne }, { isPostgresConfigured }] = await Promise.all([
       import("@/lib/db/query"),
       import("@/lib/db/sequelize"),

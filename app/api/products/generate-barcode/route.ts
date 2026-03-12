@@ -1,8 +1,6 @@
-import { and, eq, like } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import { products } from "@/lib/db/schema";
+import { queryMany } from "@/lib/db/query";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 
 /**
@@ -24,19 +22,20 @@ function calcEAN13CheckDigit(first12: string): number {
 export async function POST() {
   try {
     const { storeId } = await enforcePermission("products.create");
-    const db = await getTursoDb();
 
-    // Find the highest existing internal barcode for this store
-    const rows = await db
-      .select({ barcode: products.barcode })
-      .from(products)
-      .where(
-        and(
-          eq(products.storeId, storeId),
-          like(products.barcode, "20%"),
-        ),
-      )
-      .orderBy(products.barcode);
+    const rows = await queryMany<{ barcode: string | null }>(
+      `
+        select barcode
+        from products
+        where
+          store_id = :storeId
+          and barcode like '20%'
+        order by barcode asc
+      `,
+      {
+        replacements: { storeId },
+      },
+    );
 
     let maxSeq = 0;
     for (const row of rows) {

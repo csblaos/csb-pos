@@ -30,7 +30,7 @@ type StockBalanceRow = {
 };
 
 export const isPostgresStockMovementWriteEnabled = () =>
-  process.env.POSTGRES_STOCK_WRITE_MOVEMENT_ENABLED === "1" && isPostgresConfigured();
+  isPostgresConfigured();
 
 const loadStockBalanceInPostgres = async (storeId: string, productId: string) => {
   const row = await queryOne<StockBalanceRow>(

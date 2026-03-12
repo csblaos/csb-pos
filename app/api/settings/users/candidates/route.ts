@@ -1,69 +1,92 @@
-import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import { roles, storeMembers, stores, users } from "@/lib/db/schema";
+import { queryMany, queryOne } from "@/lib/db/query";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 
 export async function GET(request: Request) {
   try {
     const { storeId, session } = await enforcePermission("members.create");
-    const db = await getTursoDb();
 
-    const [actor] = await db
-      .select({ systemRole: users.systemRole })
-      .from(users)
-      .where(eq(users.id, session.userId))
-      .limit(1);
+    const actor = await queryOne<{ systemRole: string | null }>(
+      `
+        select system_role as "systemRole"
+        from users
+        where id = :userId
+        limit 1
+      `,
+      {
+        replacements: { userId: session.userId },
+      },
+    );
 
     if (actor?.systemRole !== "SUPERADMIN") {
       return NextResponse.json({ ok: true, candidates: [] });
     }
 
-    const ownedStoreRows = await db
-      .select({ storeId: storeMembers.storeId })
-      .from(storeMembers)
-      .innerJoin(roles, eq(storeMembers.roleId, roles.id))
-      .where(
-        and(
-          eq(storeMembers.userId, session.userId),
-          eq(storeMembers.status, "ACTIVE"),
-          eq(roles.name, "Owner"),
-        ),
-      );
+    const ownedStoreRows = await queryMany<{ storeId: string }>(
+      `
+        select sm.store_id as "storeId"
+        from store_members sm
+        inner join roles r on sm.role_id = r.id
+        where
+          sm.user_id = :userId
+          and sm.status = 'ACTIVE'
+          and r.name = 'Owner'
+      `,
+      {
+        replacements: { userId: session.userId },
+      },
+    );
 
     const ownedStoreIds = ownedStoreRows.map((row) => row.storeId);
     if (ownedStoreIds.length === 0) {
       return NextResponse.json({ ok: true, candidates: [] });
     }
 
-    const currentStoreMemberRows = await db
-      .select({ userId: storeMembers.userId })
-      .from(storeMembers)
-      .where(eq(storeMembers.storeId, storeId));
+    const currentStoreMemberRows = await queryMany<{ userId: string }>(
+      `
+        select user_id as "userId"
+        from store_members
+        where store_id = :storeId
+      `,
+      {
+        replacements: { storeId },
+      },
+    );
     const currentStoreMemberSet = new Set(currentStoreMemberRows.map((row) => row.userId));
 
     const { searchParams } = new URL(request.url);
     const q = searchParams.get("q")?.trim() ?? "";
 
-    const candidateRows = await db
-      .select({
-        userId: users.id,
-        name: users.name,
-        email: users.email,
-        systemRole: users.systemRole,
-        sourceStoreName: stores.name,
-      })
-      .from(storeMembers)
-      .innerJoin(users, eq(storeMembers.userId, users.id))
-      .innerJoin(stores, eq(storeMembers.storeId, stores.id))
-      .where(
-        and(
-          inArray(storeMembers.storeId, ownedStoreIds),
-          ne(storeMembers.storeId, storeId),
-        ),
-      )
-      .orderBy(asc(users.name));
+    const candidateRows = await queryMany<{
+      userId: string;
+      name: string;
+      email: string;
+      systemRole: string | null;
+      sourceStoreName: string;
+    }>(
+      `
+        select
+          u.id as "userId",
+          u.name,
+          u.email,
+          u.system_role as "systemRole",
+          s.name as "sourceStoreName"
+        from store_members sm
+        inner join users u on sm.user_id = u.id
+        inner join stores s on sm.store_id = s.id
+        where
+          sm.store_id in (:ownedStoreIds)
+          and sm.store_id <> :storeId
+        order by u.name asc
+      `,
+      {
+        replacements: {
+          ownedStoreIds,
+          storeId,
+        },
+      },
+    );
 
     const filteredRows =
       q.length > 0

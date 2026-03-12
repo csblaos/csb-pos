@@ -92,15 +92,8 @@ type StorePaymentAccountListOptions = {
   qrOnly?: boolean;
 };
 
-const isPostgresStoreSettingsReadEnabled = () =>
-  process.env.POSTGRES_STORE_SETTINGS_READ_ENABLED === "1";
-
 const getPostgresStoreSettingsContext =
   async (): Promise<PostgresStoreSettingsContext | null> => {
-    if (!isPostgresStoreSettingsReadEnabled()) {
-      return null;
-    }
-
     const [{ queryMany, queryOne }, { isPostgresConfigured }] = await Promise.all([
       import("@/lib/db/query"),
       import("@/lib/db/sequelize"),

@@ -1,9 +1,8 @@
 import dynamic from "next/dynamic";
 import { redirect } from "next/navigation";
 
-import { getSession } from "@/lib/auth/session";
+import { getAppShellContext } from "@/lib/app-shell/context";
 import {
-  getUserPermissionsForCurrentSession,
   isPermissionGranted,
 } from "@/lib/rbac/access";
 import {
@@ -11,6 +10,7 @@ import {
   getStorePdfConfigFromPostgres,
   getStoreProfileFromPostgres,
 } from "@/lib/platform/postgres-store-settings";
+import { StockTabLoadingState } from "@/components/app/stock-tab-feedback";
 import { createPerfScope } from "@/server/perf/perf";
 import {
   getRecentStockMovements,
@@ -84,8 +84,15 @@ export default async function StockPage({
   const perf = createPerfScope("page.stock", "render");
 
   try {
-    const [session, permissionKeys] = await perf.step("sessionAndPermissions.parallel", async () =>
-      Promise.all([getSession(), getUserPermissionsForCurrentSession()]),
+    const [session, permissionKeys, params] = await perf.step(
+      "sessionAndPermissions.parallel",
+      async () => {
+        const [{ session, permissionKeys }, resolvedParams] = await Promise.all([
+          getAppShellContext(),
+          searchParams,
+        ]);
+        return [session, permissionKeys, resolvedParams] as const;
+      },
     );
 
     if (!session) {
@@ -114,6 +121,22 @@ export default async function StockPage({
 
     const PRODUCT_PAGE_SIZE = 20;
     const PO_PAGE_SIZE = 20;
+    const initialTab = params?.tab === "purchase"
+      ? "purchase"
+      : params?.tab === "inventory"
+        ? "inventory"
+        : params?.tab === "recording"
+          ? "recording"
+        : params?.tab === "history"
+          ? "history"
+          : "inventory";
+
+    const needsRecordingCatalog = initialTab === "recording";
+    const needsInventoryData = initialTab === "inventory";
+    const needsPurchaseData = initialTab === "purchase";
+    const needsHistoryData = initialTab === "history";
+    const needsProductCatalog = needsInventoryData || needsRecordingCatalog;
+    const needsStoreProfile = needsInventoryData || needsPurchaseData;
 
     const [
       movements,
@@ -123,25 +146,30 @@ export default async function StockPage({
       storeFinancial,
       storePdfConfig,
       categories,
-    ] =
-      await perf.step("service.getStockAndPO", async () =>
-        Promise.all([
-          getRecentStockMovements({
-            storeId: activeStoreId,
-            limit: 30,
-          }),
-          getPurchaseOrderListPage(activeStoreId, PO_PAGE_SIZE + 1, 0),
-          getStockProductsPage({
-            storeId: activeStoreId,
-            limit: PRODUCT_PAGE_SIZE + 1,
-            offset: 0,
-          }),
-          getStoreProfileFromPostgres(activeStoreId),
-          getStoreFinancialConfigFromPostgres(activeStoreId),
-          getStorePdfConfigFromPostgres(activeStoreId),
-          listCategories(activeStoreId),
-        ]),
-      );
+    ] = await perf.step("service.getStockAndPO", async () =>
+      Promise.all([
+        needsHistoryData
+          ? getRecentStockMovements({
+              storeId: activeStoreId,
+              limit: 30,
+            })
+          : Promise.resolve([]),
+        needsPurchaseData
+          ? getPurchaseOrderListPage(activeStoreId, PO_PAGE_SIZE + 1, 0)
+          : Promise.resolve([]),
+        needsProductCatalog
+          ? getStockProductsPage({
+              storeId: activeStoreId,
+              limit: PRODUCT_PAGE_SIZE + 1,
+              offset: 0,
+            })
+          : Promise.resolve([]),
+        needsStoreProfile ? getStoreProfileFromPostgres(activeStoreId) : Promise.resolve(null),
+        needsPurchaseData ? getStoreFinancialConfigFromPostgres(activeStoreId) : Promise.resolve(null),
+        needsPurchaseData ? getStorePdfConfigFromPostgres(activeStoreId) : Promise.resolve(null),
+        needsInventoryData ? listCategories(activeStoreId) : Promise.resolve([]),
+      ]),
+    );
 
     const initialProducts = stockProductRows.slice(0, PRODUCT_PAGE_SIZE);
     const initialHasMoreProducts = stockProductRows.length > PRODUCT_PAGE_SIZE;
@@ -161,14 +189,9 @@ export default async function StockPage({
     };
     const storeOutStockThreshold = storeProfile?.outStockThreshold ?? 0;
     const storeLowStockThreshold = storeProfile?.lowStockThreshold ?? 10;
-    const params = await searchParams;
-    const initialTab = params?.tab === "purchase"
-      ? "purchase"
-      : params?.tab === "inventory"
-        ? "inventory"
-        : params?.tab === "history"
-          ? "history"
-          : "inventory";
+    const inactiveTabFallback = (
+      <StockTabLoadingState message="กำลังเตรียมข้อมูลของแท็บนี้..." />
+    );
 
     return (
       <section className="space-y-4">
@@ -182,36 +205,50 @@ export default async function StockPage({
         <StockTabs
           initialTab={initialTab}
           recordingTab={
-            <StockRecordingForm
-              initialProducts={initialProducts}
-              canCreate={canPostMovement}
-              canAdjust={canAdjust}
-              canInbound={canInbound}
-            />
+            needsProductCatalog ? (
+              <StockRecordingForm
+                initialProducts={initialProducts}
+                canCreate={canPostMovement}
+                canAdjust={canAdjust}
+                canInbound={canInbound}
+              />
+            ) : inactiveTabFallback
           }
           inventoryTab={
-            <StockInventoryView
-              products={initialProducts}
-              categories={categories}
-              storeOutStockThreshold={storeOutStockThreshold}
-              storeLowStockThreshold={storeLowStockThreshold}
-              pageSize={PRODUCT_PAGE_SIZE}
-              initialHasMore={initialHasMoreProducts}
-            />
+            needsInventoryData ? (
+              <StockInventoryView
+                products={initialProducts}
+                categories={categories}
+                storeOutStockThreshold={storeOutStockThreshold}
+                storeLowStockThreshold={storeLowStockThreshold}
+                pageSize={PRODUCT_PAGE_SIZE}
+                initialHasMore={initialHasMoreProducts}
+              />
+            ) : inactiveTabFallback
           }
-          historyTab={<StockMovementHistory movements={movements} />}
+          historyTab={
+            needsHistoryData ? (
+              <StockMovementHistory movements={movements} />
+            ) : (
+              inactiveTabFallback
+            )
+          }
           purchaseTab={
-            <PurchaseOrderList
-              purchaseOrders={initialPOs}
-              activeStoreId={activeStoreId}
-              userId={session.userId}
-              storeCurrency={storeCurrency}
-              canCreate={canCreate}
-              pageSize={PO_PAGE_SIZE}
-              initialHasMore={hasMorePO}
-              storeLogoUrl={storeLogoUrl}
-              pdfConfig={purchaseOrderPdfConfig}
-            />
+            needsPurchaseData ? (
+              <PurchaseOrderList
+                purchaseOrders={initialPOs}
+                activeStoreId={activeStoreId}
+                userId={session.userId}
+                storeCurrency={storeCurrency}
+                canCreate={canCreate}
+                pageSize={PO_PAGE_SIZE}
+                initialHasMore={hasMorePO}
+                storeLogoUrl={storeLogoUrl}
+                pdfConfig={purchaseOrderPdfConfig}
+              />
+            ) : (
+              inactiveTabFallback
+            )
           }
         />
       </section>

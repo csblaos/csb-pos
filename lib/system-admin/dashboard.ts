@@ -16,5 +16,5 @@ export async function getSystemAdminDashboardStats(): Promise<SystemAdminDashboa
   if (postgresStats) {
     return postgresStats;
   }
-  throw new Error("POSTGRES_SETTINGS_SYSTEM_ADMIN_READ_ENABLED is required for system admin dashboard");
+  throw new Error("PostgreSQL system admin dashboard is not available");
 }

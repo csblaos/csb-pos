@@ -32,7 +32,7 @@
 ### ยังไม่อยู่ใน scope
 
 - remove fallback paths
-- ปิด `TURSO_*`
+- ล้าง legacy env/tooling หลังจบ migration ทั้ง repo
 - โดเมน settings/store หรือ notifications rollout
 
 ## Success Criteria

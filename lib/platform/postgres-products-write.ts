@@ -87,7 +87,7 @@ const asJsonText = (value: unknown) => {
 };
 
 export const isPostgresProductsWriteEnabled = () =>
-  process.env.POSTGRES_PRODUCTS_WRITE_ENABLED === "1" && isPostgresConfigured();
+  isPostgresConfigured();
 
 export const logProductsWriteFallback = (operation: string, error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);

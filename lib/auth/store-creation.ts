@@ -20,7 +20,7 @@ export async function getStoreCreationPolicy(userId: string): Promise<StoreCreat
   if (postgresPolicy) {
     return postgresPolicy;
   }
-  throw new Error("POSTGRES_SETTINGS_SYSTEM_ADMIN_READ_ENABLED is required for store creation policy");
+  throw new Error("PostgreSQL store creation policy is not available");
 }
 
 export function evaluateStoreCreationAccess(policy: StoreCreationPolicy): StoreCreationAccess {

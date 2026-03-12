@@ -74,7 +74,7 @@ const toIntInRangeOrNull = (
 };
 
 export const isPostgresSettingsSystemAdminWriteEnabled = () =>
-  process.env.POSTGRES_SETTINGS_SYSTEM_ADMIN_WRITE_ENABLED === "1" && isPostgresConfigured();
+  isPostgresConfigured();
 
 export const logSettingsSystemAdminWriteFallback = (operation: string, error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);

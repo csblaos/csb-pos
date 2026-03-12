@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { parseStoreCurrency } from "@/lib/finance/store-financial";
+import {
+  claimIdempotencyForRoute,
+  readJsonRouteRequest,
+} from "@/lib/http/route-handler";
 import { getInventoryBalancesByStore } from "@/lib/inventory/queries";
 import { computeOrderTotals } from "@/lib/orders/totals";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
@@ -18,9 +22,6 @@ import {
 import { safeLogAuditEvent } from "@/server/services/audit.service";
 import { invalidateDashboardSummaryCache } from "@/server/services/dashboard.service";
 import {
-  claimIdempotency,
-  getIdempotencyKey,
-  hashRequestBody,
   markIdempotencySucceeded,
   safeMarkIdempotencyFailed,
 } from "@/server/services/idempotency.service";
@@ -77,69 +78,45 @@ export async function POST(request: Request) {
       actorRole: session.activeRoleName,
     };
 
-    const rawBody = await request.text();
-    const idempotencyKey = getIdempotencyKey(request);
-    const requestHash = hashRequestBody(rawBody);
-    let body: unknown;
+    const requestEnvelope = await readJsonRouteRequest(request);
+    const { idempotencyKey, requestHash } = requestEnvelope.value;
 
-    try {
-      body = rawBody ? JSON.parse(rawBody) : {};
-    } catch {
+    if (!requestEnvelope.ok) {
       if (idempotencyKey) {
-        const claim = await claimIdempotency({
+        const claimResult = await claimIdempotencyForRoute({
           storeId,
           action,
           idempotencyKey,
           requestHash,
           createdBy: session.userId,
         });
-
-        if (claim.kind === "replay") {
-          return NextResponse.json(claim.body, { status: claim.statusCode });
+        if (!claimResult.ok) {
+          return claimResult.response;
         }
-        if (claim.kind === "processing") {
-          return NextResponse.json({ message: "คำขอนี้กำลังประมวลผลอยู่" }, { status: 409 });
-        }
-        if (claim.kind === "conflict") {
-          return NextResponse.json(
-            { message: "Idempotency-Key นี้ถูกใช้กับข้อมูลคำขออื่นแล้ว" },
-            { status: 409 },
-          );
-        }
-
-        idempotencyRecordId = claim.recordId;
+        idempotencyRecordId = claimResult.claim.recordId;
         await safeMarkIdempotencyFailed({
-          recordId: claim.recordId,
+          recordId: claimResult.claim.recordId,
           statusCode: 400,
           body: { message: "รูปแบบ JSON ไม่ถูกต้อง" },
         });
       }
-      return NextResponse.json({ message: "รูปแบบ JSON ไม่ถูกต้อง" }, { status: 400 });
+      return requestEnvelope.response;
     }
 
+    const body = requestEnvelope.value.body;
+
     if (idempotencyKey) {
-      const claim = await claimIdempotency({
+      const claimResult = await claimIdempotencyForRoute({
         storeId,
         action,
         idempotencyKey,
         requestHash,
         createdBy: session.userId,
       });
-
-      if (claim.kind === "replay") {
-        return NextResponse.json(claim.body, { status: claim.statusCode });
+      if (!claimResult.ok) {
+        return claimResult.response;
       }
-      if (claim.kind === "processing") {
-        return NextResponse.json({ message: "คำขอนี้กำลังประมวลผลอยู่" }, { status: 409 });
-      }
-      if (claim.kind === "conflict") {
-        return NextResponse.json(
-          { message: "Idempotency-Key นี้ถูกใช้กับข้อมูลคำขออื่นแล้ว" },
-          { status: 409 },
-        );
-      }
-
-      idempotencyRecordId = claim.recordId;
+      idempotencyRecordId = claimResult.claim.recordId;
     }
 
     const parsed = createOrderSchema.safeParse(body);

@@ -1,6 +1,8 @@
 # PostgreSQL Full Cutover Checklist
 
-เอกสารนี้เป็น source of truth สำหรับการย้าย runtime จาก `Turso/LibSQL` ไป `Aiven PostgreSQL`
+> Historical reference: cutover checklist นี้ถูกเก็บไว้เป็นบันทึก migration แล้ว ปัจจุบัน runtime/tooling ของ repo เป็น PostgreSQL-only
+
+เอกสารนี้เคยเป็น source of truth สำหรับการย้าย runtime จาก `Turso/LibSQL` ไป `Aiven PostgreSQL`
 แบบครบระบบ โดยแยกชัดว่า:
 
 - อะไร `รองรับ PostgreSQL แล้ว`
@@ -23,7 +25,7 @@
 - top-level import ของ `@/lib/db/client` ใน runtime ถูกเก็บจนเหลือ `0` ไฟล์แล้ว
 - [server/db/client.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/db/client.ts) ถูกลบแล้ว
 - [lib/db/client.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/client.ts) ยังอยู่เป็น lazy legacy path สำหรับ fallback/tooling บางส่วน แต่ไม่ยิง health probe ตอน import แล้ว
-- phase ถัดไปของ cutover คือ `dead Turso path removal` และ `TURSO_* env/tooling cleanup`
+- phase cutover ฝั่ง runtime จบแล้ว; sections ด้านล่างถูกคงไว้เป็น migration history
 
 ## Current Runtime Status
 

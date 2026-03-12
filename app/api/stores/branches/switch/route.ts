@@ -1,4 +1,3 @@
-import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -9,9 +8,7 @@ import {
   SessionStoreUnavailableError,
 } from "@/lib/auth/session";
 import { canMemberAccessBranch, ensureMainBranchExists } from "@/lib/branches/access";
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import { storeBranches } from "@/lib/db/schema";
-import { getBranchByIdFromPostgres, logBranchesFallback } from "@/lib/platform/postgres-branches";
+import { getBranchByIdFromPostgres } from "@/lib/platform/postgres-branches";
 import { getUserPermissions } from "@/lib/rbac/access";
 import { getStorefrontEntryRoute } from "@/lib/storefront/routing";
 
@@ -44,49 +41,20 @@ export async function POST(request: Request) {
     );
   }
 
-  let branch:
-    | {
-        id: string;
-        name: string;
+  const postgresBranch = await getBranchByIdFromPostgres(
+    session.activeStoreId,
+    payload.data.branchId,
+  );
+  if (postgresBranch === undefined) {
+    throw new Error("PostgreSQL branch switch path is not available");
+  }
+
+  const branch = postgresBranch
+    ? {
+        id: postgresBranch.id,
+        name: postgresBranch.name,
       }
-    | null = null;
-  let branchResolvedFromPostgres = false;
-
-  try {
-    const postgresBranch = await getBranchByIdFromPostgres(
-      session.activeStoreId,
-      payload.data.branchId,
-    );
-    if (postgresBranch !== undefined) {
-      branchResolvedFromPostgres = true;
-      branch = postgresBranch
-        ? {
-            id: postgresBranch.id,
-            name: postgresBranch.name,
-          }
-        : null;
-    }
-  } catch (error) {
-    logBranchesFallback("route.switch-branch", error);
-  }
-
-  if (!branchResolvedFromPostgres) {
-    const db = await getTursoDb();
-    const [tursoBranch] = await db
-      .select({
-        id: storeBranches.id,
-        name: storeBranches.name,
-      })
-      .from(storeBranches)
-      .where(
-        and(
-          eq(storeBranches.storeId, session.activeStoreId),
-          eq(storeBranches.id, payload.data.branchId),
-        ),
-      )
-      .limit(1);
-    branch = tursoBranch ?? null;
-  }
+    : null;
 
   if (!branch) {
     return NextResponse.json({ message: "ไม่พบสาขาที่เลือก" }, { status: 404 });

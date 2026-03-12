@@ -1,6 +1,17 @@
-# CSB POS (Next.js + Drizzle + Turso)
+# CSB POS (Next.js + PostgreSQL)
 
 เอกสารนี้สรุปวิธีรันโปรเจกต์ในเครื่อง, คำสั่งฐานข้อมูล, และ workflow ตอนพัฒนาให้ใช้งานได้จริงในทีม
+
+## Current Status
+
+- runtime app เป็น `PostgreSQL-only`
+- tooling ปัจจุบันเป็น `PostgreSQL-only`
+- โปรเจกต์อยู่ในสถานะ `พร้อมพัฒนาฟีเจอร์ POS ต่อ`
+- rollout flags กลุ่ม `POSTGRES_*_ENABLED` ถูก retired แล้ว; runtime ใช้ PostgreSQL โดยตรง
+- ถ้าจะอ่านเอกสารเริ่มต้น ให้เริ่มที่:
+  - `AI_CONTEXT.md`
+  - `docs/HANDOFF.md`
+  - `docs/CONTEXT_INDEX.md`
 
 ## 1) สิ่งที่ต้องมี
 
@@ -25,19 +36,13 @@ source .env.local
 set +a
 ```
 
-3. ซ่อมสถานะ migration (กรณีฐานข้อมูลมีอยู่แล้ว แต่ history ไม่ตรง)
+3. รัน migration ล่าสุด
 
 ```bash
-npm run db:repair
+npm run db:migrate:postgres
 ```
 
-4. รัน migration ล่าสุด
-
-```bash
-npm run db:migrate
-```
-
-5. รัน dev server
+4. รัน dev server
 
 ```bash
 npm run dev
@@ -50,48 +55,38 @@ npm run dev           # รัน dev server (turbopack)
 npm run dev:webpack   # รัน dev server แบบ webpack
 npm run lint          # ตรวจ lint
 npm run build         # ตรวจ compile + type + build
-npm run db:generate   # generate migration จาก schema
-npm run db:migrate    # apply migration
-npm run db:repair     # ซ่อม migration history/คอลัมน์ที่เคย drift
-npm run db:push       # push schema ตรงไป DB (ใช้ด้วยความระวัง)
-npm run db:seed       # seed ข้อมูลตัวอย่าง
-npm run idempotency:cleanup # cleanup ตาราง idempotency_requests แบบ manual
+npm run db:check:postgres   # ตรวจการเชื่อมต่อ PostgreSQL
+npm run db:migrate:postgres # apply PostgreSQL migrations
 ```
 
 ## 4) Workflow ตอนแก้ฐานข้อมูล (Schema)
 
-เมื่อมีการเพิ่ม/แก้คอลัมน์ใน `lib/db/schema/tables.ts`:
+เมื่อมีการเพิ่ม/แก้ schema:
 
-1. แก้ schema ในโค้ด
-2. generate migration
-
-```bash
-npm run db:generate
-```
-
-3. โหลด env และ apply migration
+1. เพิ่ม/แก้ไฟล์ SQL ใน `postgres/migrations/`
+2. โหลด env และ apply migration
 
 ```bash
 set -a
 source .env.local
 set +a
-npm run db:migrate
+npm run db:migrate:postgres
 ```
 
-4. ตรวจโค้ด
+3. ตรวจโค้ด
 
 ```bash
 npm run lint
 npm run build
 ```
 
-5. commit ให้ครบทั้งไฟล์ schema + drizzle migration + snapshot
+4. commit ให้ครบทั้ง migration + docs ที่เกี่ยวข้อง
 
 ไฟล์ที่ต้องเช็กว่าเข้า commit แล้ว:
-- `lib/db/schema/tables.ts`
-- `drizzle/*.sql`
-- `drizzle/meta/*_snapshot.json`
-- `drizzle/meta/_journal.json`
+- `postgres/migrations/*.sql`
+- `AI_CONTEXT.md`
+- `docs/HANDOFF.md`
+- เอกสาร schema/API/UI ที่เกี่ยวข้อง
 
 ## 5) Workflow ตอนแก้ฟีเจอร์ทั่วไป (API/UI/Auth)
 
@@ -110,27 +105,9 @@ npm run build
 - จัดการผู้ใช้ในหน้า settings
 - Orders create flow: ดู checklist มาตรฐานที่ `docs/UAT_ORDERS_CREATE_FLOW.md`
 
-## 6) ถ้าเจอปัญหา migrate แล้วฟ้อง table already exists
+## 6) หมายเหตุสำคัญเรื่อง env
 
-อาการตัวอย่าง:
-- `table contacts already exists`
-
-สาเหตุ:
-- ฐานข้อมูลมีตารางแล้ว แต่ `__drizzle_migrations` ไม่ตรงกับไฟล์ migration
-
-วิธีแก้:
-
-```bash
-set -a
-source .env.local
-set +a
-npm run db:repair
-npm run db:migrate
-```
-
-## 7) หมายเหตุสำคัญเรื่อง env
-
-- คำสั่ง DB (`db:migrate`, `db:repair`, `db:push`) ควรรันหลัง `source .env.local` เพื่อให้ชี้ DB เป้าหมายถูกต้อง
+- คำสั่ง DB (`db:check:postgres`, `db:migrate:postgres`) ควรรันหลัง `source .env.local` เพื่อให้ชี้ DB เป้าหมายถูกต้อง
 - ถ้าไม่โหลด env อาจไปรันผิดฐานข้อมูล
 - ถ้าต้องการอัปโหลดโลโก้ร้านจาก onboarding ต้องตั้งค่า Cloudflare R2 ใน `.env.local`:
 
@@ -274,6 +251,6 @@ IDEMPOTENCY_STALE_PROCESSING_MINUTES=15
 ทดสอบ manual ได้ด้วย:
 
 ```bash
-npm run idempotency:cleanup
 curl -H "Authorization: Bearer <CRON_SECRET>" https://<your-domain>/api/internal/cron/ap-reminders
+curl -H "Authorization: Bearer <CRON_SECRET>" https://<your-domain>/api/internal/cron/idempotency-cleanup
 ```

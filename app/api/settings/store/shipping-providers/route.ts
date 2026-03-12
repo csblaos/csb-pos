@@ -1,11 +1,9 @@
 import { randomUUID } from "node:crypto";
 
-import { and, asc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import { shippingProviders } from "@/lib/db/schema";
+import { execute, queryMany, queryOne } from "@/lib/db/query";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 
 const createShippingProviderSchema = z.object({
@@ -104,7 +102,6 @@ const resolveUniqueProviderCode = async (
   requestedCode: string,
   excludeId?: string,
 ) => {
-  const db = await getTursoDb();
   const safeCode = requestedCode.trim().toUpperCase() || "PROVIDER";
   const maxCodeLength = 40;
   const baseCode = safeCode.slice(0, maxCodeLength);
@@ -117,16 +114,20 @@ const resolveUniqueProviderCode = async (
     const trunkMaxLength = maxCodeLength - suffix.length;
     const candidate = `${baseCode.slice(0, Math.max(1, trunkMaxLength))}${suffix}`;
 
-    const [existing] = await db
-      .select({ id: shippingProviders.id })
-      .from(shippingProviders)
-      .where(
-        and(
-          eq(shippingProviders.storeId, storeId),
-          eq(shippingProviders.code, candidate),
-        ),
-      )
-      .limit(1);
+    const existing = await queryOne<{ id: string }>(
+      `
+        select id
+        from shipping_providers
+        where store_id = :storeId and code = :code
+        limit 1
+      `,
+      {
+        replacements: {
+          storeId,
+          code: candidate,
+        },
+      },
+    );
 
     if (!existing || (excludeId && existing.id === excludeId)) {
       return candidate;
@@ -136,21 +137,10 @@ const resolveUniqueProviderCode = async (
   return `${baseCode.slice(0, 30)}_${Date.now().toString().slice(-6)}`;
 };
 
-const toSchemaOutdatedResponse = () =>
-  NextResponse.json(
-    {
-      message:
-        "ระบบยังไม่พร้อมสำหรับข้อมูลขนส่ง กรุณารันฐานข้อมูลล่าสุด (`npm run db:migrate`) ก่อน",
-    },
-    { status: 409 },
-  );
-
 export async function GET() {
   try {
     const { storeId } = await enforcePermission("settings.view");
-    const db = await getTursoDb();
-
-    let rows: Array<{
+    const rows = await queryMany<{
       id: string;
       code: string;
       displayName: string;
@@ -159,30 +149,25 @@ export async function GET() {
       active: boolean;
       sortOrder: number;
       createdAt: string;
-    }> = [];
-
-    try {
-      rows = await db
-        .select({
-          id: shippingProviders.id,
-          code: shippingProviders.code,
-          displayName: shippingProviders.displayName,
-          branchName: shippingProviders.branchName,
-          aliases: shippingProviders.aliases,
-          active: shippingProviders.active,
-          sortOrder: shippingProviders.sortOrder,
-          createdAt: shippingProviders.createdAt,
-        })
-        .from(shippingProviders)
-        .where(eq(shippingProviders.storeId, storeId))
-        .orderBy(
-          asc(shippingProviders.sortOrder),
-          asc(shippingProviders.displayName),
-          asc(shippingProviders.createdAt),
-        );
-    } catch {
-      return toSchemaOutdatedResponse();
-    }
+    }>(
+      `
+        select
+          id,
+          code,
+          display_name as "displayName",
+          branch_name as "branchName",
+          aliases,
+          active,
+          sort_order as "sortOrder",
+          created_at as "createdAt"
+        from shipping_providers
+        where store_id = :storeId
+        order by sort_order asc, display_name asc, created_at asc
+      `,
+      {
+        replacements: { storeId },
+      },
+    );
 
     return NextResponse.json({
       ok: true,
@@ -205,7 +190,6 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const { storeId } = await enforcePermission("stores.update");
-    const db = await getTursoDb();
     const parsed = createShippingProviderSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json({ message: "ข้อมูลผู้ให้บริการขนส่งไม่ถูกต้อง" }, { status: 400 });
@@ -217,43 +201,74 @@ export async function POST(request: Request) {
     const aliases = normalizeAliases(payload.aliases);
     const requestedCode = normalizeProviderCode(displayName);
 
-    let code = "";
-    try {
-      code = await resolveUniqueProviderCode(storeId, requestedCode);
-    } catch {
-      return toSchemaOutdatedResponse();
-    }
+    const code = await resolveUniqueProviderCode(storeId, requestedCode);
     const providerId = randomUUID();
 
-    try {
-      await db.insert(shippingProviders).values({
-        id: providerId,
-        storeId,
-        code,
-        displayName,
-        branchName,
-        aliases: JSON.stringify(aliases),
-        active: payload.active ?? true,
-        sortOrder: payload.sortOrder ?? 0,
-      });
-    } catch {
-      return toSchemaOutdatedResponse();
-    }
+    await execute(
+      `
+        insert into shipping_providers (
+          id,
+          store_id,
+          code,
+          display_name,
+          branch_name,
+          aliases,
+          active,
+          sort_order
+        )
+        values (
+          :id,
+          :storeId,
+          :code,
+          :displayName,
+          :branchName,
+          :aliases,
+          :active,
+          :sortOrder
+        )
+      `,
+      {
+        replacements: {
+          id: providerId,
+          storeId,
+          code,
+          displayName,
+          branchName,
+          aliases: JSON.stringify(aliases),
+          active: payload.active ?? true,
+          sortOrder: payload.sortOrder ?? 0,
+        },
+      },
+    );
 
-    const [created] = await db
-      .select({
-        id: shippingProviders.id,
-        code: shippingProviders.code,
-        displayName: shippingProviders.displayName,
-        branchName: shippingProviders.branchName,
-        aliases: shippingProviders.aliases,
-        active: shippingProviders.active,
-        sortOrder: shippingProviders.sortOrder,
-        createdAt: shippingProviders.createdAt,
-      })
-      .from(shippingProviders)
-      .where(and(eq(shippingProviders.id, providerId), eq(shippingProviders.storeId, storeId)))
-      .limit(1);
+    const created = await queryOne<{
+      id: string;
+      code: string;
+      displayName: string;
+      branchName: string | null;
+      aliases: string;
+      active: boolean;
+      sortOrder: number;
+      createdAt: string;
+    }>(
+      `
+        select
+          id,
+          code,
+          display_name as "displayName",
+          branch_name as "branchName",
+          aliases,
+          active,
+          sort_order as "sortOrder",
+          created_at as "createdAt"
+        from shipping_providers
+        where id = :id and store_id = :storeId
+        limit 1
+      `,
+      {
+        replacements: { id: providerId, storeId },
+      },
+    );
 
     return NextResponse.json(
       {
@@ -284,31 +299,29 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const { storeId } = await enforcePermission("stores.update");
-    const db = await getTursoDb();
     const parsed = updateShippingProviderSchema.safeParse(await request.json());
     if (!parsed.success) {
       return NextResponse.json({ message: "ข้อมูลผู้ให้บริการขนส่งไม่ถูกต้อง" }, { status: 400 });
     }
 
     const payload = parsed.data;
-    let target: { id: string } | undefined;
-    try {
-      [target] = await db
-        .select({
-          id: shippingProviders.id,
-        })
-        .from(shippingProviders)
-        .where(and(eq(shippingProviders.id, payload.id), eq(shippingProviders.storeId, storeId)))
-        .limit(1);
-    } catch {
-      return toSchemaOutdatedResponse();
-    }
+    const target = await queryOne<{ id: string }>(
+      `
+        select id
+        from shipping_providers
+        where id = :id and store_id = :storeId
+        limit 1
+      `,
+      {
+        replacements: { id: payload.id, storeId },
+      },
+    );
 
     if (!target) {
       return NextResponse.json({ message: "ไม่พบผู้ให้บริการขนส่งที่ต้องการแก้ไข" }, { status: 404 });
     }
 
-    const nextValues: Partial<typeof shippingProviders.$inferInsert> = {};
+    const nextValues: Record<string, unknown> = {};
     if (payload.displayName !== undefined) {
       nextValues.displayName = payload.displayName.trim();
     }
@@ -325,29 +338,71 @@ export async function PATCH(request: Request) {
       nextValues.active = payload.active;
     }
 
-    try {
-      await db
-        .update(shippingProviders)
-        .set(nextValues)
-        .where(and(eq(shippingProviders.id, payload.id), eq(shippingProviders.storeId, storeId)));
-    } catch {
-      return toSchemaOutdatedResponse();
+    if (payload.displayName !== undefined) {
+      nextValues.code = await resolveUniqueProviderCode(
+        storeId,
+        normalizeProviderCode(payload.displayName.trim()),
+        payload.id,
+      );
     }
 
-    const [updated] = await db
-      .select({
-        id: shippingProviders.id,
-        code: shippingProviders.code,
-        displayName: shippingProviders.displayName,
-        branchName: shippingProviders.branchName,
-        aliases: shippingProviders.aliases,
-        active: shippingProviders.active,
-        sortOrder: shippingProviders.sortOrder,
-        createdAt: shippingProviders.createdAt,
+    const assignments = Object.keys(nextValues)
+      .map((key) => {
+        const columnMap: Record<string, string> = {
+          code: "code",
+          displayName: "display_name",
+          branchName: "branch_name",
+          aliases: "aliases",
+          sortOrder: "sort_order",
+          active: "active",
+        };
+        return `${columnMap[key]} = :${key}`;
       })
-      .from(shippingProviders)
-      .where(and(eq(shippingProviders.id, payload.id), eq(shippingProviders.storeId, storeId)))
-      .limit(1);
+      .join(", ");
+
+    await execute(
+      `
+        update shipping_providers
+        set ${assignments}
+        where id = :id and store_id = :storeId
+      `,
+      {
+        replacements: {
+          ...nextValues,
+          id: payload.id,
+          storeId,
+        },
+      },
+    );
+
+    const updated = await queryOne<{
+      id: string;
+      code: string;
+      displayName: string;
+      branchName: string | null;
+      aliases: string;
+      active: boolean;
+      sortOrder: number;
+      createdAt: string;
+    }>(
+      `
+        select
+          id,
+          code,
+          display_name as "displayName",
+          branch_name as "branchName",
+          aliases,
+          active,
+          sort_order as "sortOrder",
+          created_at as "createdAt"
+        from shipping_providers
+        where id = :id and store_id = :storeId
+        limit 1
+      `,
+      {
+        replacements: { id: payload.id, storeId },
+      },
+    );
 
     if (!updated) {
       return NextResponse.json({ message: "ไม่พบข้อมูลผู้ให้บริการขนส่งหลังอัปเดต" }, { status: 404 });
@@ -368,35 +423,37 @@ export async function PATCH(request: Request) {
 export async function DELETE(request: Request) {
   try {
     const { storeId } = await enforcePermission("stores.update");
-    const db = await getTursoDb();
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id")?.trim() ?? "";
     if (!id) {
       return NextResponse.json({ message: "กรุณาระบุผู้ให้บริการที่ต้องการลบ" }, { status: 400 });
     }
 
-    let target: { id: string } | undefined;
-    try {
-      [target] = await db
-        .select({ id: shippingProviders.id })
-        .from(shippingProviders)
-        .where(and(eq(shippingProviders.id, id), eq(shippingProviders.storeId, storeId)))
-        .limit(1);
-    } catch {
-      return toSchemaOutdatedResponse();
-    }
+    const target = await queryOne<{ id: string }>(
+      `
+        select id
+        from shipping_providers
+        where id = :id and store_id = :storeId
+        limit 1
+      `,
+      {
+        replacements: { id, storeId },
+      },
+    );
 
     if (!target) {
       return NextResponse.json({ message: "ไม่พบผู้ให้บริการขนส่งที่ต้องการลบ" }, { status: 404 });
     }
 
-    try {
-      await db
-        .delete(shippingProviders)
-        .where(and(eq(shippingProviders.id, id), eq(shippingProviders.storeId, storeId)));
-    } catch {
-      return toSchemaOutdatedResponse();
-    }
+    await execute(
+      `
+        delete from shipping_providers
+        where id = :id and store_id = :storeId
+      `,
+      {
+        replacements: { id, storeId },
+      },
+    );
 
     return NextResponse.json({ ok: true });
   } catch (error) {

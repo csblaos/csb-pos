@@ -6,6 +6,20 @@
 
 ## 1) Quick Start (ต้องอ่านก่อนแก้โค้ด)
 
+สถานะปัจจุบัน:
+- runtime app เป็น `PostgreSQL-only`
+- tooling ปัจจุบันเป็น `PostgreSQL-only`
+- โปรเจกต์อยู่ในสถานะ `พร้อมพัฒนาฟีเจอร์ต่อ`
+- rollout flags กลุ่ม `POSTGRES_*_ENABLED` ถูกถอดออกจาก runtime/env แล้ว และ PostgreSQL เป็น default behavior ถาวร
+- env PostgreSQL ที่ควรคงไว้ในเครื่องปัจจุบันมีเพียง `POSTGRES_DATABASE_URL`, `POSTGRES_SSL_MODE`, และ `POSTGRES_SSL_REJECT_UNAUTHORIZED`; ค่ากลุ่ม pool/log ใช้ default ใน `lib/db/sequelize.ts` ได้
+- `TURSO_DATABASE_URL` และ `TURSO_AUTH_TOKEN` ถูกถอดออกจาก env ปัจจุบันแล้ว; config runtime เหลือ PostgreSQL อย่างเดียว
+- ระวัง query ฝั่ง PostgreSQL ที่เทียบ `created_at` / `paid_at`: schema migration ชุดแรกยังเก็บหลายคอลัมน์เวลาเป็น `text` ดังนั้น query ที่เทียบกับเวลาโดยตรงควร cast เป็น `::timestamptz` หรือใช้ UTC range string ที่ชัดเจนก่อนเทียบ
+- baseline PostgreSQL ล่าสุดเติมตาราง `shipping_providers` แล้วใน [postgres/migrations/0009_shipping_providers_foundation.sql](/Users/csl-dev/Desktop/alex/csb-pos/postgres/migrations/0009_shipping_providers_foundation.sql) พร้อม seed ค่า default (`Houngaloun`, `Anousith`, `Mixay`) ให้ร้านเดิมทั้งหมด
+- ระวัง raw SQL แบบ Postgres ที่ส่ง array ผ่าน Sequelize replacements: ให้ใช้ `in (:ids)` แทน `= any(:ids)` ถ้าไม่ได้ cast เป็น array จริง ไม่เช่นนั้นจะถูก expand เป็น argument list ผิด syntax เช่นเคส `product_units` ใน [lib/inventory/queries.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/inventory/queries.ts)
+- หน้า [components/app/orders-management.tsx](/Users/csl-dev/Desktop/alex/csb-pos/components/app/orders-management.tsx) มี helper `dedupeOrderStatusBadges(...)` แล้ว เพื่อกัน badge ซ้ำกรณีสถานะหลักและสถานะการชำระ map เป็น label/class เดียวกัน เช่น `ชำระแล้ว`
+- หน้า [components/app/orders-management.tsx](/Users/csl-dev/Desktop/alex/csb-pos/components/app/orders-management.tsx) รองรับ bulk actions บน `/orders` แล้วแบบจำกัดเฉพาะ `ออเดอร์ออนไลน์`: `แพ็กสินค้า` ใช้ได้กับออเดอร์ที่แพ็กได้จริง และ `จัดส่งแล้ว` ใช้ได้เฉพาะออเดอร์ `PACKED` ที่มี `shippingProvider/shippingCarrier` และ `trackingNo` ครบ โดยยังคง `ยืนยันรับชำระ` ไว้ที่หน้า detail
+- หน้า [components/app/orders-management.tsx](/Users/csl-dev/Desktop/alex/csb-pos/components/app/orders-management.tsx) มีเมนู `3 จุด` เป็น secondary actions แล้วทั้ง mobile card และ desktop table โดยมี `เปิดรายละเอียด`, `พิมพ์ใบเสร็จ`, และ `พิมพ์สติ๊กเกอร์` (เฉพาะออเดอร์ออนไลน์) ผ่านหน้า print เดิมของระบบ
+
 1. โหลด env ก่อนรันคำสั่ง DB
 
 ```bash
@@ -24,30 +38,8 @@ npm run build
 3. คำสั่งฐานข้อมูล
 
 ```bash
-npm run db:repair
-npm run db:migrate
 npm run db:check:postgres
 npm run db:migrate:postgres
-npm run db:backfill:postgres:orders-read
-npm run db:backfill:postgres:auth-rbac-read
-npm run db:backfill:postgres:settings-system-admin-read
-npm run db:backfill:postgres:store-settings-read
-npm run db:backfill:postgres:notifications
-npm run db:backfill:postgres:products-units-onboarding-read
-npm run db:backfill:postgres:product-variants-foundation
-npm run db:backfill:postgres:purchase-read
-npm run db:backfill:postgres:inventory-movements
-npm run db:compare:postgres:orders-read
-npm run db:compare:postgres:auth-rbac-read
-npm run db:compare:postgres:branches
-npm run db:compare:postgres:settings-system-admin-read
-npm run db:compare:postgres:store-settings-read
-npm run db:compare:postgres:notifications
-npm run db:compare:postgres:products-units-onboarding-read
-npm run db:compare:postgres:product-variants-foundation
-npm run db:compare:postgres:purchase-read
-npm run db:compare:postgres:inventory
-npm run db:compare:postgres:reports-read
 npm run smoke:postgres:auth-rbac-read-gate
 npm run smoke:postgres:all-postgres-observe-gate
 npm run smoke:postgres:branches-gate
@@ -100,33 +92,37 @@ npm run smoke:postgres:submit-payment-slip
 - `components/` React UI components
 - `lib/` shared logic และ query helper
 - `lib/http/request-context.ts` helper กลางสำหรับ map request headers -> `RequestContext` เพื่อเตรียมแยก transport layer ออกจาก service
+- `lib/http/route-handler.ts` helper กลางสำหรับ parse JSON, build request context, และ map idempotency claim -> HTTP response ใน route layer
+- route ใหญ่ฝั่ง orders เริ่มลดโค้ด transport ซ้ำแล้ว โดย [app/api/orders/[orderId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/orders/[orderId]/route.ts) มี helper local สำหรับ success completion และ mutation item mapping เพื่อให้ PATCH route ไปทาง `parse -> context -> service -> response` มากขึ้น
+- route ฝั่ง [app/api/settings/store/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/store/route.ts) ถูกจัดรูปแบบใหม่ให้มี dispatch กลางสำหรับ `json`/`multipart` และใช้ helper audit กลางในไฟล์เดียวกัน เพื่อลดโค้ด transport ซ้ำก่อนแยก adapter ต่อในอนาคต
+- route ฝั่ง [app/api/stock/movements/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stock/movements/route.ts) ถูกจัดรูปแบบเพิ่มให้ใช้ helper fail path กลางสำหรับ `idempotency + audit + error response` เพื่อลด branch ซ้ำและขยับเข้า pattern `parse -> context -> service -> response`
+- หน้า [app/(app)/stock/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/stock/page.tsx) ถูกลด overfetch แล้ว: server render จะโหลดเฉพาะ data ของ active tab (`inventory`, `purchase`, `recording`, `history`) และส่ง `StockTabLoadingState` ให้แท็บอื่นแทนการ fetch ทุกแท็บพร้อมกันตอนเข้า `/stock`
+- มี request-scoped helper ใหม่ที่ [lib/app-shell/context.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/app-shell/context.ts) สำหรับรวม `session + systemRole + permissionKeys + activeStoreProfile` ต่อ request เดียว และตอนนี้ [app/(app)/layout.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/layout.tsx), [app/(app)/dashboard/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/dashboard/page.tsx), [app/(app)/orders/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/orders/page.tsx), [app/(app)/stock/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/stock/page.tsx), และ [app/(app)/reports/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/reports/page.tsx) ใช้ก้อนนี้แล้ว เพื่อลด query ซ้ำตอนเปลี่ยนเมนูหลัก
+- [lib/orders/queries.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/orders/queries.ts) แยก `orders catalog` ออกเป็น static cache (`unstable_cache`, revalidate 60s) แล้ว โดย cache เฉพาะ products / conversions / contacts / payment accounts / shipping providers / financial config / payment policy ส่วน inventory balances ยังอ่านสดทุกครั้ง เพื่อให้หน้า `/orders` เข้าไวขึ้นโดยไม่ทำให้ stock ค้าง
 - `lib/platform/postgres-auth-rbac.ts` helper query-first สำหรับ `auth/session + RBAC + app shell` บน PostgreSQL
 - `lib/platform/postgres-branches.ts` helper query-first สำหรับ `stores/branches + branch policy` บน PostgreSQL
 - `lib/platform/postgres-settings-admin.ts` helper query-first สำหรับ `settings/system-admin` read foundation บน PostgreSQL
 - `lib/platform/postgres-products-onboarding.ts` helper query-first สำหรับ `products/units/onboarding channels` read foundation บน PostgreSQL
-- `lib/db/turso-lazy.ts` helper กลางสำหรับ lazy-load Turso client เฉพาะตอน runtime path ต้องใช้จริง เพื่อลด top-level Turso probe ระหว่าง build/import
-- `lib/db/schema/tables.ts` DB schema หลัก (Drizzle)
+- `postgres/migrations/` คือ source of truth ของ schema/migration ปัจจุบัน
 - `server/services/` business service layer
 - `server/repositories/` data access layer
-- `drizzle/` SQL migrations + meta
 - `postgres/migrations/` SQL migrations สำหรับ Aiven PostgreSQL (Sequelize query-first path)
-- `scripts/repair-migrations.mjs` repair/compat script
 - `scripts/check-postgres.mjs` health check สำหรับ Aiven PostgreSQL ผ่าน Sequelize
 - `scripts/migrate-postgres.mjs` apply PostgreSQL SQL migrations พร้อมตาราง tracking `__app_postgres_migrations`
-- `scripts/backfill-postgres-orders-read.mjs` backfill ข้อมูลจาก Turso -> PostgreSQL สำหรับ baseline `orders read`
-- `scripts/compare-postgres-orders-read.mjs` เทียบ parity ของ `orders list/detail` ระหว่าง Turso กับ PostgreSQL
-- `scripts/compare-postgres-reports-read.mjs` เทียบ parity ของ `/reports` overview และชุดข้อมูล `outstanding PO/AP` ระหว่าง Turso กับ PostgreSQL
 
 เอกสาร inventory:
 - `docs/CODEBASE_MAP.md` แผนที่โค้ดทั้งระบบ (domain ownership)
 - `docs/UI_ROUTE_MAP.md` แผนที่หน้า UI -> component -> API
 - `docs/API_INVENTORY.md` รายการ API ทั้งระบบ
 - `docs/SCHEMA_MAP.md` แผนผังตารางและความสัมพันธ์
-- `docs/postgresql-sequelize-migration.md` แผนย้ายไป PostgreSQL + Sequelize query-first
-- `docs/postgres-staging-rollout.md` runbook เปิด PostgreSQL flags บน staging แบบเป็น wave
-- `docs/postgres-inventory-producers-audit.md` backlog ของ runtime paths ที่ยังเขียน `inventory_movements` อยู่บน Turso
-- `docs/postgres-cutover-plan.md` แผน cutover ของ inventory/reporting หลังผ่าน staging rollout แล้ว
-- `docs/postgres-full-cutover-checklist.md` master checklist ว่า runtime ไหนใช้ PostgreSQL แล้ว/ยังใช้ Turso อยู่ และลำดับเปิด flags จนถึงถอด fallback
+- `docs/postgresql-sequelize-migration.md` historical migration record ของ phase ย้ายฐานข้อมูล
+- `docs/postgres-staging-rollout.md` historical rollout runbook ของ phase เปิด PostgreSQL flags
+- `docs/postgres-inventory-producers-audit.md` historical backlog ของ phase dual-write/cutover เดิม
+- `docs/postgres-cutover-plan.md` historical cutover plan ของ inventory/reporting
+- `docs/postgres-full-cutover-checklist.md` historical checklist ของ phase cutover/fallback removal
+- `docs/turso-legacy-tooling.md` historical note ของ phase retire Turso/LibSQL/Drizzle
+- `docs/legacy-tooling-deletion-audit.md` สรุปผลการลบ legacy tooling ล่าสุด
+- `docs/archive/HANDOFF_HISTORY.md` migration/handoff log เดิมแบบเต็ม ใช้อ้างย้อนหลังเท่านั้น
 - `docs/postgres-purchase-rollout-execution.md` checklist ปฏิบัติจริงสำหรับ purchase rollout บน staging
 - `docs/postgres-inventory-read-rollout-execution.md` checklist ปฏิบัติจริงสำหรับ inventory read rollout บน staging
 - `docs/postgres-auth-rbac-read-rollout-execution.md` checklist ปฏิบัติจริงสำหรับ auth/session + RBAC + app shell read rollout บน staging
@@ -138,6 +134,10 @@ npm run smoke:postgres:submit-payment-slip
 - `docs/postgres-products-units-onboarding-write-rollout-execution.md` checklist ปฏิบัติจริงสำหรับ products/units/onboarding low-risk write rollout บน staging
 - `docs/postgres-products-write-rollout-execution.md` checklist ปฏิบัติจริงสำหรับ product CRUD + variant persistence write rollout บน staging
 - `docs/postgres-orders-write-rollout-execution.md` checklist ปฏิบัติจริงสำหรับ orders write rollout บน staging
+
+หมายเหตุ:
+- `docs/HANDOFF.md` คือ handoff ปัจจุบันแบบสั้น
+- sections ยาวด้านล่างของไฟล์นี้เป็น historical timeline ของงาน migration เดิม ไม่ใช่คู่มือปัจจุบัน
 - `scripts/smoke-postgres-orders-write-suite.mjs` ตอนนี้เป็น preflight chain ของ orders write rollout แล้ว โดยรวม `db:check:postgres`, `db:migrate:postgres`, `db:compare:postgres:auth-rbac-read`, `db:compare:postgres:orders-read`, `db:compare:postgres:purchase-read`, `db:compare:postgres:inventory`, `db:compare:postgres:reports-read`, order write smokes ทั้งชุด, `lint`, และ `build` และรันผ่านแล้วกับ Aiven จริง
 - `docs/postgres-stock-movement-rollout-execution.md` checklist ปฏิบัติจริงสำหรับ stock movement rollout บน staging
 - `scripts/smoke-postgres-stock-movement-gate.mjs` ตอนนี้เป็น preflight chain ของ stock movement rollout แล้ว โดยรวม `db:check:postgres`, `db:migrate:postgres`, `db:compare:postgres:auth-rbac-read`, `db:compare:postgres:branches`, `smoke:postgres:inventory-read-gate`, `smoke:postgres:stock-movement`, `lint`, และ `build` และรันผ่านแล้วกับ Aiven จริง
@@ -176,7 +176,17 @@ npm run smoke:postgres:submit-payment-slip
 - `POSTGRES_ORDERS_WRITE_MARK_PACKED_ENABLED=1`
 - `POSTGRES_ORDERS_WRITE_MARK_SHIPPED_ENABLED=1`
 - `POSTGRES_ORDERS_WRITE_SUBMIT_PAYMENT_SLIP_ENABLED=1`
-- dev machine นี้ถูก hard-switch เป็น PostgreSQL-first แล้ว; Turso ถูกคงไว้ชั่วคราวเพื่อ compare scripts / legacy fallback / audit ระหว่างช่วงเก็บ zero-fallback window
+- dev machine นี้ถูก hard-switch เป็น PostgreSQL-first แล้ว และ runtime app ไม่ใช้ Turso/LibSQL แล้ว
+- phase ล่าสุดลบ `drizzle-orm` และ schema reference เดิมออกแล้ว:
+  - ลบ [lib/db/schema.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/schema.ts), [lib/db/schema/index.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/schema/index.ts), และ [lib/db/schema/tables.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/schema/tables.ts)
+  - ลบ dependency `drizzle-orm`
+  - เอา `drizzle-orm` ออกจาก [next.config.ts](/Users/csl-dev/Desktop/alex/csb-pos/next.config.ts)
+  - schema source of truth เหลือ PostgreSQL migrations ที่ [postgres/migrations/](/Users/csl-dev/Desktop/alex/csb-pos/postgres/migrations/)
+- phase ล่าสุดของ docs scrub:
+  - [docs/postgresql-sequelize-migration.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgresql-sequelize-migration.md) ถูกลดบทบาทเป็น historical migration record
+  - [docs/postgres-staging-rollout.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-staging-rollout.md) ถูกลดบทบาทเป็น historical rollout reference และตัดคำสั่ง compare/backfill ที่ถูกลบออกแล้ว
+  - [docs/postgres-turso-runtime-dependency-audit.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-turso-runtime-dependency-audit.md) ถูกปิดสถานะเป็น historical audit และระบุชัดว่า runtime app เป็น PostgreSQL-only แล้ว
+  - [README.md](/Users/csl-dev/Desktop/alex/csb-pos/README.md) เปลี่ยน workflow ฐานข้อมูลให้เหลือ `db:check:postgres` และ `db:migrate:postgres`
 - เริ่มถอด fallback จริงแล้วจาก `reports read`:
   - [lib/reports/queries.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/reports/queries.ts) ไม่ใช้ Turso fallback/runtime branch แล้ว และบังคับใช้ PostgreSQL query path ตรง
   - top-level imports ของ `@/lib/db/client` ใน `app/lib/server` ลดจาก `23` เหลือ `22` ไฟล์
@@ -347,7 +357,7 @@ npm run smoke:postgres:submit-payment-slip
 
 - ใช้ `rg -l "import { db } from '@/lib/db/client'" app lib server` แล้วไม่พบ runtime files ที่ยัง import Turso client แบบ top-level แล้วหลัง phase `runtime Turso cleanup`
 - [lib/db/client.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/client.ts) ยังอยู่เป็น legacy lazy path แต่เลิกยิง connection probe ตอน import แล้ว
-- blocker หลักของการถอน Turso runtime ตอนนี้ไม่ใช่ top-level import แล้ว แต่เป็น `turso-lazy` entrypoint และ runtime callers ที่ยังพึ่งมันอยู่ รวมถึง compare/tooling cleanup
+- blocker หลักของการถอน Turso runtime ตอนนี้ไม่ใช่ top-level import แล้ว และไม่ใช่ `turso-lazy` อีกต่อไป เพราะ runtime callers เหลือ `0`; งานที่เหลือคือ compare/tooling cleanup
 - ดูรายละเอียด grouping และลำดับ migration เพิ่มเติมที่ [docs/postgres-turso-runtime-dependency-audit.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/postgres-turso-runtime-dependency-audit.md)
 - phase auth/RBAC ล่าสุด:
   - เพิ่ม PostgreSQL foundation สำหรับ `auth/session + RBAC + app shell` แล้วผ่าน [lib/platform/postgres-auth-rbac.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/platform/postgres-auth-rbac.ts)
@@ -620,6 +630,7 @@ npm run smoke:postgres:submit-payment-slip
   - `PATCH /api/orders/[orderId]`
   - `GET /api/orders/cod-reconcile`
   - `POST /api/orders/cod-reconcile`
+  - `PATCH /api/orders/[orderId]` (`action=mark_cod_returned` จาก COD reconcile row action)
   - `POST /api/orders/[orderId]/send-qr`
   - `POST /api/orders/[orderId]/send-shipping`
   - `POST /api/orders/[orderId]/shipments/label`
@@ -631,6 +642,7 @@ npm run smoke:postgres:submit-payment-slip
     - หน้า `/orders` แสดง `ช่องทาง` ในบรรทัดเดียวกันทั้งมือถือและ desktop แล้ว โดยใช้ข้อความสั้น `Facebook` / `WhatsApp` / `Walk-in` / `Pickup`
     - ตาราง desktop ของหน้า `/orders` เพิ่มคอลัมน์ `ช่องทาง` (ค่าในรูป `Facebook • LAK • COD`) และคอลัมน์ `ยอดรวม` เหลือแสดงเฉพาะยอดเงิน
     - หน้า `/orders` ปรับ badge สถานะของออเดอร์ออนไลน์ให้แยก `สถานะงาน` ออกจาก `สถานะการชำระ` มากขึ้น: เคส `PENDING_PAYMENT` ของ online จะใช้ badge หลัก `รอดำเนินการ` แทน `ค้างจ่าย`, ส่วน badge รองอ่านจาก `paymentMethod/paymentStatus` เช่น `ยังไม่ชำระ`, `รอตรวจสลิป`, `COD`, `COD รอปิดยอด`, `ชำระแล้ว`
+    - หน้า `/orders` รองรับ multi-select แบบจำกัดเฉพาะออเดอร์ออนไลน์ที่ `แพ็กได้จริง` แล้ว ทั้ง mobile card list และ desktop table โดยมี bulk action bar + `SlideUpSheet` ยืนยันสำหรับ `แพ็กสินค้า` และยิง `PATCH /api/orders/[orderId]` (`action=mark_packed`) ทีละรายการจากหน้า list; เคส `ลูกค้าหน้าร้าน` จะไม่แสดง checkbox สำหรับแพ็ก
     - ปรับถ้อยคำ badge สถานะค้างชำระจาก `รอชำระ` เป็น `ค้างจ่าย` ทั้งหน้า `/orders` และ `/orders/[orderId]` (รวม label `รับสินค้าแล้ว (...)`)
     - เพิ่มปุ่มลัด `ปิดยอด COD รายวัน` ไปหน้า `/orders/cod-reconcile` (แสดงเมื่อผู้ใช้มีสิทธิ์ `orders.mark_paid`)
     - ใช้ `SlideUpSheet` ตัวเดียวกันทั้งสามช่วงหน้าจอ
@@ -783,6 +795,7 @@ npm run smoke:postgres:submit-payment-slip
       - แสดงเฉพาะออเดอร์ `COD` ที่อยู่สถานะ `SHIPPED + COD_PENDING_SETTLEMENT`
       - กรองตาม `ช่วงวันที่ส่ง`, `ผู้ให้บริการขนส่ง`, และ `คำค้น (เลขออเดอร์/ชื่อลูกค้า)`
       - ปรับค่า `ยอดโอนจริง` และ `codFee` ต่อรายการได้ แล้วเลือกหลายรายการเพื่อปิดยอดแบบ batch
+      - แต่ละแถวมี quick action `ตีกลับ` เปิด `SlideUpSheet` ในหน้าเดียว เพื่อกรอก `ค่าตีกลับ` + `หมายเหตุ` แล้วบันทึก `mark_cod_returned` รายออเดอร์ โดยไม่ต้องออกไปหน้า detail
       - มี summary card แบบ real-time สำหรับยอดที่ต้องได้/ยอดโอนจริง/codFee/ส่วนต่าง (จากรายการที่เลือก) และสรุปร่างข้อมูลทั้งหน้าปัจจุบัน
       - ปิดยอดแบบ batch ผ่าน `POST /api/orders/cod-reconcile` (ใช้สิทธิ์ `orders.mark_paid`) พร้อมบันทึก audit action `order.confirm_paid.bulk_cod_reconcile`
       - endpoint ปิดยอด COD รองรับ `Idempotency-Key` เพื่อกันการกดยืนยันซ้ำ/เน็ตหน่วง และ replay response เดิมได้
@@ -959,7 +972,7 @@ npm run smoke:postgres:submit-payment-slip
   - navbar คงปุ่ม `เปลี่ยนร้าน` แต่ปรับเป็น compact (icon-first) และซ่อนปุ่มเมื่ออยู่หน้า `/settings/stores`
   - เพิ่ม API inbox:
     - `GET/PATCH /api/settings/notifications/inbox` (list + mark read/unread/resolve)
-    - ถ้า schema notification ยังไม่พร้อม (`notification_inbox`/`notification_rules` ยังไม่มี) `GET` จะ fallback เป็นรายการว่างพร้อม `warning` แทนการ 500; `PATCH` จะตอบ 503 พร้อมข้อความแนะนำให้รัน `db:repair` + `db:migrate`
+    - ถ้า schema notification ยังไม่พร้อม (`notification_inbox`/`notification_rules` ยังไม่มี) `GET` จะ fallback เป็นรายการว่างพร้อม `warning` แทนการ 500; `PATCH` จะตอบ 503 พร้อมข้อความแนะนำให้รัน `db:migrate:postgres`
     - `PATCH /api/settings/notifications/rules` (mute/snooze/clear ราย PO)
   - เพิ่ม cron endpoint `GET /api/internal/cron/ap-reminders` (ใช้ `CRON_SECRET`) เพื่อ sync แจ้งเตือนจาก `getPurchaseApDueReminders`
   - เพิ่ม GitHub Actions workflow `.github/workflows/ap-reminders-cron.yml` เป็น external scheduler fallback (เหมาะกับ Vercel Free) โดยยิง endpoint เดิมด้วย secret
@@ -987,7 +1000,7 @@ npm run smoke:postgres:submit-payment-slip
 
 ## 6) Required Environments (เฉพาะที่ใช้บ่อย)
 
-- DB: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`
+- legacy LibSQL env ไม่จำเป็นแล้วใน workflow ปัจจุบัน
 - PostgreSQL migration foundation:
   - `POSTGRES_DATABASE_URL` (ไม่ต้องพ่วง `sslmode` ใน URL; ให้คุมผ่าน env ด้านล่าง)
   - `POSTGRES_SSL_MODE`
@@ -1126,8 +1139,69 @@ npm run smoke:postgres:submit-payment-slip
   - `server/services/idempotency.service.ts` ถูกย้ายเป็น PostgreSQL raw SQL แล้วทั้ง `claim`, `mark success/fail`, และ `cleanup`
   - `server/repositories/order-shipment.repo.ts` ถูก rewrite เป็น PostgreSQL raw SQL แล้ว
   - `server/services/order-shipment.service.ts` เปลี่ยนไปใช้ PostgreSQL transaction (`runInTransaction`) และ audit insert แบบ PostgreSQL แล้ว
-  - หลังรอบนี้ runtime callers ของ `lib/db/turso-lazy.ts` ลดจาก `39` เหลือ `31`
+  - `server/services/notification.service.ts` ถูกลดเหลือ PostgreSQL-only wrapper แล้ว และไม่เรียก `getTursoDb()` อีก
+  - `lib/products/service.ts` ถูกลดเหลือ PostgreSQL-only wrapper แล้ว และไม่เรียก `getTursoDb()` อีก
+  - routes กลุ่ม `products/units` ถูกย้ายเป็น PostgreSQL path ตรงแล้วใน `app/api/products/**`, `app/api/units/**`, และ `app/api/products/generate-barcode/route.ts`
+  - ต่อจากนั้น `settings/store` ถูกย้ายเป็น PostgreSQL path ตรงแล้วใน:
+    - `GET/PATCH` ของ [app/api/settings/store/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/store/route.ts)
+    - `GET/PATCH` ของ [app/api/settings/store/pdf/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/store/pdf/route.ts)
+    - `GET/POST/PATCH/DELETE` ของ [app/api/settings/store/payment-accounts/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/store/payment-accounts/route.ts)
+  - ต่อจากนั้น `settings/users + roles` ถูกย้ายเป็น PostgreSQL path ตรงแล้วใน:
+    - `GET/POST` ของ [app/api/settings/users/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/users/route.ts)
+    - `GET/PATCH` ของ [app/api/settings/users/[userId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/users/[userId]/route.ts)
+    - `GET` ของ [app/api/settings/roles/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/roles/route.ts)
+    - `GET/PATCH` ของ [app/api/settings/roles/[roleId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/roles/[roleId]/route.ts)
+  - ต่อจากนั้น `settings/account + shipping-providers + users/candidates` ถูกย้ายเป็น PostgreSQL path ตรงแล้วใน:
+    - `GET/PATCH` ของ [app/api/settings/account/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/account/route.ts)
+    - `GET/POST/PATCH/DELETE` ของ [app/api/settings/store/shipping-providers/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/store/shipping-providers/route.ts)
+    - `GET` ของ [app/api/settings/users/candidates/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/users/candidates/route.ts)
+  - ต่อจากนั้น `auth + onboarding` ถูกย้ายเป็น PostgreSQL path ตรงแล้วใน:
+    - `POST` ของ [app/api/auth/login/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/auth/login/route.ts)
+    - `POST` ของ [app/api/auth/signup/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/auth/signup/route.ts)
+    - `GET/POST` ของ [app/api/onboarding/channels/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/onboarding/channels/route.ts)
+    - `POST` ของ [app/api/onboarding/store/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/onboarding/store/route.ts)
+    - [server/repositories/onboarding-channels.repo.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/repositories/onboarding-channels.repo.ts) และ [server/services/onboarding-channels.service.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/services/onboarding-channels.service.ts) ไม่ย้อนกลับ Turso แล้ว
+  - ปิด `branches + system-admin + dashboard repo` แล้วใน:
+    - [app/api/stores/branches/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stores/branches/route.ts)
+    - [app/api/stores/branches/switch/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stores/branches/switch/route.ts)
+    - [lib/branches/policy.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/branches/policy.ts)
+    - [app/api/system-admin/config/stores/[storeId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/system-admin/config/stores/[storeId]/route.ts)
+    - [app/api/system-admin/config/users/[userId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/system-admin/config/users/[userId]/route.ts)
+    - [app/api/system-admin/superadmins/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/system-admin/superadmins/route.ts)
+    - [app/api/system-admin/superadmins/[userId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/system-admin/superadmins/[userId]/route.ts)
+    - [server/repositories/dashboard.repo.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/repositories/dashboard.repo.ts)
+  - หลังรอบล่าสุด runtime callers ของ `getTursoDb()` ใน `app/lib/server` เหลือ `0`
+  - สถานะ dev machine ตอนนี้คือ `PostgreSQL-only runtime`; Turso เหลือบทบาทใน legacy compare/backfill tooling เท่านั้น
   - `npm run lint` และ `npm run build` ผ่านหลังการเปลี่ยน
+  - phase ล่าสุดแยก `Turso` ออกเป็น legacy tooling ชัดขึ้นแล้ว:
+    - [lib/db/turso-lazy.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/turso-lazy.ts) ถูกลบ เพราะไม่มี caller เหลือ
+    - เพิ่ม [docs/turso-legacy-tooling.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/turso-legacy-tooling.md)
+    - [docs/drizzle-migrations.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/drizzle-migrations.md) ถูกปรับให้ชัดว่าเป็น legacy SQLite/Turso tooling docs ไม่ใช่ runtime หลัก
+    - [.env.example](/Users/csl-dev/Desktop/alex/csb-pos/.env.example) ระบุชัดว่า `LEGACY_LIBSQL_*` ใช้สำหรับ compare/backfill/repair/drizzle legacy tooling เท่านั้น
+  - phase ล่าสุดต่อจากนั้นเก็บ `legacy tooling env cleanup` แล้ว:
+    - [legacy/drizzle.config.ts](/Users/csl-dev/Desktop/alex/csb-pos/legacy/drizzle.config.ts) รองรับ `LEGACY_LIBSQL_DATABASE_URL` / `LEGACY_LIBSQL_AUTH_TOKEN` เป็นชื่อหลักแล้ว
+    - [scripts/load-local-env.mjs](/Users/csl-dev/Desktop/alex/csb-pos/scripts/load-local-env.mjs) โหลด `.env`/`.env.local` ตรง โดยไม่ต้องมี `TURSO_*` alias แล้ว
+    - scripts legacy ที่ไม่ผ่าน `load-local-env` เช่น [scripts/repair-migrations.mjs](/Users/csl-dev/Desktop/alex/csb-pos/scripts/repair-migrations.mjs), [scripts/seed.mjs](/Users/csl-dev/Desktop/alex/csb-pos/scripts/seed.mjs), [scripts/cleanup-idempotency.mjs](/Users/csl-dev/Desktop/alex/csb-pos/scripts/cleanup-idempotency.mjs), [scripts/smoke-idempotency-tx.mjs](/Users/csl-dev/Desktop/alex/csb-pos/scripts/smoke-idempotency-tx.mjs), และ [scripts/benchmark-onboarding-channels.mjs](/Users/csl-dev/Desktop/alex/csb-pos/scripts/benchmark-onboarding-channels.mjs) รองรับ `LEGACY_LIBSQL_*` แล้ว
+  - phase ล่าสุดต่อจากนั้นเก็บ `backfill-postgres-*` และ `compare-postgres-*` ชุดหลักแล้ว:
+    - scripts กลุ่ม backfill/compare ของ `orders`, `auth-rbac`, `settings-system-admin`, `store-settings`, `notifications`, `products-units-onboarding`, `product-variants`, `purchase`, `inventory`, `branches`, และ `reports` ใช้ `LEGACY_LIBSQL_*` เป็นชื่อ env หลักแล้ว
+    - `TURSO_*` ไม่ถูกอ้างตรงใน scripts เหล่านี้แล้ว และ compatibility alias ถูกถอดออกจาก `load-local-env`/`.env.example` แล้ว
+    - รอบตรวจล่าสุดตัด alias mapping ที่ค้างจริงออกจาก [scripts/load-local-env.mjs](/Users/csl-dev/Desktop/alex/csb-pos/scripts/load-local-env.mjs) แล้ว ทำให้ config/scripts ปัจจุบันไม่ต้องพึ่ง `TURSO_*` อีก
+  - phase ล่าสุดต่อจากนั้นเก็บ `legacy command namespace cleanup` แล้ว:
+    - เพิ่ม `legacy:*` scripts ใน [package.json](/Users/csl-dev/Desktop/alex/csb-pos/package.json) สำหรับ Drizzle/LibSQL tooling เช่น `legacy:db:generate`, `legacy:db:migrate`, `legacy:db:repair`, `legacy:db:push`, `legacy:db:studio`, `legacy:db:seed`, `legacy:smoke:idempotency-tx`, `legacy:idempotency:cleanup`
+    - รอบล่าสุดลบ alias ชื่อเดิมออกจาก [package.json](/Users/csl-dev/Desktop/alex/csb-pos/package.json) แล้ว เหลือใช้เฉพาะ `legacy:*` สำหรับ LibSQL/Drizzle tooling
+    - docs runtime/legacy หลัก เช่น [docs/drizzle-migrations.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/drizzle-migrations.md), [docs/turso-legacy-tooling.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/turso-legacy-tooling.md), [docs/ARCHITECTURE.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/ARCHITECTURE.md), และ [docs/SCHEMA_MAP.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/SCHEMA_MAP.md) ถูกปรับให้ใช้ชื่อ command ใหม่แล้ว
+  - phase ล่าสุดต่อจากนั้นเก็บ `legacy file relocation` แล้ว:
+    - ย้าย [lib/db/client.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/client.ts) ไปเป็น legacy client ชั่วคราว แล้ว
+    - ย้าย [drizzle.config.ts](/Users/csl-dev/Desktop/alex/csb-pos/drizzle.config.ts) ไปเป็น [legacy/drizzle.config.ts](/Users/csl-dev/Desktop/alex/csb-pos/legacy/drizzle.config.ts)
+    - `legacy:db:*` scripts ใน [package.json](/Users/csl-dev/Desktop/alex/csb-pos/package.json) ถูกปรับให้เรียก `drizzle-kit ... --config legacy/drizzle.config.ts`
+    - รอบล่าสุดย้ายโฟลเดอร์ [drizzle/](/Users/csl-dev/Desktop/alex/csb-pos/drizzle) ไปเป็น [legacy/drizzle/](/Users/csl-dev/Desktop/alex/csb-pos/legacy/drizzle) และปรับ `out` ใน [legacy/drizzle.config.ts](/Users/csl-dev/Desktop/alex/csb-pos/legacy/drizzle.config.ts) ให้ชี้ path ใหม่แล้ว
+  - เพิ่ม [docs/legacy-tooling-deletion-audit.md](/Users/csl-dev/Desktop/alex/csb-pos/docs/legacy-tooling-deletion-audit.md) เพื่อยืนยันว่าของที่เหลือฝั่ง LibSQL/Drizzle ยังไม่ใช่ dead code ทั้งหมด:
+    - เดิมยังมี consumer จริงคือ `legacy:db:*`, compare/backfill/repair/seed scripts, `legacy/drizzle/`, และ type dependency ใน `lib/products/variant-persistence.ts`
+    - ตอนนี้ยังไม่มีไฟล์ legacy ก้อนใหญ่ที่ลบได้ทันทีโดยไม่กระทบ tooling
+  - รอบล่าสุดลบ legacy type dependency สุดท้ายแล้ว:
+    - ลบ `lib/products/variant-persistence.ts` เพราะไม่มี caller เหลือ และ logic variant persistence ถูกรวมอยู่ใน [lib/platform/postgres-products-write.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/platform/postgres-products-write.ts)
+    - ลบ `legacy/libsql/client.ts` เพราะไม่มี consumer เหลือแล้ว
+    - หลังรอบนี้ legacy ฝั่ง LibSQL/Drizzle ที่ยังเหลือจริงคือ `legacy/drizzle.config.ts`, `legacy/drizzle/`, และ scripts compare/backfill/repair/seed ที่ยังใช้ `@libsql/client` ตรง
   - เพิ่ม `scripts/smoke-postgres-inventory-read-gate.mjs` และขยาย `docs/postgres-staging-rollout.md` สำหรับ rollout `POSTGRES_INVENTORY_READ_ENABLED=1` แบบมี preflight, canary UAT, และ rollback rules ชัดเจน
   - เพิ่ม `scripts/smoke-postgres-cutover-gate.mjs`, `docs/postgres-cutover-plan.md`, และ ADR-021 เพื่อยืนยันว่าการ cutover inventory/reporting ต้องใช้ `shadow-compare + canary` ก่อนลดบทบาท Turso
   - `.env.local` ของเครื่องนี้ยังคง `POSTGRES_PURCHASE_READ_ENABLED=0` ไว้ก่อน เพราะถ้าเปิด read ก่อนเปิด purchase write flags พร้อมกัน หน้า PO จะเสี่ยง stale หลังมีการสร้าง/รับสินค้าใหม่บน Turso

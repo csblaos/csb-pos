@@ -5,67 +5,29 @@
 
 ## Snapshot
 
-- วันที่ audit: March 11, 2026
+- วันที่ audit: March 12, 2026
 - คำสั่งที่ใช้หลัก:
 
 ```bash
-rg -l "import \\{ db \\} from ['\\\"]@/lib/db/client['\\\"]" app lib server
+rg -l "getTursoDb\\(" app lib server
 rg -n "TURSO_DATABASE_URL|TURSO_AUTH_TOKEN|createClient\\(|connection failed mode=turso" .
 ```
 
 ## Key Findings
 
-1. runtime files ที่ยัง import `@/lib/db/client` แบบ top-level อยู่มี `0` ไฟล์แล้วใน `app/`, `lib/`, และ `server/`
-2. [lib/db/client.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/client.ts) ยังอยู่เป็น legacy lazy path แต่ถูกลด side effect แล้ว
-   - file นี้ยัง `createClient(...)` เมื่อถูก import/use จริง
-   - แต่ไม่ยิง `select 1 as health_check` และไม่ log `initializing client/connection success` ตอน import อีก
-3. runtime Turso import ถูกลดด้วย `getTursoDb()` จนไม่เหลือ top-level runtime import แล้ว
-4. blocker หลักของการถอน Turso runtime ตอนนี้เหลือ lazy Turso paths/fallbacks และ compare/tooling cleanup ไม่ใช่ import graph
-5. runtime callers ของ [lib/db/turso-lazy.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/turso-lazy.ts) ล่าสุดเหลือ `39` ไฟล์แล้ว และในก้อน `settings/superadmin + settings pages` ไม่เหลือ `getTursoDb` แล้ว
+1. runtime app ไม่เหลือ `getTursoDb()` callers แล้ว
+2. runtime app ไม่เหลือ top-level import ของ Turso client แล้ว
+3. runtime app เป็น `PostgreSQL-only`
+4. LibSQL/Drizzle tooling ถูกลบออกจาก workflow ปัจจุบันแล้ว
+5. audit นี้ถูกเก็บไว้เป็น historical record; ไม่ใช่ active blocker list อีกแล้ว
 
-สถานะล่าสุดเพิ่ม:
+## Current Conclusion
 
-- dead lazy path cleanup รอบล่าสุดย้าย runtime paths ฝั่ง `platform/auth/settings` จำนวนมากไปใช้ [lib/db/turso-lazy.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/turso-lazy.ts) กลางแล้ว
-- จากนั้นเก็บ `session + system-admin` ต่อใน wave เดียวแล้ว
-- จากนั้นเก็บ `products/units` ต่อใน wave เดียวแล้ว
-- remaining direct import path ไป [lib/db/client.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/client.ts) จาก `rg` เหลือ `1` จุด และเหลือเฉพาะ helper กลาง [lib/db/turso-lazy.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/turso-lazy.ts)
-- อย่างไรก็ตาม runtime callers ของ [lib/db/turso-lazy.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/turso-lazy.ts) ยังมี `71` ไฟล์ จึงยังไม่ถือว่า Turso ถูกถอดออกจาก runtime ทั้งหมด
-- wave ล่าสุดย้าย `inventory` query helpers และ `purchase/stock` routes/pages ที่อ่าน `stores.currency` หรือ stock list/movement ผ่าน Turso ไป PostgreSQL แล้ว:
-  - [lib/inventory/queries.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/inventory/queries.ts)
-  - [app/api/stock/purchase-orders/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stock/purchase-orders/route.ts)
-  - [app/api/stock/purchase-orders/[poId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stock/purchase-orders/[poId]/route.ts)
-  - [app/api/stock/purchase-orders/pending-rate/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stock/purchase-orders/pending-rate/route.ts)
-  - [app/api/stock/purchase-orders/[poId]/settle/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stock/purchase-orders/[poId]/settle/route.ts)
-  - [app/api/stock/purchase-orders/[poId]/finalize-rate/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stock/purchase-orders/[poId]/finalize-rate/route.ts)
-  - [app/(app)/stock/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/stock/page.tsx)
-  - [app/(app)/stock/purchase-orders/[poId]/print/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/stock/purchase-orders/[poId]/print/page.tsx)
-- wave ล่าสุดต่อจากนั้นย้าย [server/repositories/stock.repo.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/repositories/stock.repo.ts) ไป PostgreSQL query-first แล้ว ทำให้ `stock.repo` หลุดจาก Turso runtime callers
-- wave ล่าสุดต่อจากนั้นย้าย low-risk callers อีก 3 จุดออกจาก Turso แล้ว:
-  - [app/api/orders/payment-accounts/[accountId]/qr-image/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/orders/payment-accounts/[accountId]/qr-image/route.ts)
-  - [app/api/orders/[orderId]/shipments/upload-label/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/orders/[orderId]/shipments/upload-label/route.ts)
-  - [lib/stores/financial.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/stores/financial.ts)
-- wave ล่าสุดต่อจากนั้นเก็บ `settings/superadmin + settings pages` ออกจาก Turso เพิ่มอีกก้อนแล้ว:
-  - [app/(app)/settings/pdf/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/settings/pdf/page.tsx)
-  - [app/(app)/settings/profile/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/settings/profile/page.tsx)
-  - [app/(app)/settings/security/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/settings/security/page.tsx)
-  - [app/(app)/settings/stock/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/settings/stock/page.tsx)
-  - [app/(app)/settings/store/shipping-providers/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/settings/store/shipping-providers/page.tsx)
-  - [app/(app)/settings/roles/[roleId]/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/settings/roles/[roleId]/page.tsx)
-  - [app/(app)/settings/superadmin/stores/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/settings/superadmin/stores/page.tsx)
-  - [app/(system-admin)/system-admin/config/stores-users/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(system-admin)/system-admin/config/stores-users/page.tsx)
-  - [lib/rbac/queries.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/rbac/queries.ts)
-  - [lib/superadmin/global-config.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/superadmin/global-config.ts)
-  - [lib/superadmin/overview.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/superadmin/overview.ts)
-  - [lib/superadmin/home-dashboard.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/superadmin/home-dashboard.ts)
-  - จากนั้นเก็บ 5 หน้าสุดท้ายในก้อนนี้ต่อจนครบ:
-    - [app/(app)/settings/audit-log/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/settings/audit-log/page.tsx)
-    - [app/(app)/settings/superadmin/audit-log/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/settings/superadmin/audit-log/page.tsx)
-    - [app/(app)/settings/superadmin/integrations/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/settings/superadmin/integrations/page.tsx)
-    - [app/(app)/settings/superadmin/quotas/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/settings/superadmin/quotas/page.tsx)
-    - [app/(app)/settings/superadmin/security/page.tsx](/Users/csl-dev/Desktop/alex/csb-pos/app/(app)/settings/superadmin/security/page.tsx)
-  - หลัง wave นี้ ก้อน `settings/superadmin + settings pages` ไม่เหลือ Turso callers แล้ว และ runtime callers ของ [lib/db/turso-lazy.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/turso-lazy.ts) ลดเหลือ `39` ไฟล์
+- phase runtime dependency audit ถือว่า `closed`
+- ถ้าจะทำงานต่อจากจุดนี้ ให้โฟกัส `Express readiness` และ `historical docs scrub`
+- sections ด้านล่างถูกเก็บไว้เป็น migration history เท่านั้น
 
-## Remaining Import Set
+## Historical Detail
 
 ตอนนี้ไม่เหลือไฟล์ runtime ที่ import `@/lib/db/client` แบบ top-level อยู่แล้ว
 
@@ -366,18 +328,67 @@ rg -n "TURSO_DATABASE_URL|TURSO_AUTH_TOKEN|createClient\\(|connection failed mod
   - purchase domain ไม่เรียก `getTursoDb()` ใน service/repo คู่นี้แล้ว
   - ตามด้วย [server/services/audit.service.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/services/audit.service.ts) และ [server/services/idempotency.service.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/services/idempotency.service.ts) ที่ถูกย้ายเป็น PostgreSQL raw SQL ทั้งหมดแล้ว
   - ตามด้วย [server/repositories/order-shipment.repo.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/repositories/order-shipment.repo.ts) และ [server/services/order-shipment.service.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/services/order-shipment.service.ts) ที่ถูกย้ายเป็น PostgreSQL raw SQL/transaction แล้ว
-  - runtime callers ของ [lib/db/turso-lazy.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/turso-lazy.ts) ล่าสุดลดเหลือ `31`
+  - ตามด้วย [server/services/notification.service.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/services/notification.service.ts) ที่ถูกลดเหลือ PostgreSQL-only wrapper แล้ว และไม่เรียก `getTursoDb()` อีก
+  - ตามด้วย [lib/products/service.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/products/service.ts) ที่ถูกลดเหลือ PostgreSQL-only wrapper แล้ว และไม่เรียก `getTursoDb()` อีก
+  - ตามด้วย routes กลุ่ม products/units:
+    - [app/api/products/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/products/route.ts)
+    - [app/api/products/[productId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/products/[productId]/route.ts)
+    - [app/api/products/categories/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/products/categories/route.ts)
+    - [app/api/products/generate-barcode/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/products/generate-barcode/route.ts)
+    - [app/api/units/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/units/route.ts)
+    - [app/api/units/[unitId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/units/[unitId]/route.ts)
+  - ตามด้วย `settings/store`:
+    - [app/api/settings/store/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/store/route.ts)
+    - [app/api/settings/store/pdf/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/store/pdf/route.ts)
+    - [app/api/settings/store/payment-accounts/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/store/payment-accounts/route.ts)
+  - ตามด้วย `settings/users + roles`:
+    - [app/api/settings/users/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/users/route.ts)
+    - [app/api/settings/users/[userId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/users/[userId]/route.ts)
+    - [app/api/settings/roles/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/roles/route.ts)
+    - [app/api/settings/roles/[roleId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/roles/[roleId]/route.ts)
+  - ตามด้วย `settings/account + shipping-providers + users/candidates`:
+    - [app/api/settings/account/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/account/route.ts)
+    - [app/api/settings/store/shipping-providers/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/store/shipping-providers/route.ts)
+    - [app/api/settings/users/candidates/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/settings/users/candidates/route.ts)
+  - ตามด้วย `auth + onboarding`:
+    - [app/api/auth/login/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/auth/login/route.ts)
+    - [app/api/auth/signup/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/auth/signup/route.ts)
+    - [app/api/onboarding/channels/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/onboarding/channels/route.ts)
+    - [app/api/onboarding/store/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/onboarding/store/route.ts)
+    - [server/repositories/onboarding-channels.repo.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/repositories/onboarding-channels.repo.ts)
+    - [server/services/onboarding-channels.service.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/services/onboarding-channels.service.ts)
+  - ปิดก้อน `branches + system-admin + dashboard repo` แล้วใน:
+    - [app/api/stores/branches/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stores/branches/route.ts)
+    - [app/api/stores/branches/switch/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/stores/branches/switch/route.ts)
+    - [lib/branches/policy.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/branches/policy.ts)
+    - [app/api/system-admin/config/stores/[storeId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/system-admin/config/stores/[storeId]/route.ts)
+    - [app/api/system-admin/config/users/[userId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/system-admin/config/users/[userId]/route.ts)
+    - [app/api/system-admin/superadmins/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/system-admin/superadmins/route.ts)
+    - [app/api/system-admin/superadmins/[userId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/system-admin/superadmins/[userId]/route.ts)
+    - [server/repositories/dashboard.repo.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/repositories/dashboard.repo.ts)
+  - runtime callers ของ [lib/db/turso-lazy.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/turso-lazy.ts) ใน `app/lib/server` ล่าสุดเหลือ `0`
 
 ## Practical Next Phase
 
 phase ถัดไปที่แนะนำที่สุดคือ:
 
-1. เก็บ [server/services/notification.service.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/services/notification.service.ts)
-2. ตามด้วย [lib/products/service.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/products/service.ts)
-3. จากนั้นค่อยเก็บ route/API callers ฝั่ง settings/products ที่ยังเหลือ
-4. หลังจาก caller ลดลงอีกค่อยเริ่มถอด `TURSO_*` จาก runtime docs/env ให้ชัดขึ้น
+1. แยก compare/backfill/repair paths ที่ยังอิง Turso ไปเป็น `legacy tooling`
+2. ตอนนี้ [lib/db/turso-lazy.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/turso-lazy.ts) ถูกลบแล้ว เพราะไม่มี runtime caller เหลือ
+3. ถอด `TURSO_*` ออกจาก runtime docs/env หลัก
+4. หลังจากนั้นค่อยประเมินลบ Turso/Drizzle code ที่ไม่ถูกเรียกแล้วจริง
 
 เหตุผล:
 
-- `notification` และ `products/service` เป็น caller ใหญ่ถัดไปที่ลด count ได้คุ้มหลังจากเก็บ service transactional หลักแล้ว
-- route/API callers ฝั่ง settings/products ที่เหลือส่วนใหญ่จะเป็น cleanup wave หลัง service layer ลง PostgreSQL ครบขึ้น
+- runtime app หลุดจาก Turso แล้ว จึงไม่ควรใช้ effort ต่อกับ runtime migration ซ้ำ
+- งานที่คุ้มที่สุดถัดไปคือทำให้ Turso กลายเป็น tooling legacy อย่างชัดเจน และเก็บ env/docs ให้สะอาด
+
+## Latest Status
+
+- runtime app ใน `app/`, `lib/`, และ `server/` ไม่เหลือ `getTursoDb()` แล้ว
+- [lib/db/turso-lazy.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/turso-lazy.ts) ถูกลบออกแล้ว
+- Turso เหลือไว้เฉพาะ legacy tooling เช่น:
+  - [lib/db/client.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/client.ts)
+  - [drizzle.config.ts](/Users/csl-dev/Desktop/alex/csb-pos/drizzle.config.ts)
+  - scripts กลุ่ม `backfill-postgres-*`
+  - scripts กลุ่ม `compare-postgres-*`
+  - `repair/seed/benchmark` บางตัวที่ยังอ่าน `TURSO_*`

@@ -1,10 +1,8 @@
-import { and, eq, inArray } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { invalidateUserSessions } from "@/lib/auth/session";
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import { permissions, rolePermissions, roles, storeMembers } from "@/lib/db/schema";
+import { execute, queryMany, queryOne } from "@/lib/db/query";
 import { timeDbQuery } from "@/lib/perf/server";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { getPermissionCatalog } from "@/lib/rbac/queries";
@@ -20,21 +18,29 @@ export async function GET(
 ) {
   try {
     const { storeId } = await enforcePermission("rbac.roles.view");
-    const db = await getTursoDb();
-
     const { roleId } = await context.params;
 
-    const [role] = await timeDbQuery("api.roles.getRole", async () =>
-      db
-        .select({
-          id: roles.id,
-          name: roles.name,
-          isSystem: roles.isSystem,
-          createdAt: roles.createdAt,
-        })
-        .from(roles)
-        .where(and(eq(roles.id, roleId), eq(roles.storeId, storeId)))
-        .limit(1),
+    const role = await timeDbQuery("api.roles.getRole", async () =>
+      queryOne<{
+        id: string;
+        name: string;
+        isSystem: boolean;
+        createdAt: string;
+      }>(
+        `
+          select
+            id,
+            name,
+            is_system as "isSystem",
+            created_at as "createdAt"
+          from roles
+          where id = :roleId and store_id = :storeId
+          limit 1
+        `,
+        {
+          replacements: { roleId, storeId },
+        },
+      ),
     );
 
     if (!role) {
@@ -44,13 +50,17 @@ export async function GET(
     const [allPermissionRows, assigned] = await Promise.all([
       getPermissionCatalog(),
       timeDbQuery("api.roles.assignedPermissions", async () =>
-        db
-          .select({
-            permissionKey: permissions.key,
-          })
-          .from(rolePermissions)
-          .innerJoin(permissions, eq(rolePermissions.permissionId, permissions.id))
-          .where(eq(rolePermissions.roleId, role.id)),
+        queryMany<{ permissionKey: string }>(
+          `
+            select p.key as "permissionKey"
+            from role_permissions rp
+            inner join permissions p on rp.permission_id = p.id
+            where rp.role_id = :roleId
+          `,
+          {
+            replacements: { roleId: role.id },
+          },
+        ),
       ),
     ]);
 
@@ -83,7 +93,6 @@ export async function PATCH(
 
   try {
     const { storeId, session } = await enforcePermission("rbac.roles.update");
-    const db = await getTursoDb();
 
     const { roleId } = await context.params;
     auditContext = {
@@ -115,16 +124,25 @@ export async function PATCH(
       return NextResponse.json({ message: "ข้อมูลสิทธิ์ไม่ถูกต้อง" }, { status: 400 });
     }
 
-    const [role] = await timeDbQuery("api.roles.patch.getRole", async () =>
-      db
-        .select({
-          id: roles.id,
-          name: roles.name,
-          isSystem: roles.isSystem,
-        })
-        .from(roles)
-        .where(and(eq(roles.id, roleId), eq(roles.storeId, storeId)))
-        .limit(1),
+    const role = await timeDbQuery("api.roles.patch.getRole", async () =>
+      queryOne<{
+        id: string;
+        name: string;
+        isSystem: boolean;
+      }>(
+        `
+          select
+            id,
+            name,
+            is_system as "isSystem"
+          from roles
+          where id = :roleId and store_id = :storeId
+          limit 1
+        `,
+        {
+          replacements: { roleId, storeId },
+        },
+      ),
     );
 
     if (!role) {
@@ -179,10 +197,16 @@ export async function PATCH(
     );
 
     const currentRows = await timeDbQuery("api.roles.patch.currentPermissions", async () =>
-      db
-        .select({ permissionId: rolePermissions.permissionId })
-        .from(rolePermissions)
-        .where(eq(rolePermissions.roleId, roleId)),
+      queryMany<{ permissionId: string }>(
+        `
+          select permission_id as "permissionId"
+          from role_permissions
+          where role_id = :roleId
+        `,
+        {
+          replacements: { roleId },
+        },
+      ),
     );
 
     const currentIdSet = new Set(currentRows.map((item) => item.permissionId));
@@ -200,31 +224,51 @@ export async function PATCH(
 
     if (toDelete.length > 0) {
       await timeDbQuery("api.roles.patch.deletePermissions", async () =>
-        db
-          .delete(rolePermissions)
-          .where(
-            and(
-              eq(rolePermissions.roleId, roleId),
-              inArray(rolePermissions.permissionId, toDelete),
-            ),
-          ),
+        execute(
+          `
+            delete from role_permissions
+            where role_id = :roleId
+              and permission_id in (:permissionIds)
+          `,
+          {
+            replacements: {
+              roleId,
+              permissionIds: toDelete,
+            },
+          },
+        ),
       );
     }
 
     if (toInsert.length > 0) {
       await timeDbQuery("api.roles.patch.insertPermissions", async () =>
-        db
-          .insert(rolePermissions)
-          .values(toInsert.map((permissionId) => ({ roleId, permissionId })))
-          .onConflictDoNothing(),
+        execute(
+          `
+            insert into role_permissions (role_id, permission_id)
+            values ${toInsert.map((_, index) => `(:roleId, :permissionId${index})`).join(", ")}
+            on conflict do nothing
+          `,
+          {
+            replacements: Object.fromEntries([
+              ["roleId", roleId],
+              ...toInsert.map((permissionId, index) => [`permissionId${index}`, permissionId]),
+            ]),
+          },
+        ),
       );
     }
 
     if (toInsert.length > 0 || toDelete.length > 0) {
-      const roleMemberRows = await db
-        .select({ userId: storeMembers.userId })
-        .from(storeMembers)
-        .where(and(eq(storeMembers.storeId, storeId), eq(storeMembers.roleId, roleId)));
+      const roleMemberRows = await queryMany<{ userId: string }>(
+        `
+          select user_id as "userId"
+          from store_members
+          where store_id = :storeId and role_id = :roleId
+        `,
+        {
+          replacements: { storeId, roleId },
+        },
+      );
 
       const userIds = [...new Set(roleMemberRows.map((row) => row.userId))];
       await Promise.all(userIds.map((userId) => invalidateUserSessions(userId)));

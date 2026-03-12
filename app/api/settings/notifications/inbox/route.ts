@@ -92,7 +92,7 @@ export async function GET(request: Request) {
         items: [],
         summary: EMPTY_SUMMARY,
         warning:
-          "notification schema ยังไม่พร้อมใช้งาน กรุณารัน npm run db:repair แล้วตามด้วย npm run db:migrate",
+          "notification schema ยังไม่พร้อมใช้งาน กรุณารัน npm run db:migrate:postgres",
       });
     }
     return toRBACErrorResponse(error);
@@ -128,7 +128,7 @@ export async function PATCH(request: Request) {
       return NextResponse.json(
         {
           message:
-            "notification schema ยังไม่พร้อมใช้งาน กรุณารัน npm run db:repair แล้วตามด้วย npm run db:migrate",
+            "notification schema ยังไม่พร้อมใช้งาน กรุณารัน npm run db:migrate:postgres",
         },
         { status: 503 },
       );

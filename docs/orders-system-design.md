@@ -186,10 +186,9 @@
 ## 12) แนวทางเริ่มลงมือในโค้ดนี้ (ขั้นต่ำ)
 
 ลำดับแนะนำ:
-1. เพิ่ม enum/คอลัมน์ใน `lib/db/schema/tables.ts` + migration
+1. เพิ่ม/แก้ PostgreSQL migration ใน `postgres/migrations/`
 2. เพิ่ม validation ใน `lib/orders/validation.ts`
 3. เพิ่ม action ใหม่ใน `app/api/orders/[orderId]/route.ts`
 4. เพิ่ม `order_shipments` repository/service
 5. เพิ่ม outbox worker และ cron/endpoint เรียก worker
 6. เพิ่มหน้าจอ order detail ให้เห็นสถานะ label + ปุ่ม retry
-

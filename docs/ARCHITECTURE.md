@@ -3,13 +3,13 @@
 ## System Shape
 
 - Framework: Next.js App Router
-- Database: Turso/LibSQL + Drizzle ORM
+- Database: PostgreSQL + Sequelize query-first
 - Cache: Redis/Upstash (ตาม env)
 - Runtime layering:
   - Route handlers (`app/api/*`)
   - Services (`server/services/*`)
   - Repositories (`server/repositories/*`)
-  - DB schema (`lib/db/schema/tables.ts`)
+  - SQL migrations (`postgres/migrations/*`)
 
 ## Key Domains
 
@@ -65,7 +65,6 @@
 
 ## Data/Migration Discipline
 
-- แก้ schema ที่ `lib/db/schema/tables.ts`
-- generate migration ด้วย `npm run db:generate`
-- apply ด้วย `npm run db:migrate`
-- ถ้า DB drift ใช้ `npm run db:repair`
+- แก้ PostgreSQL migration ที่ `postgres/migrations/`
+- รัน `npm run db:migrate:postgres`
+- ไม่มี Drizzle/LibSQL schema layer แล้ว; ให้ใช้ PostgreSQL migrations เป็น source of truth เดียว

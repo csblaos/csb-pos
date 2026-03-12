@@ -5,10 +5,6 @@ const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const commands = [
   "db:check:postgres",
   "db:migrate:postgres",
-  "db:compare:postgres:auth-rbac-read",
-  "db:compare:postgres:orders-read",
-  "db:compare:postgres:purchase-read",
-  "db:compare:postgres:inventory",
   "smoke:postgres:orders-write-suite",
   "smoke:postgres:purchase-suite",
   "lint",

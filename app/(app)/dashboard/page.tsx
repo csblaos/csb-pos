@@ -1,9 +1,8 @@
 import { redirect } from "next/navigation";
 
 import { StorefrontDashboardByType } from "@/components/storefront/dashboard/registry";
-import { getSession } from "@/lib/auth/session";
+import { getAppShellContext } from "@/lib/app-shell/context";
 import {
-  getUserPermissionsForCurrentSession,
   isPermissionGranted,
 } from "@/lib/rbac/access";
 import { getPreferredAuthorizedRoute } from "@/lib/rbac/navigation";
@@ -37,8 +36,9 @@ export default async function DashboardPage() {
   const perf = createPerfScope("page.dashboard", "render");
 
   try {
-    const [session, permissionKeys] = await perf.step("sessionAndPermissions.parallel", async () =>
-      Promise.all([getSession(), getUserPermissionsForCurrentSession()]),
+    const { session, permissionKeys, activeStoreType } = await perf.step(
+      "sessionAndPermissions.parallel",
+      async () => getAppShellContext(),
     );
 
     if (!session) {
@@ -76,7 +76,7 @@ export default async function DashboardPage() {
 
     return (
       <StorefrontDashboardByType
-        storeType={session.activeStoreType}
+        storeType={activeStoreType}
         session={session}
         dashboardDataPromise={dashboardDataPromise}
         canViewInventory={canViewInventory}

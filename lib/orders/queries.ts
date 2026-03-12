@@ -1,3 +1,5 @@
+import { unstable_cache } from "next/cache";
+
 import { defaultStoreVatMode } from "@/lib/finance/store-financial";
 import { getInventoryBalancesByStore } from "@/lib/inventory/queries";
 import { generateOrderNoInPostgres } from "@/lib/orders/postgres-write";
@@ -40,6 +42,9 @@ export type OrderListItem = {
   createdAt: string;
   paidAt: string | null;
   shippedAt: string | null;
+  shippingProvider: string | null;
+  shippingCarrier: string | null;
+  trackingNo: string | null;
 };
 
 export type OrderDetailItem = {
@@ -198,6 +203,60 @@ export type OrderCatalog = {
   contacts: OrderCatalogContact[];
 };
 
+type OrderCatalogProductRow = {
+  productId: string;
+  sku: string;
+  barcode: string | null;
+  imageUrl: string | null;
+  categoryId: string | null;
+  categoryName: string | null;
+  name: string;
+  priceBase: number;
+  costBase: number;
+  baseUnitId: string;
+  baseUnitCode: string;
+  baseUnitNameTh: string;
+};
+
+type OrderCatalogConversionRow = {
+  productId: string;
+  unitId: string;
+  unitCode: string;
+  unitNameTh: string;
+  multiplierToBase: number;
+  pricePerUnit: number | null;
+};
+
+type OrderCatalogPaymentAccountRow = {
+  id: string;
+  displayName: string;
+  accountType: string;
+  bankName: string | null;
+  accountName: string;
+  accountNumber: string | null;
+  qrImageUrl: string | null;
+  isDefault: boolean;
+  isActive: boolean;
+};
+
+type OrderCatalogShippingProviderRow = {
+  id: string;
+  code: string;
+  displayName: string;
+  branchName: string | null;
+  aliases: string | null;
+};
+
+type OrderCatalogStaticPayload = {
+  financial: Awaited<ReturnType<typeof getStoreFinancialConfig>>;
+  globalPaymentPolicy: Awaited<ReturnType<typeof getGlobalPaymentPolicy>>;
+  productRows: OrderCatalogProductRow[];
+  conversionRows: OrderCatalogConversionRow[];
+  contactRows: OrderCatalogContact[];
+  paymentAccountRows: OrderCatalogPaymentAccountRow[];
+  shippingProviderRows: OrderCatalogShippingProviderRow[];
+};
+
 const mapOrderCatalogPaymentAccount = (row: {
   id: string;
   displayName: string;
@@ -305,6 +364,9 @@ type OrderListItemRow = {
   createdAt: string;
   paidAt: string | null;
   shippedAt: string | null;
+  shippingProvider: string | null;
+  shippingCarrier: string | null;
+  trackingNo: string | null;
 };
 
 type OrderDetailRow = Omit<OrderDetail, "items" | "cancelApproval">;
@@ -383,7 +445,10 @@ const listOrdersByTabPostgres = async (
             o.payment_method as "paymentMethod",
             o.created_at as "createdAt",
             o.paid_at as "paidAt",
-            o.shipped_at as "shippedAt"
+            o.shipped_at as "shippedAt",
+            o.shipping_provider as "shippingProvider",
+            o.shipping_carrier as "shippingCarrier",
+            o.tracking_no as "trackingNo"
           from orders o
           left join contacts c on o.contact_id = c.id
           where o.store_id = :storeId
@@ -827,35 +892,23 @@ const getOrderDetailPostgres = async (
   };
 };
 
-export async function getOrderDetail(storeId: string, orderId: string): Promise<OrderDetail | null> {
-  const pg = await getPostgresOrdersReadContext();
-  return getOrderDetailPostgres(pg, storeId, orderId);
-}
+const getOrderCatalogStaticForStore = unstable_cache(
+  async (storeId: string): Promise<OrderCatalogStaticPayload> => {
+    const pg = await getPostgresOrdersReadContext();
+    const [financial, globalPaymentPolicy] = await Promise.all([
+      getStoreFinancialConfig(storeId),
+      getGlobalPaymentPolicy(),
+    ]);
 
-export async function getOrderCatalogForStore(storeId: string): Promise<OrderCatalog> {
-  const pg = await getPostgresOrdersReadContext();
-  const [financial, globalPaymentPolicy] = await Promise.all([
-    getStoreFinancialConfig(storeId),
-    getGlobalPaymentPolicy(),
-  ]);
-
-  const [productRows, conversionRows, contactRows, paymentAccountRows, shippingProviderRows, balances] =
-    await Promise.all([
+    const [
+      productRows,
+      conversionRows,
+      contactRows,
+      paymentAccountRows,
+      shippingProviderRows,
+    ] = await Promise.all([
       timeDbQuery("orders.catalog.products.pg", async () =>
-        pg.queryMany<{
-          productId: string;
-          sku: string;
-          barcode: string | null;
-          imageUrl: string | null;
-          categoryId: string | null;
-          categoryName: string | null;
-          name: string;
-          priceBase: number;
-          costBase: number;
-          baseUnitId: string;
-          baseUnitCode: string;
-          baseUnitNameTh: string;
-        }>(
+        pg.queryMany<OrderCatalogProductRow>(
           `
             select
               p.id as "productId",
@@ -882,14 +935,7 @@ export async function getOrderCatalogForStore(storeId: string): Promise<OrderCat
         ),
       ),
       timeDbQuery("orders.catalog.conversions.pg", async () =>
-        pg.queryMany<{
-          productId: string;
-          unitId: string;
-          unitCode: string;
-          unitNameTh: string;
-          multiplierToBase: number;
-          pricePerUnit: number | null;
-        }>(
+        pg.queryMany<OrderCatalogConversionRow>(
           `
             select
               pu.product_id as "productId",
@@ -927,17 +973,7 @@ export async function getOrderCatalogForStore(storeId: string): Promise<OrderCat
         ),
       ),
       timeDbQuery("orders.catalog.paymentAccounts.pg", async () =>
-        pg.queryMany<{
-          id: string;
-          displayName: string;
-          accountType: string;
-          bankName: string | null;
-          accountName: string;
-          accountNumber: string | null;
-          qrImageUrl: string | null;
-          isDefault: boolean;
-          isActive: boolean;
-        }>(
+        pg.queryMany<OrderCatalogPaymentAccountRow>(
           `
             select
               id,
@@ -959,13 +995,7 @@ export async function getOrderCatalogForStore(storeId: string): Promise<OrderCat
         ),
       ),
       timeDbQuery("orders.catalog.shippingProviders.pg", async () =>
-        pg.queryMany<{
-          id: string;
-          code: string;
-          displayName: string;
-          branchName: string | null;
-          aliases: string | null;
-        }>(
+        pg.queryMany<OrderCatalogShippingProviderRow>(
           `
             select
               id,
@@ -982,6 +1012,31 @@ export async function getOrderCatalogForStore(storeId: string): Promise<OrderCat
           },
         ),
       ),
+    ]);
+
+    return {
+      financial,
+      globalPaymentPolicy,
+      productRows,
+      conversionRows,
+      contactRows,
+      paymentAccountRows,
+      shippingProviderRows,
+    };
+  },
+  ["orders.catalog.static.v1"],
+  { revalidate: 60 },
+);
+
+export async function getOrderDetail(storeId: string, orderId: string): Promise<OrderDetail | null> {
+  const pg = await getPostgresOrdersReadContext();
+  return getOrderDetailPostgres(pg, storeId, orderId);
+}
+
+export async function getOrderCatalogForStore(storeId: string): Promise<OrderCatalog> {
+  const [{ financial, globalPaymentPolicy, productRows, conversionRows, contactRows, paymentAccountRows, shippingProviderRows }, balances] =
+    await Promise.all([
+      getOrderCatalogStaticForStore(storeId),
       getInventoryBalancesByStore(storeId),
     ]);
 

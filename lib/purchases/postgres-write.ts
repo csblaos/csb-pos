@@ -130,11 +130,9 @@ const normalizeIsoDateOrNull = (value: string | null | undefined): string | null
 };
 
 export const isPostgresPurchaseCreateReceivedEnabled = () =>
-  process.env.POSTGRES_PURCHASE_WRITE_CREATE_RECEIVED_ENABLED === "1" &&
   isPostgresConfigured();
 
 export const isPostgresPurchaseReceiveStatusEnabled = () =>
-  process.env.POSTGRES_PURCHASE_WRITE_RECEIVE_STATUS_ENABLED === "1" &&
   isPostgresConfigured();
 
 export const poNumberExistsInPostgres = async (storeId: string, poNumber: string) => {

@@ -2,7 +2,8 @@ import { spawn } from "node:child_process";
 
 const commands = [
   ["npm", ["run", "smoke:postgres:cutover-gate"]],
-  ["npm", ["run", "db:compare:postgres:reports-read"]],
+  ["npm", ["run", "lint"]],
+  ["npm", ["run", "build"]],
 ];
 
 const run = (command, args) =>

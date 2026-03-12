@@ -1,13 +1,9 @@
-import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { enforceSystemAdminSession, toSystemAdminErrorResponse } from "@/lib/auth/system-admin";
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import { users } from "@/lib/db/schema";
 import {
   findUserByIdFromPostgres,
-  logSettingsSystemAdminWriteFallback,
   updateSystemAdminUserConfigInPostgres,
 } from "@/lib/platform/postgres-settings-admin-write";
 
@@ -49,56 +45,10 @@ export async function PATCH(
       return NextResponse.json({ message: "ข้อมูลผู้ใช้ไม่ถูกต้อง" }, { status: 400 });
     }
 
-    try {
-      const targetUser = await findUserByIdFromPostgres(userId);
-      if (targetUser !== undefined) {
-        if (!targetUser) {
-          return NextResponse.json({ message: "ไม่พบบัญชีผู้ใช้" }, { status: 404 });
-        }
-
-        if (
-          userId === session.userId &&
-          payload.data.systemRole !== undefined &&
-          payload.data.systemRole !== "SYSTEM_ADMIN"
-        ) {
-          return NextResponse.json(
-            { message: "ไม่สามารถลดสิทธิ์ SYSTEM_ADMIN ของบัญชีตัวเองได้" },
-            { status: 400 },
-          );
-        }
-
-        await updateSystemAdminUserConfigInPostgres({
-          userId,
-          name: payload.data.name,
-          systemRole: payload.data.systemRole,
-          canCreateStores: payload.data.canCreateStores,
-          maxStores:
-            payload.data.canCreateStores === false
-              ? null
-              : payload.data.maxStores,
-          canCreateBranches: payload.data.canCreateBranches,
-          maxBranchesPerStore:
-            payload.data.canCreateBranches === false
-              ? null
-              : payload.data.maxBranchesPerStore,
-          sessionLimit: payload.data.sessionLimit,
-        });
-
-        return NextResponse.json({ ok: true });
-      }
-    } catch (error) {
-      logSettingsSystemAdminWriteFallback("system-admin.config-user.update", error);
+    const targetUser = await findUserByIdFromPostgres(userId);
+    if (targetUser === undefined) {
+      throw new Error("PostgreSQL system-admin write path is not available");
     }
-
-    const db = await getTursoDb();
-    const [targetUser] = await db
-      .select({
-        id: users.id,
-        systemRole: users.systemRole,
-      })
-      .from(users)
-      .where(eq(users.id, userId))
-      .limit(1);
 
     if (!targetUser) {
       return NextResponse.json({ message: "ไม่พบบัญชีผู้ใช้" }, { status: 404 });
@@ -115,39 +65,22 @@ export async function PATCH(
       );
     }
 
-    const updateValues: Partial<typeof users.$inferInsert> = {};
-
-    if (payload.data.name !== undefined) {
-      updateValues.name = payload.data.name;
-    }
-    if (payload.data.systemRole !== undefined) {
-      updateValues.systemRole = payload.data.systemRole;
-    }
-    if (payload.data.canCreateStores !== undefined) {
-      updateValues.canCreateStores = payload.data.canCreateStores;
-    }
-
-    if (payload.data.maxStores !== undefined) {
-      updateValues.maxStores = payload.data.maxStores;
-    }
-    if (payload.data.canCreateBranches !== undefined) {
-      updateValues.canCreateBranches = payload.data.canCreateBranches;
-    }
-    if (payload.data.maxBranchesPerStore !== undefined) {
-      updateValues.maxBranchesPerStore = payload.data.maxBranchesPerStore;
-    }
-    if (payload.data.sessionLimit !== undefined) {
-      updateValues.sessionLimit = payload.data.sessionLimit;
-    }
-
-    if (payload.data.canCreateStores === false) {
-      updateValues.maxStores = null;
-    }
-    if (payload.data.canCreateBranches === false) {
-      updateValues.maxBranchesPerStore = null;
-    }
-
-    await db.update(users).set(updateValues).where(eq(users.id, userId));
+    await updateSystemAdminUserConfigInPostgres({
+      userId,
+      name: payload.data.name,
+      systemRole: payload.data.systemRole,
+      canCreateStores: payload.data.canCreateStores,
+      maxStores:
+        payload.data.canCreateStores === false
+          ? null
+          : payload.data.maxStores,
+      canCreateBranches: payload.data.canCreateBranches,
+      maxBranchesPerStore:
+        payload.data.canCreateBranches === false
+          ? null
+          : payload.data.maxBranchesPerStore,
+      sessionLimit: payload.data.sessionLimit,
+    });
 
     return NextResponse.json({ ok: true });
   } catch (error) {

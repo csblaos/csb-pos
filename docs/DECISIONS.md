@@ -325,7 +325,7 @@
 - Consequence:
   - logic ใน list/detail/report ต้องคำนวณ `totalPaidBase/outstandingBase` จาก ledger
   - UI PO detail ซับซ้อนขึ้นเล็กน้อย (history payment + reverse action) แต่ auditability สูงขึ้น
-  - ต้องดูแล `db:repair` ให้รองรับฐานเก่าที่ยังไม่มี `due_date`/`purchase_order_payments`
+  - ในช่วง migration เดิม ต้องมี repair step สำหรับฐานเก่าที่ยังไม่มี `due_date`/`purchase_order_payments`
 
 ## ADR-014: AP ราย Supplier ใช้ Outstanding View เดียวกันทั้ง Summary/Statement/Export
 

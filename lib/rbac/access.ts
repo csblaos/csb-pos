@@ -39,7 +39,7 @@ async function getMembership(userId: string, storeId: string) {
   if (postgresMembership !== undefined) {
     return postgresMembership ?? null;
   }
-  throw new Error("POSTGRES_AUTH_RBAC_READ_ENABLED is required for membership lookup");
+  throw new Error("PostgreSQL membership lookup is not available");
 }
 
 const getMembershipForRequest = cache(getMembership);
@@ -49,7 +49,7 @@ async function getAllPermissionKeys() {
   if (postgresPermissionKeys !== undefined) {
     return postgresPermissionKeys;
   }
-  throw new Error("POSTGRES_AUTH_RBAC_READ_ENABLED is required for permission keys");
+  throw new Error("PostgreSQL permission catalog is not available");
 }
 
 const getAllPermissionKeysCached = unstable_cache(
@@ -63,7 +63,7 @@ async function getRolePermissionKeys(roleId: string) {
   if (postgresPermissionKeys !== undefined) {
     return postgresPermissionKeys;
   }
-  throw new Error("POSTGRES_AUTH_RBAC_READ_ENABLED is required for role permission keys");
+  throw new Error("PostgreSQL role permissions are not available");
 }
 
 const getRolePermissionKeysForRequest = cache(getRolePermissionKeys);

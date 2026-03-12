@@ -123,14 +123,7 @@ const toIntInRangeOrNull = (
     : null;
 };
 
-const isPostgresAuthRbacReadEnabled = () =>
-  process.env.POSTGRES_AUTH_RBAC_READ_ENABLED === "1";
-
 const getPostgresAuthRbacContext = async (): Promise<PostgresAuthRbacContext | null> => {
-  if (!isPostgresAuthRbacReadEnabled()) {
-    return null;
-  }
-
   const [{ queryMany, queryOne, execute }, { isPostgresConfigured }] = await Promise.all([
     import("@/lib/db/query"),
     import("@/lib/db/sequelize"),

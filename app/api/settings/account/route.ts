@@ -1,4 +1,3 @@
-import { eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -11,8 +10,8 @@ import {
   SessionStoreUnavailableError,
 } from "@/lib/auth/session";
 import { buildSessionForUser } from "@/lib/auth/session-db";
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import { users } from "@/lib/db/schema";
+import { execute, queryOne } from "@/lib/db/query";
+import { readJsonRouteRequest } from "@/lib/http/route-handler";
 import { safeLogAuditEvent } from "@/server/services/audit.service";
 
 const updateProfileSchema = z.object({
@@ -37,18 +36,28 @@ export async function GET() {
     return NextResponse.json({ message: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
   }
 
-  const db = await getTursoDb();
-  const [user] = await db
-    .select({
-      id: users.id,
-      name: users.name,
-      email: users.email,
-      mustChangePassword: users.mustChangePassword,
-      passwordUpdatedAt: users.passwordUpdatedAt,
-    })
-    .from(users)
-    .where(eq(users.id, session.userId))
-    .limit(1);
+  const user = await queryOne<{
+    id: string;
+    name: string;
+    email: string;
+    mustChangePassword: boolean;
+    passwordUpdatedAt: string | null;
+  }>(
+    `
+      select
+        id,
+        name,
+        email,
+        must_change_password as "mustChangePassword",
+        password_updated_at as "passwordUpdatedAt"
+      from users
+      where id = :userId
+      limit 1
+    `,
+    {
+      replacements: { userId: session.userId },
+    },
+  );
 
   if (!user) {
     return NextResponse.json({ message: "ไม่พบบัญชีผู้ใช้" }, { status: 404 });
@@ -69,10 +78,35 @@ export async function PATCH(request: Request) {
   const auditScope = session.activeStoreId ? "STORE" : "SYSTEM";
   const auditStoreId = session.activeStoreId ?? null;
   let auditAction = "account.settings.update";
+  let requestContext = {
+    requestId: request.headers.get("x-request-id"),
+    ipAddress:
+      request.headers.get("x-forwarded-for") ??
+      request.headers.get("x-real-ip"),
+    userAgent: request.headers.get("user-agent"),
+  };
 
   try {
-    const db = await getTursoDb();
-    const payload = patchAccountSchema.safeParse(await request.json());
+    const requestEnvelope = await readJsonRouteRequest(request);
+    requestContext = requestEnvelope.value.requestContext;
+    if (!requestEnvelope.ok) {
+      await safeLogAuditEvent({
+        scope: auditScope,
+        storeId: auditStoreId,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        action: auditAction,
+        entityType: "user_account",
+        entityId: session.userId,
+        result: "FAIL",
+        reasonCode: "INVALID_JSON",
+        requestContext,
+      });
+      return requestEnvelope.response;
+    }
+
+    const payload = patchAccountSchema.safeParse(requestEnvelope.value.body);
     if (!payload.success) {
       await safeLogAuditEvent({
         scope: auditScope,
@@ -88,7 +122,7 @@ export async function PATCH(request: Request) {
         metadata: {
           issues: payload.error.issues.map((issue) => issue.path.join(".")).slice(0, 5),
         },
-        request,
+        requestContext,
       });
       return NextResponse.json({ message: "ข้อมูลไม่ถูกต้อง" }, { status: 400 });
     }
@@ -98,16 +132,26 @@ export async function PATCH(request: Request) {
         ? "account.profile.update"
         : "account.password.change";
 
-    const [user] = await db
-      .select({
-        id: users.id,
-        name: users.name,
-        email: users.email,
-        passwordHash: users.passwordHash,
-      })
-      .from(users)
-      .where(eq(users.id, session.userId))
-      .limit(1);
+    const user = await queryOne<{
+      id: string;
+      name: string;
+      email: string;
+      passwordHash: string;
+    }>(
+      `
+        select
+          id,
+          name,
+          email,
+          password_hash as "passwordHash"
+        from users
+        where id = :userId
+        limit 1
+      `,
+      {
+        replacements: { userId: session.userId },
+      },
+    );
 
     if (!user) {
       await safeLogAuditEvent({
@@ -121,7 +165,7 @@ export async function PATCH(request: Request) {
         entityId: session.userId,
         result: "FAIL",
         reasonCode: "NOT_FOUND",
-        request,
+        requestContext,
       });
       return NextResponse.json({ message: "ไม่พบบัญชีผู้ใช้" }, { status: 404 });
     }
@@ -139,11 +183,11 @@ export async function PATCH(request: Request) {
           action: auditAction,
           entityType: "user_account",
           entityId: user.id,
-          metadata: {
-            noChange: true,
-          },
-          request,
-        });
+        metadata: {
+          noChange: true,
+        },
+        requestContext,
+      });
         return NextResponse.json({
           ok: true,
           user: {
@@ -153,10 +197,19 @@ export async function PATCH(request: Request) {
         });
       }
 
-      await db
-        .update(users)
-        .set({ name: nextName })
-        .where(eq(users.id, user.id));
+      await execute(
+        `
+          update users
+          set name = :name
+          where id = :userId
+        `,
+        {
+          replacements: {
+            name: nextName,
+            userId: user.id,
+          },
+        },
+      );
 
       let sessionCookie: Awaited<ReturnType<typeof createSessionCookie>> | null = null;
       let warning: string | null = null;
@@ -200,7 +253,7 @@ export async function PATCH(request: Request) {
         after: {
           name: nextName,
         },
-        request,
+        requestContext,
       });
 
       const response = NextResponse.json({
@@ -243,7 +296,7 @@ export async function PATCH(request: Request) {
         metadata: {
           message: "invalid_current_password",
         },
-        request,
+        requestContext,
       });
       return NextResponse.json({ message: "รหัสผ่านปัจจุบันไม่ถูกต้อง" }, { status: 400 });
     }
@@ -264,7 +317,7 @@ export async function PATCH(request: Request) {
         metadata: {
           message: "new_password_same_as_old",
         },
-        request,
+        requestContext,
       });
       return NextResponse.json(
         { message: "รหัสผ่านใหม่ต้องไม่ซ้ำรหัสผ่านเดิม" },
@@ -274,14 +327,22 @@ export async function PATCH(request: Request) {
 
     const newPasswordHash = await hashPassword(newPassword);
 
-    await db
-      .update(users)
-      .set({
-        passwordHash: newPasswordHash,
-        mustChangePassword: false,
-        passwordUpdatedAt: sql`CURRENT_TIMESTAMP`,
-      })
-      .where(eq(users.id, user.id));
+    await execute(
+      `
+        update users
+        set
+          password_hash = :passwordHash,
+          must_change_password = false,
+          password_updated_at = current_timestamp
+        where id = :userId
+      `,
+      {
+        replacements: {
+          passwordHash: newPasswordHash,
+          userId: user.id,
+        },
+      },
+    );
 
     const invalidated = await invalidateUserSessions(user.id);
     await safeLogAuditEvent({
@@ -296,7 +357,7 @@ export async function PATCH(request: Request) {
       metadata: {
         sessionsInvalidated: invalidated,
       },
-      request,
+      requestContext,
     });
 
     const response = NextResponse.json({
@@ -326,7 +387,7 @@ export async function PATCH(request: Request) {
       metadata: {
         message: error instanceof Error ? error.message : "unknown",
       },
-      request,
+      requestContext,
     });
     return NextResponse.json({ message: "เกิดข้อผิดพลาดภายในระบบ" }, { status: 500 });
   }

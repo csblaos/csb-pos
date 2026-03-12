@@ -1,4 +1,3 @@
-import { and, eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -10,12 +9,7 @@ import {
   listStoreBranches,
   replaceMemberBranchAccess,
 } from "@/lib/branches/access";
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import {
-  roles,
-  storeMembers,
-  users,
-} from "@/lib/db/schema";
+import { execute, queryOne } from "@/lib/db/query";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { safeLogAuditEvent } from "@/server/services/audit.service";
 
@@ -43,18 +37,20 @@ const updateUserSchema = z.discriminatedUnion("action", [
 ]);
 
 const activeOwnerCount = async (storeId: string) => {
-  const db = await getTursoDb();
-  const [row] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(storeMembers)
-    .innerJoin(roles, eq(storeMembers.roleId, roles.id))
-    .where(
-      and(
-        eq(storeMembers.storeId, storeId),
-        eq(storeMembers.status, "ACTIVE"),
-        eq(roles.name, "Owner"),
-      ),
-    );
+  const row = await queryOne<{ count: number | string }>(
+    `
+      select count(*) as "count"
+      from store_members sm
+      inner join roles r on sm.role_id = r.id
+      where
+        sm.store_id = :storeId
+        and sm.status = 'ACTIVE'
+        and r.name = 'Owner'
+    `,
+    {
+      replacements: { storeId },
+    },
+  );
 
   return Number(row?.count ?? 0);
 };
@@ -66,14 +62,19 @@ export async function GET(
   try {
     const { storeId } = await enforcePermission("members.view");
     const { userId } = await context.params;
-    const db = await getTursoDb();
     await ensureMainBranchExists(storeId);
 
-    const [membership] = await db
-      .select({ userId: storeMembers.userId })
-      .from(storeMembers)
-      .where(and(eq(storeMembers.storeId, storeId), eq(storeMembers.userId, userId)))
-      .limit(1);
+    const membership = await queryOne<{ userId: string }>(
+      `
+        select user_id as "userId"
+        from store_members
+        where store_id = :storeId and user_id = :userId
+        limit 1
+      `,
+      {
+        replacements: { storeId, userId },
+      },
+    );
 
     if (!membership) {
       return NextResponse.json({ message: "ไม่พบสมาชิกในร้าน" }, { status: 404 });
@@ -118,7 +119,6 @@ export async function PATCH(
   try {
     const { storeId, session } = await enforcePermission("members.update");
     const { userId } = await context.params;
-    const db = await getTursoDb();
     auditContext = {
       storeId,
       actorUserId: session.userId,
@@ -159,17 +159,27 @@ export async function PATCH(
     }
     auditAction = `store.member.${payload.data.action}`;
 
-    const [targetMembership] = await db
-      .select({
-        userId: storeMembers.userId,
-        roleId: roles.id,
-        roleName: roles.name,
-        status: storeMembers.status,
-      })
-      .from(storeMembers)
-      .innerJoin(roles, eq(storeMembers.roleId, roles.id))
-      .where(and(eq(storeMembers.storeId, storeId), eq(storeMembers.userId, userId)))
-      .limit(1);
+    const targetMembership = await queryOne<{
+      userId: string;
+      roleId: string;
+      roleName: string;
+      status: "ACTIVE" | "INVITED" | "SUSPENDED";
+    }>(
+      `
+        select
+          sm.user_id as "userId",
+          r.id as "roleId",
+          r.name as "roleName",
+          sm.status
+        from store_members sm
+        inner join roles r on sm.role_id = r.id
+        where sm.store_id = :storeId and sm.user_id = :userId
+        limit 1
+      `,
+      {
+        replacements: { storeId, userId },
+      },
+    );
 
     if (!targetMembership) {
       await logFail({ reasonCode: "NOT_FOUND" });
@@ -177,14 +187,23 @@ export async function PATCH(
     }
 
     if (payload.data.action === "assign_role") {
-      const [targetRole] = await db
-        .select({
-          id: roles.id,
-          name: roles.name,
-        })
-        .from(roles)
-        .where(and(eq(roles.id, payload.data.roleId), eq(roles.storeId, storeId)))
-        .limit(1);
+      const targetRole = await queryOne<{
+        id: string;
+        name: string;
+      }>(
+        `
+          select id, name
+          from roles
+          where id = :roleId and store_id = :storeId
+          limit 1
+        `,
+        {
+          replacements: {
+            roleId: payload.data.roleId,
+            storeId,
+          },
+        },
+      );
 
       if (!targetRole) {
         await logFail({
@@ -212,10 +231,20 @@ export async function PATCH(
         }
       }
 
-      await db
-        .update(storeMembers)
-        .set({ roleId: targetRole.id })
-        .where(and(eq(storeMembers.storeId, storeId), eq(storeMembers.userId, userId)));
+      await execute(
+        `
+          update store_members
+          set role_id = :roleId
+          where store_id = :storeId and user_id = :userId
+        `,
+        {
+          replacements: {
+            roleId: targetRole.id,
+            storeId,
+            userId,
+          },
+        },
+      );
 
       await invalidateUserSessions(userId);
       await safeLogAuditEvent({
@@ -269,10 +298,20 @@ export async function PATCH(
         );
       }
 
-      await db
-        .update(storeMembers)
-        .set({ status: payload.data.status })
-        .where(and(eq(storeMembers.storeId, storeId), eq(storeMembers.userId, userId)));
+      await execute(
+        `
+          update store_members
+          set status = :status
+          where store_id = :storeId and user_id = :userId
+        `,
+        {
+          replacements: {
+            status: payload.data.status,
+            storeId,
+            userId,
+          },
+        },
+      );
 
       await invalidateUserSessions(userId);
       await safeLogAuditEvent({
@@ -295,16 +334,31 @@ export async function PATCH(
     }
 
     if (payload.data.action === "set_session_limit") {
-      const [targetUser] = await db
-        .select({ sessionLimit: users.sessionLimit })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
+      const targetUser = await queryOne<{ sessionLimit: number | null }>(
+        `
+          select session_limit as "sessionLimit"
+          from users
+          where id = :userId
+          limit 1
+        `,
+        {
+          replacements: { userId },
+        },
+      );
 
-      await db
-        .update(users)
-        .set({ sessionLimit: payload.data.sessionLimit })
-        .where(eq(users.id, userId));
+      await execute(
+        `
+          update users
+          set session_limit = :sessionLimit
+          where id = :userId
+        `,
+        {
+          replacements: {
+            sessionLimit: payload.data.sessionLimit,
+            userId,
+          },
+        },
+      );
 
       await enforceUserSessionLimitNow(userId);
       await safeLogAuditEvent({
@@ -383,14 +437,22 @@ export async function PATCH(
       const temporaryPassword = generateTemporaryPassword(10);
       const passwordHash = await hashPassword(temporaryPassword);
 
-      await db
-        .update(users)
-        .set({
-          passwordHash,
-          mustChangePassword: true,
-          passwordUpdatedAt: null,
-        })
-        .where(eq(users.id, userId));
+      await execute(
+        `
+          update users
+          set
+            password_hash = :passwordHash,
+            must_change_password = true,
+            password_updated_at = null
+          where id = :userId
+        `,
+        {
+          replacements: {
+            passwordHash,
+            userId,
+          },
+        },
+      );
 
       await invalidateUserSessions(userId);
       await safeLogAuditEvent({

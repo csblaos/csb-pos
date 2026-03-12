@@ -69,8 +69,7 @@ export type ReplaceMemberBranchAccessInput = {
   branchIds: string[];
 };
 
-const isPostgresBranchesEnabled = () =>
-  process.env.POSTGRES_BRANCHES_ENABLED === "1" && isPostgresConfigured();
+const isPostgresBranchesEnabled = () => isPostgresConfigured();
 
 export const logBranchesFallback = (operation: string, error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);

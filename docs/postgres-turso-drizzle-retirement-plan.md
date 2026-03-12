@@ -1,5 +1,7 @@
 # Turso/Drizzle Retirement Plan
 
+> Historical reference: retirement plan นี้ถูกเก็บไว้เป็นบันทึก migration หลัง runtime/tooling หลักย้ายเป็น PostgreSQL-only แล้ว
+
 เอกสารนี้ใช้สำหรับ phase สุดท้ายของการย้ายจาก `Turso/LibSQL + Drizzle` ไป `Aiven PostgreSQL + Sequelize query-first`
 หลังจาก runtime หลักวิ่งบน PostgreSQL จริงและผ่านช่วง observe/fallback removal แล้ว
 
@@ -43,11 +45,9 @@
 1. `lib/db/client.ts`
 2. `server/repositories/` และ lazy helpers ที่ยังเรียก Drizzle/Turso โดยตรง
 3. route/service ที่ยัง import `db` จาก Turso path
-4. `lib/db/schema/tables.ts` และ type helpers ที่ใช้เฉพาะ Drizzle runtime
-5. `drizzle.config.ts` และ scripts/migrations ที่ยังจำเป็นต่อ production path
-6. env vars:
-   - `TURSO_DATABASE_URL`
-   - `TURSO_AUTH_TOKEN`
+4. schema/type helpers ที่ยังผูกกับ Drizzle runtime (ถ้ามี)
+5. legacy config/scripts/migrations ที่ยังจำเป็นต่อ tooling ในช่วงนั้น
+6. env vars legacy ของช่วง migration
 
 ผล audit ล่าสุดถูกรวบไว้ที่:
 
@@ -84,8 +84,10 @@ exit criteria:
 
 - runtime import graph ถูกเก็บจนไม่เหลือ top-level import ของ `@/lib/db/client` แล้ว
 - [server/db/client.ts](/Users/csl-dev/Desktop/alex/csb-pos/server/db/client.ts) ถูกลบออกจาก runtime แล้ว
-- [lib/db/client.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/client.ts) ยังอยู่เป็น legacy lazy path แต่ไม่ยิง `health_check` ตอน import แล้ว
-- งานที่เหลือใน wave นี้จึงเป็น `dead lazy/fallback path removal` มากกว่า import cleanup
+- runtime callers ของ `getTursoDb()` ใน `app/lib/server` เหลือ `0`
+- [lib/db/turso-lazy.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/turso-lazy.ts) ถูกลบแล้ว เพราะไม่มี runtime caller เหลือ
+- [lib/db/client.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/db/client.ts) เหลือไว้เฉพาะ legacy tooling path
+- wave นี้ถือว่า `complete` ใน dev runtime แล้ว
 
 ### Wave 2: Remove Drizzle Repositories From Core Domains
 
@@ -130,19 +132,11 @@ exit criteria:
 
 ต้องตัดสินใจให้ชัด:
 
-ทางเลือก A:
-- คง `drizzle/` และ `lib/db/schema/tables.ts` ไว้ชั่วคราวเป็น historical reference
+สถานะล่าสุด:
 
-ทางเลือก B:
-- freeze ไว้แล้วหยุดใช้งานทั้งหมด
-
-ทางเลือก C:
-- ลบออกจาก repo เมื่อ PostgreSQL schema/migrations กลายเป็น source of truth เดียว
-
-คำแนะนำ:
-
-- ไม่ควรลบทันทีใน wave แรก
-- ควรทำหลังจาก runtime retirement สำเร็จแล้ว และทีมยืนยันว่าไม่ต้องใช้ Drizzle tooling ย้อนกลับ
+- phase นี้เสร็จแล้ว
+- `legacy/drizzle/`, `legacy/drizzle.config.ts`, `lib/db/schema/*`, และ dependency `drizzle-orm` ถูกลบออกแล้ว
+- PostgreSQL schema/migrations เป็น source of truth เดียวของ repo
 
 ### Wave 5: Final Turso Retirement
 
@@ -156,10 +150,10 @@ exit criteria:
 ## Suggested Execution Order
 
 1. audit runtime imports ที่ยังแตะ Turso/Drizzle
-2. remove Turso runtime dependency
+2. freeze Turso ให้เป็น legacy tooling only
 3. remove Drizzle repositories from core domains
 4. cleanup env/ops docs
-5. decide fate ของ `drizzle/` และ schema tooling
+5. scrub historical docs ที่ยังอ้าง Drizzle/Turso path เก่า
 6. retire Turso infra จริง
 
 ## Validation Commands

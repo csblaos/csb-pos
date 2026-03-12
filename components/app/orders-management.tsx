@@ -1,7 +1,6 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type ColumnDef,
@@ -12,7 +11,7 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import { useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowDownToLine, Clock3, Expand, ExternalLink, ScanLine, X } from "lucide-react";
+import { ArrowDownToLine, Clock3, Expand, ExternalLink, MoreHorizontal, ScanLine, X } from "lucide-react";
 import { toast } from "react-hot-toast";
 
 import { BarcodeScannerPanel } from "@/components/app/barcode-scanner-panel";
@@ -127,6 +126,55 @@ type OrderStatusBadge = {
   className: string;
 };
 
+const isOrderEligibleForBulkPack = (
+  order: Pick<OrderListItem, "channel" | "status" | "paymentMethod" | "paymentStatus">,
+) => {
+  if (order.channel === "WALK_IN") {
+    return false;
+  }
+  const canPackFromPaid = order.status === "PAID";
+  const canPackCodFromPending =
+    order.paymentMethod === "COD" &&
+    order.status === "PENDING_PAYMENT" &&
+    order.paymentStatus === "COD_PENDING_SETTLEMENT";
+  return canPackFromPaid || canPackCodFromPending;
+};
+
+const isOrderEligibleForBulkShip = (
+  order: Pick<
+    OrderListItem,
+    "channel" | "status" | "shippingProvider" | "shippingCarrier" | "trackingNo"
+  >,
+) => {
+  if (order.channel === "WALK_IN" || order.status !== "PACKED") {
+    return false;
+  }
+
+  const hasProvider =
+    (order.shippingProvider?.trim().length ?? 0) > 0 ||
+    (order.shippingCarrier?.trim().length ?? 0) > 0;
+  const hasTrackingNo = (order.trackingNo?.trim().length ?? 0) > 0;
+
+  return hasProvider && hasTrackingNo;
+};
+
+const createBulkOrderActionIdempotencyKey = (action: string, orderId: string) => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `orders-${action}-${orderId}-${crypto.randomUUID()}`;
+  }
+  return `orders-${action}-${orderId}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const dedupeOrderStatusBadges = (badges: OrderStatusBadge[]) => {
+  const seen = new Set<string>();
+  return badges.filter((badge) => {
+    const key = `${badge.label}__${badge.className}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 const buildOrderStatusBadges = (order: Pick<OrderListItem, "channel" | "status" | "paymentMethod" | "paymentStatus">) => {
   const badges: OrderStatusBadge[] = [];
   const isOnlineOrder = order.channel !== "WALK_IN";
@@ -204,7 +252,7 @@ const buildOrderStatusBadges = (order: Pick<OrderListItem, "channel" | "status" 
     className: "bg-amber-100 text-amber-700",
   });
 
-  return badges;
+  return dedupeOrderStatusBadges(badges);
 };
 
 const pickupPaymentBadge = (
@@ -412,6 +460,12 @@ export function OrdersManagement(props: OrdersManagementProps) {
   const [showScannerSheet, setShowScannerSheet] = useState(false);
   const [hasSeenScannerPermission, setHasSeenScannerPermission] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [bulkPackSubmitting, setBulkPackSubmitting] = useState(false);
+  const [bulkShipSubmitting, setBulkShipSubmitting] = useState(false);
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  const [showBulkPackConfirmSheet, setShowBulkPackConfirmSheet] = useState(false);
+  const [showBulkShipConfirmSheet, setShowBulkShipConfirmSheet] = useState(false);
+  const [openOrderActionMenuId, setOpenOrderActionMenuId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [scanMessage, setScanMessage] = useState<string | null>(null);
@@ -681,7 +735,49 @@ export function OrdersManagement(props: OrdersManagementProps) {
     return Array.from(categoryMap.values()).sort((a, b) => a.name.localeCompare(b.name, "th"));
   }, [catalog.products]);
 
-  const visibleOrders = isCreateOnlyMode ? [] : (ordersPage?.rows ?? []);
+  const visibleOrders = useMemo(
+    () => (isCreateOnlyMode ? [] : (ordersPage?.rows ?? [])),
+    [isCreateOnlyMode, ordersPage],
+  );
+  const bulkPackEligibleOrders = useMemo(
+    () => visibleOrders.filter((order) => isOrderEligibleForBulkPack(order)),
+    [visibleOrders],
+  );
+  const bulkPackEligibleOrderIds = useMemo(
+    () => new Set(bulkPackEligibleOrders.map((order) => order.id)),
+    [bulkPackEligibleOrders],
+  );
+  const bulkShipEligibleOrders = useMemo(
+    () => visibleOrders.filter((order) => isOrderEligibleForBulkShip(order)),
+    [visibleOrders],
+  );
+  const bulkShipEligibleOrderIds = useMemo(
+    () => new Set(bulkShipEligibleOrders.map((order) => order.id)),
+    [bulkShipEligibleOrders],
+  );
+  const bulkActionEligibleOrders = useMemo(
+    () =>
+      visibleOrders.filter(
+        (order) => bulkPackEligibleOrderIds.has(order.id) || bulkShipEligibleOrderIds.has(order.id),
+      ),
+    [bulkPackEligibleOrderIds, bulkShipEligibleOrderIds, visibleOrders],
+  );
+  const bulkActionEligibleOrderIds = useMemo(
+    () => new Set(bulkActionEligibleOrders.map((order) => order.id)),
+    [bulkActionEligibleOrders],
+  );
+  const selectedBulkPackOrders = useMemo(
+    () => bulkPackEligibleOrders.filter((order) => selectedOrderIds.includes(order.id)),
+    [bulkPackEligibleOrders, selectedOrderIds],
+  );
+  const selectedBulkShipOrders = useMemo(
+    () => bulkShipEligibleOrders.filter((order) => selectedOrderIds.includes(order.id)),
+    [bulkShipEligibleOrders, selectedOrderIds],
+  );
+  const allBulkPackSelected =
+    bulkActionEligibleOrders.length > 0 &&
+    selectedOrderIds.length === bulkActionEligibleOrders.length;
+  const isBulkActionSubmitting = bulkPackSubmitting || bulkShipSubmitting;
   const hasCatalogProducts = catalog.products.length > 0;
   const getProductUnitPrice = useCallback(
     (productId: string, unitId: string) => {
@@ -1218,8 +1314,321 @@ export function OrdersManagement(props: OrdersManagementProps) {
     return query ? `/orders?${query}` : "/orders";
   };
 
+  useEffect(() => {
+    if (openOrderActionMenuId === null || typeof document === "undefined") {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        setOpenOrderActionMenuId(null);
+        return;
+      }
+      if (target.closest("[data-order-action-menu-root='true']")) {
+        return;
+      }
+      setOpenOrderActionMenuId(null);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, [openOrderActionMenuId]);
+
+  useEffect(() => {
+    setSelectedOrderIds((prev) => prev.filter((orderId) => bulkActionEligibleOrderIds.has(orderId)));
+  }, [bulkActionEligibleOrderIds]);
+
+  const toggleBulkPackOrderSelection = useCallback((orderId: string) => {
+    setSelectedOrderIds((prev) =>
+      prev.includes(orderId) ? prev.filter((currentId) => currentId !== orderId) : [...prev, orderId],
+    );
+  }, []);
+
+  const toggleSelectAllBulkPackOrders = useCallback(() => {
+    setSelectedOrderIds((prev) => {
+      if (allBulkPackSelected) {
+        return prev.filter((orderId) => !bulkActionEligibleOrderIds.has(orderId));
+      }
+
+      const next = new Set(prev);
+      for (const order of bulkActionEligibleOrders) {
+        next.add(order.id);
+      }
+      return Array.from(next);
+    });
+  }, [allBulkPackSelected, bulkActionEligibleOrderIds, bulkActionEligibleOrders]);
+
+  const closeBulkPackConfirmSheet = useCallback(() => {
+    if (isBulkActionSubmitting) {
+      return;
+    }
+    setShowBulkPackConfirmSheet(false);
+  }, [isBulkActionSubmitting]);
+
+  const closeBulkShipConfirmSheet = useCallback(() => {
+    if (isBulkActionSubmitting) {
+      return;
+    }
+    setShowBulkShipConfirmSheet(false);
+  }, [isBulkActionSubmitting]);
+
+  const toggleOrderActionMenu = useCallback((orderId: string) => {
+    setOpenOrderActionMenuId((currentId) => (currentId === orderId ? null : orderId));
+  }, []);
+
+  const closeOrderActionMenu = useCallback(() => {
+    setOpenOrderActionMenuId(null);
+  }, []);
+
+  const openOrderDetailFromList = useCallback(
+    (orderId: string) => {
+      closeOrderActionMenu();
+      router.push(`/orders/${orderId}`);
+    },
+    [closeOrderActionMenu, router],
+  );
+
+  const openOrderPrintPage = useCallback(
+    (orderId: string, kind: "receipt" | "label") => {
+      closeOrderActionMenu();
+      if (typeof window === "undefined") {
+        return;
+      }
+      window.open(`/orders/${orderId}/print/${kind}`, "_blank", "noopener,noreferrer");
+    },
+    [closeOrderActionMenu],
+  );
+
+  const renderOrderActionMenu = useCallback(
+    (order: OrderListItem) => {
+      const isOnlineOrder = order.channel !== "WALK_IN";
+      const isOpen = openOrderActionMenuId === order.id;
+
+      return (
+        <div className="relative" data-order-action-menu-root="true">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 rounded-full p-0 text-slate-500"
+            aria-label={`เมนูเพิ่มเติมสำหรับ ${order.orderNo}`}
+            aria-expanded={isOpen}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleOrderActionMenu(order.id);
+            }}
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+          {isOpen ? (
+            <div
+              className="absolute right-0 top-10 z-20 min-w-[12rem] rounded-xl border bg-white p-1 shadow-lg"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                onClick={() => openOrderDetailFromList(order.id)}
+              >
+                เปิดรายละเอียด
+              </button>
+              <button
+                type="button"
+                className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                onClick={() => openOrderPrintPage(order.id, "receipt")}
+              >
+                พิมพ์ใบเสร็จ
+              </button>
+              {isOnlineOrder ? (
+                <button
+                  type="button"
+                  className="flex w-full items-center rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                  onClick={() => openOrderPrintPage(order.id, "label")}
+                >
+                  พิมพ์สติ๊กเกอร์
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      );
+    },
+    [openOrderActionMenuId, openOrderDetailFromList, openOrderPrintPage, toggleOrderActionMenu],
+  );
+
+  const runBulkPackSelectedOrders = useCallback(async () => {
+    if (selectedBulkPackOrders.length <= 0) {
+      setErrorMessage("กรุณาเลือกรายการที่พร้อมแพ็กอย่างน้อย 1 ออเดอร์");
+      setShowBulkPackConfirmSheet(false);
+      return;
+    }
+
+    setBulkPackSubmitting(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    const results = await Promise.all(
+      selectedBulkPackOrders.map(async (order) => {
+        try {
+          const response = await authFetch(`/api/orders/${order.id}`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              "Idempotency-Key": createBulkOrderActionIdempotencyKey("mark_packed", order.id),
+            },
+            body: JSON.stringify({ action: "mark_packed" }),
+          });
+          const data = (await response.json().catch(() => null)) as { message?: string } | null;
+
+          if (!response.ok) {
+            return {
+              orderNo: order.orderNo,
+              ok: false,
+              message: data?.message ?? "แพ็กสินค้าไม่สำเร็จ",
+            };
+          }
+
+          return {
+            orderNo: order.orderNo,
+            ok: true,
+            message: null,
+          };
+        } catch {
+          return {
+            orderNo: order.orderNo,
+            ok: false,
+            message: "แพ็กสินค้าไม่สำเร็จ",
+          };
+        }
+      }),
+    );
+
+    const succeeded = results.filter((result) => result.ok);
+    const failed = results.filter((result) => !result.ok);
+    const failedSummary = failed
+      .slice(0, 3)
+      .map((result) => `${result.orderNo}: ${result.message ?? "ไม่สำเร็จ"}`)
+      .join(" | ");
+
+    if (failed.length > 0) {
+      setErrorMessage(
+        `แพ็กสำเร็จ ${succeeded.length.toLocaleString("th-TH")} รายการ, ไม่สำเร็จ ${failed.length.toLocaleString("th-TH")} รายการ${
+          failedSummary ? ` (${failedSummary})` : ""
+        }`,
+      );
+    } else {
+      setSuccessMessage(`แพ็กสินค้าแล้ว ${succeeded.length.toLocaleString("th-TH")} รายการ`);
+    }
+
+    setSelectedOrderIds((prev) =>
+      prev.filter((orderId) => !selectedBulkPackOrders.some((order) => order.id === orderId)),
+    );
+    setShowBulkPackConfirmSheet(false);
+    setBulkPackSubmitting(false);
+    router.refresh();
+  }, [router, selectedBulkPackOrders]);
+
+  const runBulkShipSelectedOrders = useCallback(async () => {
+    if (selectedBulkShipOrders.length <= 0) {
+      setErrorMessage("กรุณาเลือกรายการที่พร้อมจัดส่งอย่างน้อย 1 ออเดอร์");
+      setShowBulkShipConfirmSheet(false);
+      return;
+    }
+
+    setBulkShipSubmitting(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    const results = await Promise.all(
+      selectedBulkShipOrders.map(async (order) => {
+        try {
+          const response = await authFetch(`/api/orders/${order.id}`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              "Idempotency-Key": createBulkOrderActionIdempotencyKey("mark_shipped", order.id),
+            },
+            body: JSON.stringify({ action: "mark_shipped" }),
+          });
+          const data = (await response.json().catch(() => null)) as { message?: string } | null;
+
+          if (!response.ok) {
+            return {
+              orderNo: order.orderNo,
+              ok: false,
+              message: data?.message ?? "บันทึกจัดส่งไม่สำเร็จ",
+            };
+          }
+
+          return {
+            orderNo: order.orderNo,
+            ok: true,
+            message: null,
+          };
+        } catch {
+          return {
+            orderNo: order.orderNo,
+            ok: false,
+            message: "บันทึกจัดส่งไม่สำเร็จ",
+          };
+        }
+      }),
+    );
+
+    const succeeded = results.filter((result) => result.ok);
+    const failed = results.filter((result) => !result.ok);
+    const failedSummary = failed
+      .slice(0, 3)
+      .map((result) => `${result.orderNo}: ${result.message ?? "ไม่สำเร็จ"}`)
+      .join(" | ");
+
+    if (failed.length > 0) {
+      setErrorMessage(
+        `จัดส่งสำเร็จ ${succeeded.length.toLocaleString("th-TH")} รายการ, ไม่สำเร็จ ${failed.length.toLocaleString("th-TH")} รายการ${
+          failedSummary ? ` (${failedSummary})` : ""
+        }`,
+      );
+    } else {
+      setSuccessMessage(`บันทึกจัดส่งแล้ว ${succeeded.length.toLocaleString("th-TH")} รายการ`);
+    }
+
+    setSelectedOrderIds((prev) =>
+      prev.filter((orderId) => !selectedBulkShipOrders.some((order) => order.id === orderId)),
+    );
+    setShowBulkShipConfirmSheet(false);
+    setBulkShipSubmitting(false);
+    router.refresh();
+  }, [router, selectedBulkShipOrders]);
+
   const tableColumns = useMemo<ColumnDef<OrderListItem>[]>(
     () => [
+      {
+        id: "select",
+        header: () =>
+          bulkActionEligibleOrders.length > 0 ? (
+            <input
+              type="checkbox"
+              checked={allBulkPackSelected}
+              aria-label={
+                allBulkPackSelected
+                  ? "ยกเลิกเลือกออเดอร์ที่ทำรายการได้ทั้งหมด"
+                  : "เลือกออเดอร์ที่ทำรายการได้ทั้งหมด"
+              }
+              onChange={() => toggleSelectAllBulkPackOrders()}
+            />
+          ) : null,
+        cell: ({ row }) =>
+          isOrderEligibleForBulkPack(row.original) || isOrderEligibleForBulkShip(row.original) ? (
+            <input
+              type="checkbox"
+              checked={selectedOrderIds.includes(row.original.id)}
+              aria-label={`เลือก ${row.original.orderNo} เพื่อทำรายการ`}
+              onClick={(event) => event.stopPropagation()}
+              onChange={() => toggleBulkPackOrderSelection(row.original.id)}
+            />
+          ) : null,
+      },
       {
         accessorKey: "orderNo",
         header: "เลขที่ออเดอร์",
@@ -1259,8 +1668,21 @@ export function OrdersManagement(props: OrdersManagementProps) {
         header: "ยอดรวม",
         cell: ({ row }) => `${row.original.total.toLocaleString("th-TH")} ${catalog.storeCurrency}`,
       },
+      {
+        id: "actions",
+        header: "",
+        cell: ({ row }) => renderOrderActionMenu(row.original),
+      },
     ],
-    [catalog.storeCurrency],
+    [
+      allBulkPackSelected,
+      bulkActionEligibleOrders.length,
+      catalog.storeCurrency,
+      renderOrderActionMenu,
+      selectedOrderIds,
+      toggleBulkPackOrderSelection,
+      toggleSelectAllBulkPackOrders,
+    ],
   );
 
   const ordersTable = useReactTable({
@@ -3953,6 +4375,53 @@ export function OrdersManagement(props: OrdersManagementProps) {
           </article>
 
           <section className="space-y-2">
+            {bulkActionEligibleOrders.length > 0 ? (
+              <article className="rounded-xl border bg-white p-3 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm">
+                    <p className="font-medium text-slate-900">
+                      ทำรายการได้ในหน้านี้ {bulkActionEligibleOrders.length.toLocaleString("th-TH")} รายการ
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      พร้อมแพ็ก {bulkPackEligibleOrders.length.toLocaleString("th-TH")} • พร้อมจัดส่ง {bulkShipEligibleOrders.length.toLocaleString("th-TH")} • เลือกแล้ว {selectedOrderIds.length.toLocaleString("th-TH")} รายการ
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 rounded-xl px-3 text-xs sm:text-sm"
+                      onClick={toggleSelectAllBulkPackOrders}
+                      disabled={isBulkActionSubmitting}
+                    >
+                      {allBulkPackSelected ? "ยกเลิกทั้งหมด" : "เลือกทั้งหมด"}
+                    </Button>
+                    <Button
+                      type="button"
+                      className="h-9 rounded-xl px-3 text-xs sm:text-sm"
+                      onClick={() => setShowBulkPackConfirmSheet(true)}
+                      disabled={isBulkActionSubmitting || selectedBulkPackOrders.length <= 0}
+                    >
+                      {bulkPackSubmitting
+                        ? "กำลังแพ็ก..."
+                        : `แพ็ก ${selectedBulkPackOrders.length.toLocaleString("th-TH")} รายการ`}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 rounded-xl px-3 text-xs sm:text-sm"
+                      onClick={() => setShowBulkShipConfirmSheet(true)}
+                      disabled={isBulkActionSubmitting || selectedBulkShipOrders.length <= 0}
+                    >
+                      {bulkShipSubmitting
+                        ? "กำลังจัดส่ง..."
+                        : `จัดส่ง ${selectedBulkShipOrders.length.toLocaleString("th-TH")} รายการ`}
+                    </Button>
+                  </div>
+                </div>
+              </article>
+            ) : null}
+
             {visibleOrders.length === 0 ? (
               <article className="rounded-xl border bg-white p-4 text-sm text-muted-foreground shadow-sm">
                 ไม่พบออเดอร์ในแท็บนี้
@@ -3962,38 +4431,72 @@ export function OrdersManagement(props: OrdersManagementProps) {
                 <div className="space-y-2 md:hidden">
                   {visibleOrders.map((order) => {
                     const badges = buildOrderStatusBadges(order);
+                    const canBulkPack = isOrderEligibleForBulkPack(order);
+                    const canBulkShip = isOrderEligibleForBulkShip(order);
+                    const isSelectedForBulkPack = selectedOrderIds.includes(order.id);
                     return (
-                      <Link
+                      <article
                         key={order.id}
-                        href={`/orders/${order.id}`}
-                        className="block rounded-xl border bg-white p-4 shadow-sm"
+                        className="rounded-xl border bg-white p-4 shadow-sm"
+                        role="link"
+                        tabIndex={0}
+                        aria-label={`เปิดรายละเอียดออเดอร์ ${order.orderNo}`}
+                        onClick={() => router.push(`/orders/${order.id}`)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            router.push(`/orders/${order.id}`);
+                          }
+                        }}
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <p className="text-xs text-muted-foreground">{order.orderNo}</p>
-                            <h3 className="text-sm font-semibold">
-                              {order.customerName || order.contactDisplayName || "ลูกค้าทั่วไป"}
-                            </h3>
-                            <p className="text-xs text-muted-foreground">
-                              {channelSummaryLabel(order)} • {order.paymentCurrency} •{" "}
-                              {paymentMethodLabel[order.paymentMethod]}
-                            </p>
+                          <div className="flex items-start gap-2">
+                            {canBulkPack || canBulkShip ? (
+                              <input
+                                type="checkbox"
+                                checked={isSelectedForBulkPack}
+                                aria-label={`เลือก ${order.orderNo} เพื่อทำรายการ`}
+                                className="mt-1"
+                                onClick={(event) => event.stopPropagation()}
+                                onChange={() => toggleBulkPackOrderSelection(order.id)}
+                              />
+                            ) : null}
+                            <div>
+                              <p className="text-xs text-muted-foreground">{order.orderNo}</p>
+                              <h3 className="text-sm font-semibold">
+                                {order.customerName || order.contactDisplayName || "ลูกค้าทั่วไป"}
+                              </h3>
+                              <p className="text-xs text-muted-foreground">
+                                {channelSummaryLabel(order)} • {order.paymentCurrency} •{" "}
+                                {paymentMethodLabel[order.paymentMethod]}
+                              </p>
+                            </div>
                           </div>
-                          <div className="flex flex-col items-end gap-1">
-                            {badges.map((badge) => (
-                              <span
-                                key={`${order.id}-${badge.label}-${badge.className}`}
-                                className={`rounded-full px-2 py-1 text-xs ${badge.className}`}
-                              >
-                                {badge.label}
-                              </span>
-                            ))}
+                          <div className="flex items-start gap-2">
+                            <div className="flex flex-col items-end gap-1">
+                              {badges.map((badge) => (
+                                <span
+                                  key={`${order.id}-${badge.label}-${badge.className}`}
+                                  className={`rounded-full px-2 py-1 text-xs ${badge.className}`}
+                                >
+                                  {badge.label}
+                                </span>
+                              ))}
+                            </div>
+                            {renderOrderActionMenu(order)}
                           </div>
                         </div>
-                        <p className="mt-2 text-sm font-medium">
-                          {order.total.toLocaleString("th-TH")} {catalog.storeCurrency}
-                        </p>
-                      </Link>
+                        <div className="mt-2 flex items-center justify-between gap-2">
+                          <p className="text-sm font-medium">
+                            {order.total.toLocaleString("th-TH")} {catalog.storeCurrency}
+                          </p>
+                          {canBulkPack || canBulkShip ? (
+                            <span className="rounded-full bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-700">
+                              {canBulkShip ? "เลือกเพื่อจัดส่งได้" : "เลือกเพื่อแพ็กได้"}
+                            </span>
+                          ) : null}
+                        </div>
+                      </article>
                     );
                   })}
                 </div>
@@ -4032,9 +4535,9 @@ export function OrdersManagement(props: OrdersManagementProps) {
                             }
                           }}
                         >
-                          {row.getVisibleCells().map((cell, index) => (
+                          {row.getVisibleCells().map((cell) => (
                             <td key={cell.id} className="px-3 py-3">
-                              {index === 0 ? (
+                              {cell.column.id === "orderNo" ? (
                                 <span className="font-medium text-blue-700">
                                   {row.original.orderNo}
                                 </span>
@@ -4690,6 +5193,129 @@ export function OrdersManagement(props: OrdersManagementProps) {
             >
               ปิดหน้าต่างนี้
             </button>
+          </div>
+        </SlideUpSheet>
+      ) : null}
+
+      {!isCreateOnlyMode ? (
+        <SlideUpSheet
+          isOpen={showBulkPackConfirmSheet}
+          onClose={closeBulkPackConfirmSheet}
+          title="ยืนยันแพ็กสินค้า"
+          description="บันทึกว่าออเดอร์ที่เลือกแพ็กสินค้าแล้ว"
+          panelMaxWidthClass="min-[1200px]:max-w-lg"
+          disabled={bulkPackSubmitting}
+          footer={
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 rounded-xl"
+                onClick={closeBulkPackConfirmSheet}
+                disabled={bulkPackSubmitting}
+              >
+                ยกเลิก
+              </Button>
+              <Button
+                type="button"
+                className="h-10 rounded-xl"
+                onClick={() => void runBulkPackSelectedOrders()}
+                disabled={bulkPackSubmitting || selectedBulkPackOrders.length <= 0}
+              >
+                {bulkPackSubmitting
+                  ? "กำลังแพ็ก..."
+                  : `ยืนยันแพ็ก ${selectedBulkPackOrders.length.toLocaleString("th-TH")} รายการ`}
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <div className="rounded-xl border bg-slate-50 p-3">
+              <p className="text-sm font-medium text-slate-900">
+                เลือกไว้ {selectedBulkPackOrders.length.toLocaleString("th-TH")} รายการ
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                ใช้สำหรับงานแพ็กสินค้าที่ไม่ต้องกรอกข้อมูลเพิ่ม
+              </p>
+            </div>
+            <div className="space-y-2">
+              {selectedBulkPackOrders.slice(0, 6).map((order) => (
+                <div key={order.id} className="rounded-xl border px-3 py-2 text-sm">
+                  <p className="font-medium text-slate-900">{order.orderNo}</p>
+                  <p className="text-xs text-slate-500">
+                    {order.customerName || order.contactDisplayName || "ลูกค้าทั่วไป"} •{" "}
+                    {order.total.toLocaleString("th-TH")} {catalog.storeCurrency}
+                  </p>
+                </div>
+              ))}
+              {selectedBulkPackOrders.length > 6 ? (
+                <p className="text-xs text-slate-500">
+                  และอีก {(selectedBulkPackOrders.length - 6).toLocaleString("th-TH")} รายการ
+                </p>
+              ) : null}
+            </div>
+          </div>
+        </SlideUpSheet>
+      ) : null}
+
+      {!isCreateOnlyMode ? (
+        <SlideUpSheet
+          isOpen={showBulkShipConfirmSheet}
+          onClose={closeBulkShipConfirmSheet}
+          title="ยืนยันจัดส่งแล้ว"
+          description="บันทึกว่าออเดอร์ที่เลือกจัดส่งแล้ว"
+          panelMaxWidthClass="min-[1200px]:max-w-lg"
+          disabled={bulkShipSubmitting}
+          footer={
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 rounded-xl"
+                onClick={closeBulkShipConfirmSheet}
+                disabled={bulkShipSubmitting}
+              >
+                ยกเลิก
+              </Button>
+              <Button
+                type="button"
+                className="h-10 rounded-xl"
+                onClick={() => void runBulkShipSelectedOrders()}
+                disabled={bulkShipSubmitting || selectedBulkShipOrders.length <= 0}
+              >
+                {bulkShipSubmitting
+                  ? "กำลังจัดส่ง..."
+                  : `ยืนยันจัดส่ง ${selectedBulkShipOrders.length.toLocaleString("th-TH")} รายการ`}
+              </Button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <div className="rounded-xl border bg-slate-50 p-3">
+              <p className="text-sm font-medium text-slate-900">
+                เลือกไว้ {selectedBulkShipOrders.length.toLocaleString("th-TH")} รายการ
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                ใช้ได้เฉพาะออเดอร์ออนไลน์ที่แพ็กแล้วและมีข้อมูลขนส่งพร้อม
+              </p>
+            </div>
+            <div className="space-y-2">
+              {selectedBulkShipOrders.slice(0, 6).map((order) => (
+                <div key={order.id} className="rounded-xl border px-3 py-2 text-sm">
+                  <p className="font-medium text-slate-900">{order.orderNo}</p>
+                  <p className="text-xs text-slate-500">
+                    {order.customerName || order.contactDisplayName || "ลูกค้าทั่วไป"} •{" "}
+                    {(order.shippingProvider || order.shippingCarrier || "ไม่ระบุ")} •{" "}
+                    {order.trackingNo || "ไม่มีเลขติดตาม"}
+                  </p>
+                </div>
+              ))}
+              {selectedBulkShipOrders.length > 6 ? (
+                <p className="text-xs text-slate-500">
+                  และอีก {(selectedBulkShipOrders.length - 6).toLocaleString("th-TH")} รายการ
+                </p>
+              ) : null}
+            </div>
           </div>
         </SlideUpSheet>
       ) : null}

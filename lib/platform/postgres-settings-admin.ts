@@ -103,14 +103,7 @@ const getTodayUtcRange = () => {
   };
 };
 
-const isPostgresSettingsSystemAdminReadEnabled = () =>
-  process.env.POSTGRES_SETTINGS_SYSTEM_ADMIN_READ_ENABLED === "1";
-
 const getPostgresSettingsAdminContext = async (): Promise<PostgresSettingsAdminContext | null> => {
-  if (!isPostgresSettingsSystemAdminReadEnabled()) {
-    return null;
-  }
-
   const [{ queryMany, queryOne }, { isPostgresConfigured }] = await Promise.all([
     import("@/lib/db/query"),
     import("@/lib/db/sequelize"),

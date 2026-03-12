@@ -33,7 +33,6 @@ const nextConfig: NextConfig = {
       "@tanstack/react-table",
       "@hookform/resolvers",
       "zod",
-      "drizzle-orm",
       "@radix-ui/react-slot",
     ],
   },

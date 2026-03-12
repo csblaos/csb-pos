@@ -1,16 +1,10 @@
-import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import { stores } from "@/lib/db/schema";
 import {
   getStorePdfConfigFromPostgres,
-  logStoreSettingsReadFallback,
 } from "@/lib/platform/postgres-store-settings";
 import {
-  isPostgresStoreSettingsWriteEnabled,
-  logStoreSettingsWriteFallback,
   updateStorePdfConfigInPostgres,
 } from "@/lib/platform/postgres-store-settings-write";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
@@ -34,33 +28,7 @@ const updatePdfConfigSchema = z.object({
 export async function GET() {
   try {
     const { storeId } = await enforcePermission("settings.view");
-    let row = null;
-
-    try {
-      const postgresRow = await getStorePdfConfigFromPostgres(storeId);
-      if (postgresRow !== undefined) {
-        row = postgresRow;
-      }
-    } catch (error) {
-      logStoreSettingsReadFallback("settings.store.pdf.get", error);
-    }
-
-    if (!row) {
-      const db = await getTursoDb();
-      [row] = await db
-        .select({
-          pdfShowLogo: stores.pdfShowLogo,
-          pdfShowSignature: stores.pdfShowSignature,
-          pdfShowNote: stores.pdfShowNote,
-          pdfHeaderColor: stores.pdfHeaderColor,
-          pdfCompanyName: stores.pdfCompanyName,
-          pdfCompanyAddress: stores.pdfCompanyAddress,
-          pdfCompanyPhone: stores.pdfCompanyPhone,
-        })
-        .from(stores)
-        .where(eq(stores.id, storeId))
-        .limit(1);
-    }
+    const row = await getStorePdfConfigFromPostgres(storeId);
 
     if (!row) {
       return NextResponse.json(
@@ -153,20 +121,7 @@ export async function PATCH(request: Request) {
       );
     }
 
-    const db = await getTursoDb();
-    const [before] = await db
-      .select({
-        pdfShowLogo: stores.pdfShowLogo,
-        pdfShowSignature: stores.pdfShowSignature,
-        pdfShowNote: stores.pdfShowNote,
-        pdfHeaderColor: stores.pdfHeaderColor,
-        pdfCompanyName: stores.pdfCompanyName,
-        pdfCompanyAddress: stores.pdfCompanyAddress,
-        pdfCompanyPhone: stores.pdfCompanyPhone,
-      })
-      .from(stores)
-      .where(eq(stores.id, storeId))
-      .limit(1);
+    const before = await getStorePdfConfigFromPostgres(storeId);
 
     if (!before) {
       await safeLogAuditEvent({
@@ -185,44 +140,16 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ message: "ไม่พบร้านค้า" }, { status: 404 });
     }
 
-    let updated;
-    if (isPostgresStoreSettingsWriteEnabled()) {
-      try {
-        const pgResult = await updateStorePdfConfigInPostgres({
-          storeId,
-          updates,
-        });
+    const pgResult = await updateStorePdfConfigInPostgres({
+      storeId,
+      updates,
+    });
 
-        if (!pgResult.ok) {
-          return NextResponse.json({ message: "ไม่พบร้านค้า" }, { status: 404 });
-        }
-
-        updated = pgResult.store;
-      } catch (error) {
-        logStoreSettingsWriteFallback("settings.store.pdf.patch", error);
-      }
+    if (!pgResult.ok) {
+      return NextResponse.json({ message: "ไม่พบร้านค้า" }, { status: 404 });
     }
 
-    if (!updated) {
-      await db
-        .update(stores)
-        .set(updates)
-        .where(eq(stores.id, storeId));
-
-      [updated] = await db
-        .select({
-          pdfShowLogo: stores.pdfShowLogo,
-          pdfShowSignature: stores.pdfShowSignature,
-          pdfShowNote: stores.pdfShowNote,
-          pdfHeaderColor: stores.pdfHeaderColor,
-          pdfCompanyName: stores.pdfCompanyName,
-          pdfCompanyAddress: stores.pdfCompanyAddress,
-          pdfCompanyPhone: stores.pdfCompanyPhone,
-        })
-        .from(stores)
-        .where(eq(stores.id, storeId))
-        .limit(1);
-    }
+    const updated = pgResult.store;
 
     await safeLogAuditEvent({
       scope: "STORE",

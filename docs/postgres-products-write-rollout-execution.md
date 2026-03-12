@@ -8,7 +8,7 @@
 - `POST /api/products` ใน [app/api/products/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/products/route.ts)
 - `PATCH /api/products/[productId]` ใน [app/api/products/[productId]/route.ts](/Users/csl-dev/Desktop/alex/csb-pos/app/api/products/[productId]/route.ts)
 - PostgreSQL write helper ใน [lib/platform/postgres-products-write.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/platform/postgres-products-write.ts)
-- variant persistence ใน [lib/products/variant-persistence.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/products/variant-persistence.ts)
+- variant persistence ที่รวมอยู่ใน [lib/platform/postgres-products-write.ts](/Users/csl-dev/Desktop/alex/csb-pos/lib/platform/postgres-products-write.ts)
 
 ## Scope
 

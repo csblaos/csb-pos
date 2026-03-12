@@ -19,7 +19,7 @@ export async function getUserSystemRole(userId: string): Promise<SystemRole> {
   if (postgresRole !== undefined) {
     return postgresRole;
   }
-  throw new Error("POSTGRES_AUTH_RBAC_READ_ENABLED is required for getUserSystemRole");
+  throw new Error("PostgreSQL system role lookup is not available");
 }
 
 export async function getCurrentUserSystemRole() {

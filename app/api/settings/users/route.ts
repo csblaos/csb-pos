@@ -1,13 +1,12 @@
 import { randomUUID } from "node:crypto";
 
-import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { alias } from "drizzle-orm/sqlite-core";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { generateTemporaryPassword, hashPassword } from "@/lib/auth/password";
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import { roles, storeMembers, users } from "@/lib/db/schema";
+import { execute, queryMany, queryOne } from "@/lib/db/query";
+import { type PostgresTransaction } from "@/lib/db/sequelize";
+import { runInTransaction } from "@/lib/db/transaction";
 import { enforcePermission, toRBACErrorResponse } from "@/lib/rbac/access";
 import { safeLogAuditEvent } from "@/server/services/audit.service";
 
@@ -39,19 +38,22 @@ type CreateStoreUserPayload =
   | z.infer<typeof createNewStoreUserSchema>
   | z.infer<typeof addExistingStoreUserSchema>;
 
-const activeOwnerCount = async (storeId: string) => {
-  const db = await getTursoDb();
-  const [row] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(storeMembers)
-    .innerJoin(roles, eq(storeMembers.roleId, roles.id))
-    .where(
-      and(
-        eq(storeMembers.storeId, storeId),
-        eq(storeMembers.status, "ACTIVE"),
-        eq(roles.name, "Owner"),
-      ),
-    );
+const activeOwnerCount = async (storeId: string, transaction?: PostgresTransaction) => {
+  const row = await queryOne<{ count: number | string }>(
+    `
+      select count(*) as "count"
+      from store_members sm
+      inner join roles r on sm.role_id = r.id
+      where
+        sm.store_id = :storeId
+        and sm.status = 'ACTIVE'
+        and r.name = 'Owner'
+    `,
+    {
+      replacements: { storeId },
+      transaction,
+    },
+  );
 
   return Number(row?.count ?? 0);
 };
@@ -91,56 +93,78 @@ const parseCreateStoreUserPayload = (
 };
 
 const listUsers = async (storeId: string) => {
-  const db = await getTursoDb();
-  const userCreators = alias(users, "user_creators");
-  const memberAdders = alias(users, "member_adders");
-
-  const rows = await db
-    .select({
-      userId: users.id,
-      email: users.email,
-      name: users.name,
-      systemRole: users.systemRole,
-      mustChangePassword: users.mustChangePassword,
-      sessionLimit: users.sessionLimit,
-      createdByUserId: users.createdBy,
-      createdByName: userCreators.name,
-      roleId: roles.id,
-      roleName: roles.name,
-      status: storeMembers.status,
-      joinedAt: storeMembers.createdAt,
-      addedByUserId: storeMembers.addedBy,
-      addedByName: memberAdders.name,
-    })
-    .from(storeMembers)
-    .innerJoin(users, eq(storeMembers.userId, users.id))
-    .innerJoin(roles, eq(storeMembers.roleId, roles.id))
-    .leftJoin(userCreators, eq(users.createdBy, userCreators.id))
-    .leftJoin(memberAdders, eq(storeMembers.addedBy, memberAdders.id))
-    .where(eq(storeMembers.storeId, storeId))
-    .orderBy(asc(users.name));
-
-  return rows;
+  return queryMany<{
+    userId: string;
+    email: string;
+    name: string;
+    systemRole: string | null;
+    mustChangePassword: boolean;
+    sessionLimit: number | null;
+    createdByUserId: string | null;
+    createdByName: string | null;
+    roleId: string;
+    roleName: string;
+    status: string;
+    joinedAt: string;
+    addedByUserId: string | null;
+    addedByName: string | null;
+  }>(
+    `
+      select
+        u.id as "userId",
+        u.email,
+        u.name,
+        u.system_role as "systemRole",
+        u.must_change_password as "mustChangePassword",
+        u.session_limit as "sessionLimit",
+        u.created_by as "createdByUserId",
+        uc.name as "createdByName",
+        r.id as "roleId",
+        r.name as "roleName",
+        sm.status,
+        sm.created_at as "joinedAt",
+        sm.added_by as "addedByUserId",
+        ua.name as "addedByName"
+      from store_members sm
+      inner join users u on sm.user_id = u.id
+      inner join roles r on sm.role_id = r.id
+      left join users uc on u.created_by = uc.id
+      left join users ua on sm.added_by = ua.id
+      where sm.store_id = :storeId
+      order by u.name asc
+    `,
+    {
+      replacements: { storeId },
+    },
+  );
 };
 
 const getRoleForStore = async (storeId: string, roleId: string) => {
-  const db = await getTursoDb();
-  const [role] = await db
-    .select({ id: roles.id, name: roles.name })
-    .from(roles)
-    .where(and(eq(roles.id, roleId), eq(roles.storeId, storeId)))
-    .limit(1);
-
-  return role ?? null;
+  return queryOne<{ id: string; name: string }>(
+    `
+      select id, name
+      from roles
+      where id = :roleId and store_id = :storeId
+      limit 1
+    `,
+    {
+      replacements: { roleId, storeId },
+    },
+  );
 };
 
 const getUserSystemRole = async (userId: string) => {
-  const db = await getTursoDb();
-  const [row] = await db
-    .select({ systemRole: users.systemRole })
-    .from(users)
-    .where(eq(users.id, userId))
-    .limit(1);
+  const row = await queryOne<{ systemRole: string | null }>(
+    `
+      select system_role as "systemRole"
+      from users
+      where id = :userId
+      limit 1
+    `,
+    {
+      replacements: { userId },
+    },
+  );
 
   return row?.systemRole ?? "USER";
 };
@@ -149,37 +173,37 @@ const canSuperadminLinkUserAcrossOwnedStores = async (
   superadminUserId: string,
   targetUserId: string,
 ) => {
-  const db = await getTursoDb();
-  const ownedStoreRows = await db
-    .select({
-      storeId: storeMembers.storeId,
-    })
-    .from(storeMembers)
-    .innerJoin(roles, eq(storeMembers.roleId, roles.id))
-    .where(
-      and(
-        eq(storeMembers.userId, superadminUserId),
-        eq(storeMembers.status, "ACTIVE"),
-        eq(roles.name, "Owner"),
-      ),
-    );
+  const ownedStoreRows = await queryMany<{ storeId: string }>(
+    `
+      select sm.store_id as "storeId"
+      from store_members sm
+      inner join roles r on sm.role_id = r.id
+      where
+        sm.user_id = :superadminUserId
+        and sm.status = 'ACTIVE'
+        and r.name = 'Owner'
+    `,
+    {
+      replacements: { superadminUserId },
+    },
+  );
 
   const ownedStoreIds = ownedStoreRows.map((row) => row.storeId);
   if (ownedStoreIds.length === 0) {
     return false;
   }
 
-  const [targetMembership] = await db
-    .select({
-      count: sql<number>`count(*)`,
-    })
-    .from(storeMembers)
-    .where(
-      and(
-        eq(storeMembers.userId, targetUserId),
-        inArray(storeMembers.storeId, ownedStoreIds),
-      ),
-    );
+  const targetMembership = await queryOne<{ count: number | string }>(
+    `
+      select count(*) as "count"
+      from store_members
+      where user_id = :targetUserId
+        and store_id in (:ownedStoreIds)
+    `,
+    {
+      replacements: { targetUserId, ownedStoreIds },
+    },
+  );
 
   return Number(targetMembership?.count ?? 0) > 0;
 };
@@ -190,22 +214,29 @@ const upsertMembershipWithRoleGuard = async (params: {
   actorUserId: string;
   nextRoleId: string;
   nextRoleName: string;
+  transaction: PostgresTransaction;
 }) => {
-  const db = await getTursoDb();
-  const [existingMembership] = await db
-    .select({
-      status: storeMembers.status,
-      roleName: roles.name,
-    })
-    .from(storeMembers)
-    .innerJoin(roles, eq(storeMembers.roleId, roles.id))
-    .where(
-      and(
-        eq(storeMembers.storeId, params.storeId),
-        eq(storeMembers.userId, params.userId),
-      ),
-    )
-    .limit(1);
+  const existingMembership = await queryOne<{
+    status: string;
+    roleName: string;
+  }>(
+    `
+      select
+        sm.status,
+        r.name as "roleName"
+      from store_members sm
+      inner join roles r on sm.role_id = r.id
+      where sm.store_id = :storeId and sm.user_id = :userId
+      limit 1
+    `,
+    {
+      replacements: {
+        storeId: params.storeId,
+        userId: params.userId,
+      },
+      transaction: params.transaction,
+    },
+  );
 
   if (
     existingMembership &&
@@ -213,35 +244,60 @@ const upsertMembershipWithRoleGuard = async (params: {
     params.nextRoleName !== "Owner" &&
     existingMembership.status === "ACTIVE"
   ) {
-    const ownerCount = await activeOwnerCount(params.storeId);
+    const ownerCount = await activeOwnerCount(params.storeId, params.transaction);
     if (ownerCount <= 1) {
       throw new Error("LAST_OWNER_ROLE_GUARD");
     }
   }
 
   if (existingMembership) {
-    await db
-      .update(storeMembers)
-      .set({
-        roleId: params.nextRoleId,
-        status: "ACTIVE",
-      })
-      .where(
-        and(
-          eq(storeMembers.storeId, params.storeId),
-          eq(storeMembers.userId, params.userId),
-        ),
-      );
+    await execute(
+      `
+        update store_members
+        set
+          role_id = :nextRoleId,
+          status = 'ACTIVE'
+        where store_id = :storeId and user_id = :userId
+      `,
+      {
+        replacements: {
+          storeId: params.storeId,
+          userId: params.userId,
+          nextRoleId: params.nextRoleId,
+        },
+        transaction: params.transaction,
+      },
+    );
     return;
   }
 
-  await db.insert(storeMembers).values({
-    storeId: params.storeId,
-    userId: params.userId,
-    roleId: params.nextRoleId,
-    status: "ACTIVE",
-    addedBy: params.actorUserId,
-  });
+  await execute(
+    `
+      insert into store_members (
+        store_id,
+        user_id,
+        role_id,
+        status,
+        added_by
+      )
+      values (
+        :storeId,
+        :userId,
+        :nextRoleId,
+        'ACTIVE',
+        :actorUserId
+      )
+    `,
+    {
+      replacements: {
+        storeId: params.storeId,
+        userId: params.userId,
+        nextRoleId: params.nextRoleId,
+        actorUserId: params.actorUserId,
+      },
+      transaction: params.transaction,
+    },
+  );
 };
 
 export async function GET() {
@@ -265,7 +321,6 @@ export async function POST(request: Request) {
 
   try {
     const { storeId, session } = await enforcePermission("members.create");
-    const db = await getTursoDb();
     auditContext = {
       storeId,
       userId: session.userId,
@@ -327,25 +382,33 @@ export async function POST(request: Request) {
         );
       }
 
-      const existingUserLookup = payload.data.userId
-        ? await db
-            .select({
-              id: users.id,
-              systemRole: users.systemRole,
-            })
-            .from(users)
-            .where(eq(users.id, payload.data.userId))
-            .limit(1)
-        : await db
-            .select({
-              id: users.id,
-              systemRole: users.systemRole,
-            })
-            .from(users)
-            .where(eq(users.email, payload.data.email!.trim().toLowerCase()))
-            .limit(1);
-
-      const [existingUser] = existingUserLookup;
+      const existingUser = payload.data.userId
+        ? await queryOne<{ id: string; systemRole: string | null }>(
+            `
+              select
+                id,
+                system_role as "systemRole"
+              from users
+              where id = :userId
+              limit 1
+            `,
+            {
+              replacements: { userId: payload.data.userId },
+            },
+          )
+        : await queryOne<{ id: string; systemRole: string | null }>(
+            `
+              select
+                id,
+                system_role as "systemRole"
+              from users
+              where lower(email) = lower(:email)
+              limit 1
+            `,
+            {
+              replacements: { email: payload.data.email!.trim().toLowerCase() },
+            },
+          );
 
       if (!existingUser) {
         await logFail({
@@ -393,12 +456,15 @@ export async function POST(request: Request) {
       }
 
       try {
-        await upsertMembershipWithRoleGuard({
-          storeId,
-          userId: existingUser.id,
-          actorUserId: session.userId,
-          nextRoleId: role.id,
-          nextRoleName: role.name,
+        await runInTransaction(async (tx) => {
+          await upsertMembershipWithRoleGuard({
+            storeId,
+            userId: existingUser.id,
+            actorUserId: session.userId,
+            nextRoleId: role.id,
+            nextRoleName: role.name,
+            transaction: tx,
+          });
         });
       } catch (error) {
         if (error instanceof Error && error.message === "LAST_OWNER_ROLE_GUARD") {
@@ -441,13 +507,24 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, members });
     }
 
-    const normalizedEmail = payload.data.email.trim().toLowerCase();
+    if (payload.data.action !== "create_new") {
+      return NextResponse.json({ message: "ข้อมูลผู้ใช้ไม่ถูกต้อง" }, { status: 400 });
+    }
 
-    const [existingUser] = await db
-      .select({ id: users.id })
-      .from(users)
-    .where(eq(users.email, normalizedEmail))
-    .limit(1);
+    const createPayload = payload.data;
+    const normalizedEmail = createPayload.email.trim().toLowerCase();
+
+    const existingUser = await queryOne<{ id: string }>(
+      `
+        select id
+        from users
+        where lower(email) = lower(:email)
+        limit 1
+      `,
+      {
+        replacements: { email: normalizedEmail },
+      },
+    );
 
     if (existingUser) {
       await logFail({
@@ -465,25 +542,51 @@ export async function POST(request: Request) {
     }
 
     const userId = randomUUID();
-    const temporaryPassword = payload.data.password ?? generateTemporaryPassword(10);
+    const temporaryPassword = createPayload.password ?? generateTemporaryPassword(10);
     const passwordHash = await hashPassword(temporaryPassword);
 
-    await db.insert(users).values({
-      id: userId,
-      email: normalizedEmail,
-      name: payload.data.name,
-      passwordHash,
-      createdBy: session.userId,
-      mustChangePassword: true,
-      passwordUpdatedAt: null,
-    });
+    await runInTransaction(async (tx) => {
+      await execute(
+        `
+          insert into users (
+            id,
+            email,
+            name,
+            password_hash,
+            created_by,
+            must_change_password,
+            password_updated_at
+          )
+          values (
+            :userId,
+            :email,
+            :name,
+            :passwordHash,
+            :createdBy,
+            true,
+            null
+          )
+        `,
+        {
+          replacements: {
+            userId,
+            email: normalizedEmail,
+            name: createPayload.name,
+            passwordHash,
+            createdBy: session.userId,
+          },
+          transaction: tx,
+        },
+      );
 
-    await upsertMembershipWithRoleGuard({
-      storeId,
-      userId,
-      actorUserId: session.userId,
-      nextRoleId: role.id,
-      nextRoleName: role.name,
+      await upsertMembershipWithRoleGuard({
+        storeId,
+        userId,
+        actorUserId: session.userId,
+        nextRoleId: role.id,
+        nextRoleName: role.name,
+        transaction: tx,
+      });
     });
 
     const members = await listUsers(storeId);
@@ -505,7 +608,7 @@ export async function POST(request: Request) {
       after: {
         userId,
         email: normalizedEmail,
-        name: payload.data.name,
+        name: createPayload.name,
         roleId: role.id,
         roleName: role.name,
         status: "ACTIVE",

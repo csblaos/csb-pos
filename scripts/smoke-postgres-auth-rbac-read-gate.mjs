@@ -5,8 +5,8 @@ const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const commands = [
   "db:check:postgres",
   "db:migrate:postgres",
-  "db:compare:postgres:auth-rbac-read",
-  "db:compare:postgres:orders-read",
+  "lint",
+  "build",
 ];
 
 const runScript = (scriptName) =>

@@ -1,17 +1,11 @@
-import { randomUUID } from "node:crypto";
-
-import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { hashPassword } from "@/lib/auth/password";
 import { enforceSystemAdminSession, toSystemAdminErrorResponse } from "@/lib/auth/system-admin";
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import { users } from "@/lib/db/schema";
 import {
   createSuperadminInPostgres,
   findUserByEmailFromPostgres,
-  logSettingsSystemAdminWriteFallback,
 } from "@/lib/platform/postgres-settings-admin-write";
 import { listSuperadmins } from "@/lib/system-admin/superadmins";
 
@@ -49,60 +43,31 @@ export async function POST(request: Request) {
 
     const passwordHash = await hashPassword(payload.data.password);
 
-    try {
-      const existingUser = await findUserByEmailFromPostgres(normalizedEmail);
-      if (existingUser !== undefined) {
-        if (existingUser) {
-          return NextResponse.json({ message: "อีเมลนี้มีในระบบแล้ว" }, { status: 409 });
-        }
-
-        const result = await createSuperadminInPostgres({
-          email: normalizedEmail,
-          name: payload.data.name,
-          passwordHash,
-          createdBy: session.userId,
-          canCreateStores: payload.data.canCreateStores,
-          maxStores: payload.data.canCreateStores ? payload.data.maxStores : null,
-          canCreateBranches: payload.data.canCreateBranches,
-          maxBranchesPerStore:
-            payload.data.canCreateBranches === false ? null : payload.data.maxBranchesPerStore,
-        });
-
-        if (result !== undefined) {
-          return NextResponse.json({ ok: true, superadmins: result.superadmins });
-        }
-      }
-    } catch (error) {
-      logSettingsSystemAdminWriteFallback("system-admin.superadmins.create", error);
+    const existingUser = await findUserByEmailFromPostgres(normalizedEmail);
+    if (existingUser === undefined) {
+      throw new Error("PostgreSQL system-admin write path is not available");
     }
-
-    const db = await getTursoDb();
-    const [existingUser] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.email, normalizedEmail))
-      .limit(1);
 
     if (existingUser) {
       return NextResponse.json({ message: "อีเมลนี้มีในระบบแล้ว" }, { status: 409 });
     }
 
-    await db.insert(users).values({
-      id: randomUUID(),
+    const result = await createSuperadminInPostgres({
       email: normalizedEmail,
       name: payload.data.name,
       passwordHash,
       createdBy: session.userId,
-      systemRole: "SUPERADMIN",
       canCreateStores: payload.data.canCreateStores,
       maxStores: payload.data.canCreateStores ? payload.data.maxStores : null,
       canCreateBranches: payload.data.canCreateBranches,
       maxBranchesPerStore:
         payload.data.canCreateBranches === false ? null : payload.data.maxBranchesPerStore,
     });
+    if (result === undefined) {
+      throw new Error("PostgreSQL system-admin write path is not available");
+    }
 
-    const superadmins = await listSuperadmins();
-    return NextResponse.json({ ok: true, superadmins });
+    return NextResponse.json({ ok: true, superadmins: result.superadmins });
   } catch (error) {
     return toSystemAdminErrorResponse(error);
   }

@@ -252,7 +252,7 @@ const toStoredRule = (row: NotificationRuleRow): StoredRule => ({
 });
 
 export const isPostgresNotificationsEnabled = () =>
-  process.env.POSTGRES_NOTIFICATIONS_ENABLED === "1" && isPostgresConfigured();
+  isPostgresConfigured();
 
 export const logNotificationsFallback = (operation: string, error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);

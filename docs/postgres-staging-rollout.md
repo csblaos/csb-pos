@@ -2,14 +2,20 @@
 
 เอกสารนี้ใช้สำหรับเปิด PostgreSQL path บน staging แบบค่อยเป็นค่อยไป โดยอิง feature flags ที่มีอยู่จริงในระบบตอนนี้
 
-## เป้าหมาย
+## Current Status
+
+- runtime app ใน repo นี้ถูกย้ายเป็น `PostgreSQL-only` แล้ว
+- runbook นี้ถูกเก็บไว้เป็น historical rollout reference
+- ถ้าจะตรวจสุขภาพ repo ปัจจุบัน ให้ใช้ smoke gates ที่ยังเหลือใน `package.json`
+
+## Historical Goal
 
 - เปิดใช้งาน PostgreSQL `orders write` บน staging แบบปลอดภัย
 - เปิดใช้งาน PostgreSQL `purchase read/write` บน staging แบบปลอดภัย
 - คง `fallback -> Turso` ไว้ในแต่ละ action จนกว่าจะมั่นใจ
 - ยังไม่เปิด `POSTGRES_INVENTORY_READ_ENABLED=1` จนกว่า movement producers นอก order route จะ dual-write ครบ
 
-## Preflight Checklist
+## Historical Preflight Checklist
 
 รันก่อนทุกครั้งใน environment ที่จะ rollout:
 
@@ -19,9 +25,6 @@ npm run smoke:postgres:settings-system-admin-read-gate
 npm run smoke:postgres:products-units-onboarding-read-gate
 npm run db:check:postgres
 npm run db:migrate:postgres
-npm run db:compare:postgres:orders-read
-npm run db:compare:postgres:purchase-read
-npm run db:compare:postgres:inventory
 npm run smoke:postgres:orders-write-suite
 npm run smoke:postgres:purchase-suite
 npm run smoke:postgres:inventory-read-gate
@@ -32,9 +35,9 @@ npm run build
 ถ้า command ใด fail ให้หยุด rollout และแก้ที่ต้นเหตุทันที
 
 หมายเหตุ:
-- `npm run smoke:postgres:purchase-suite` ตอนนี้เป็น preflight chain ของ purchase rollout แล้ว โดยรวม `db:check:postgres`, `db:migrate:postgres`, `db:compare:postgres:auth-rbac-read`, `db:backfill:postgres:purchase-read`, `db:compare:postgres:purchase-read`, purchase smokes, `db:compare:postgres:inventory`, `lint`, และ `build`
-- `npm run smoke:postgres:orders-write-suite` ตอนนี้เป็น preflight chain ของ orders write rollout แล้ว โดยรวม `db:check:postgres`, `db:migrate:postgres`, `db:compare:postgres:auth-rbac-read`, `db:compare:postgres:orders-read`, `db:compare:postgres:purchase-read`, `db:compare:postgres:inventory`, `db:compare:postgres:reports-read`, order write smokes ทั้งชุด, `lint`, และ `build`
-- `npm run smoke:postgres:stock-movement-gate` ตอนนี้เป็น preflight chain ของ stock movement rollout แล้ว โดยรวม `db:check:postgres`, `db:migrate:postgres`, `db:compare:postgres:auth-rbac-read`, `db:compare:postgres:branches`, `smoke:postgres:inventory-read-gate`, `smoke:postgres:stock-movement`, `lint`, และ `build`
+- `npm run smoke:postgres:purchase-suite` ตอนนี้เป็น preflight chain ของ purchase rollout แล้ว โดยรวม PostgreSQL health/migration + purchase smokes + `lint` + `build`
+- `npm run smoke:postgres:orders-write-suite` ตอนนี้เป็น preflight chain ของ orders write rollout แล้ว โดยรวม PostgreSQL health/migration + order write smokes + `lint` + `build`
+- `npm run smoke:postgres:stock-movement-gate` ตอนนี้เป็น preflight chain ของ stock movement rollout แล้ว โดยรวม PostgreSQL health/migration + inventory/order gates + stock movement smoke + `lint` + `build`
 - `npm run smoke:postgres:all-postgres-observe-gate` ตอนนี้เป็น operational gate สำหรับ phase observe/fallback removal แล้ว โดยรวม gates ของ auth/rbac, settings/system-admin, branches, store settings, notifications, products, reports, และ stock movement เพื่อเช็ก readiness ก่อนเริ่ม zero-fallback observe window
 
 ## Auth/RBAC Read Rollout

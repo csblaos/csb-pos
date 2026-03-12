@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 
-import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -11,18 +10,8 @@ import {
   getSession,
   SessionStoreUnavailableError,
 } from "@/lib/auth/session";
-import { getTursoDb } from "@/lib/db/turso-lazy";
-import {
-  fbConnections,
-  rolePermissions,
-  roles,
-  shippingProviders,
-  storeMembers,
-  storeBranches,
-  stores,
-  users,
-  waConnections,
-} from "@/lib/db/schema";
+import { execute, queryOne } from "@/lib/db/query";
+import { runInTransaction } from "@/lib/db/transaction";
 import {
   defaultPermissionCatalog,
   defaultRoleNames,
@@ -196,8 +185,293 @@ const createStoreSchema = z.object({
   storeName: z.string().trim().min(2).max(120),
 });
 
+function buildDefaultRolePermissionRows(roleIds: Record<(typeof defaultRoleNames)[number], string>) {
+  return defaultRoleNames.flatMap((name) => {
+    const rolePermissionSet = defaultRolePermissions[name];
+    const keys =
+      rolePermissionSet === "ALL"
+        ? defaultPermissionCatalog.map((permission) =>
+            permissionKey(permission.resource, permission.action),
+          )
+        : rolePermissionSet;
+
+    return keys.map((key) => ({
+      roleId: roleIds[name],
+      permissionId: permissionIdFromKey(key),
+    }));
+  });
+}
+
+async function createStoreInPostgres(input: {
+  storeId: string;
+  mainBranchId: string;
+  ownerUserId: string;
+  storeName: string;
+  storeType: z.infer<typeof storeTypeSchema>;
+  logoName: string | null;
+  logoUrl: string | null;
+  address: string | null;
+  phoneNumber: string | null;
+  currency: StoreCurrency;
+  supportedCurrencies: StoreCurrency[];
+  vatEnabled: boolean;
+  vatRate: number;
+  vatMode: StoreVatMode;
+  roleIds: Record<(typeof defaultRoleNames)[number], string>;
+}) {
+  const rolePermissionRows = buildDefaultRolePermissionRows(input.roleIds);
+
+  await runInTransaction(async (tx) => {
+    await execute(
+      `
+        insert into stores (
+          id,
+          name,
+          logo_name,
+          logo_url,
+          address,
+          phone_number,
+          store_type,
+          currency,
+          supported_currencies,
+          vat_enabled,
+          vat_rate,
+          vat_mode
+        )
+        values (
+          :id,
+          :name,
+          :logoName,
+          :logoUrl,
+          :address,
+          :phoneNumber,
+          :storeType,
+          :currency,
+          :supportedCurrencies,
+          :vatEnabled,
+          :vatRate,
+          :vatMode
+        )
+      `,
+      {
+        transaction: tx,
+        replacements: {
+          id: input.storeId,
+          name: input.storeName,
+          logoName: input.logoName,
+          logoUrl: input.logoUrl,
+          address: input.address,
+          phoneNumber: input.phoneNumber,
+          storeType: input.storeType,
+          currency: input.currency,
+          supportedCurrencies: JSON.stringify(input.supportedCurrencies),
+          vatEnabled: input.vatEnabled,
+          vatRate: input.vatRate,
+          vatMode: input.vatMode,
+        },
+      },
+    );
+
+    for (const roleName of defaultRoleNames) {
+      await execute(
+        `
+          insert into roles (
+            id,
+            store_id,
+            name,
+            is_system
+          )
+          values (
+            :id,
+            :storeId,
+            :name,
+            true
+          )
+        `,
+        {
+          transaction: tx,
+          replacements: {
+            id: input.roleIds[roleName],
+            storeId: input.storeId,
+            name: roleName,
+          },
+        },
+      );
+    }
+
+    for (const row of rolePermissionRows) {
+      await execute(
+        `
+          insert into role_permissions (
+            role_id,
+            permission_id
+          )
+          values (
+            :roleId,
+            :permissionId
+          )
+        `,
+        {
+          transaction: tx,
+          replacements: row,
+        },
+      );
+    }
+
+    await execute(
+      `
+        insert into store_members (
+          store_id,
+          user_id,
+          role_id,
+          status,
+          added_by
+        )
+        values (
+          :storeId,
+          :userId,
+          :roleId,
+          'ACTIVE',
+          :addedBy
+        )
+      `,
+      {
+        transaction: tx,
+        replacements: {
+          storeId: input.storeId,
+          userId: input.ownerUserId,
+          roleId: input.roleIds.Owner,
+          addedBy: input.ownerUserId,
+        },
+      },
+    );
+
+    await execute(
+      `
+        insert into store_branches (
+          id,
+          store_id,
+          name,
+          code,
+          address,
+          source_branch_id,
+          sharing_mode,
+          sharing_config
+        )
+        values (
+          :id,
+          :storeId,
+          'สาขาหลัก',
+          'MAIN',
+          null,
+          null,
+          'MAIN',
+          null
+        )
+      `,
+      {
+        transaction: tx,
+        replacements: {
+          id: input.mainBranchId,
+          storeId: input.storeId,
+        },
+      },
+    );
+
+    await execute(
+      `
+        insert into fb_connections (
+          id,
+          store_id,
+          status,
+          page_name,
+          page_id,
+          connected_at
+        )
+        values (
+          :id,
+          :storeId,
+          'DISCONNECTED',
+          null,
+          null,
+          null
+        )
+      `,
+      {
+        transaction: tx,
+        replacements: {
+          id: randomUUID(),
+          storeId: input.storeId,
+        },
+      },
+    );
+
+    await execute(
+      `
+        insert into wa_connections (
+          id,
+          store_id,
+          status,
+          phone_number,
+          connected_at
+        )
+        values (
+          :id,
+          :storeId,
+          'DISCONNECTED',
+          null,
+          null
+        )
+      `,
+      {
+        transaction: tx,
+        replacements: {
+          id: randomUUID(),
+          storeId: input.storeId,
+        },
+      },
+    );
+
+    for (const provider of DEFAULT_SHIPPING_PROVIDER_SEEDS) {
+      await execute(
+        `
+          insert into shipping_providers (
+            id,
+            store_id,
+            code,
+            display_name,
+            branch_name,
+            aliases,
+            active,
+            sort_order
+          )
+          values (
+            :id,
+            :storeId,
+            :code,
+            :displayName,
+            null,
+            '[]',
+            true,
+            :sortOrder
+          )
+        `,
+        {
+          transaction: tx,
+          replacements: {
+            id: randomUUID(),
+            storeId: input.storeId,
+            code: provider.code,
+            displayName: provider.displayName,
+            sortOrder: provider.sortOrder,
+          },
+        },
+      );
+    }
+  });
+}
+
 export async function POST(request: Request) {
-  const db = await getTursoDb();
   const session = await getSession();
   if (!session) {
     return NextResponse.json({ message: "กรุณาเข้าสู่ระบบ" }, { status: 401 });
@@ -286,107 +560,42 @@ export async function POST(request: Request) {
 
   await ensurePermissionCatalog();
 
-  await db.transaction(async (tx) => {
-    await tx.insert(stores).values({
-      id: storeId,
-      name: payload.data.storeName,
-      logoName: input.logoName,
-      logoUrl,
-      address: input.address,
-      phoneNumber: input.phoneNumber,
-      storeType: payload.data.storeType,
-      currency: input.currency,
-      supportedCurrencies: JSON.stringify(input.supportedCurrencies),
-      vatEnabled: input.vatEnabled,
-      vatRate: input.vatRate,
-      vatMode: input.vatMode,
-    });
-
-    await tx.insert(roles).values(
-      defaultRoleNames.map((name) => ({
-        id: roleIds[name],
-        storeId,
-        name,
-        isSystem: true,
-      })),
-    );
-
-    await tx.insert(rolePermissions).values(
-      defaultRoleNames.flatMap((name) => {
-        const rolePermissionSet = defaultRolePermissions[name];
-        const keys =
-          rolePermissionSet === "ALL"
-            ? defaultPermissionCatalog.map((permission) =>
-                permissionKey(permission.resource, permission.action),
-              )
-            : rolePermissionSet;
-
-        return keys.map((key) => ({
-          roleId: roleIds[name],
-          permissionId: permissionIdFromKey(key),
-        }));
-      }),
-    );
-
-    await tx.insert(storeMembers).values({
-      storeId,
-      userId: session.userId,
-      roleId: roleIds.Owner,
-      status: "ACTIVE",
-      addedBy: session.userId,
-    });
-
-    await tx.insert(storeBranches).values({
-      id: mainBranchId,
-      storeId,
-      name: "สาขาหลัก",
-      code: "MAIN",
-      address: null,
-      sourceBranchId: null,
-      sharingMode: "MAIN",
-      sharingConfig: null,
-    });
-
-    await tx.insert(fbConnections).values({
-      id: randomUUID(),
-      storeId,
-      status: "DISCONNECTED",
-      pageName: null,
-      pageId: null,
-      connectedAt: null,
-    });
-
-    await tx.insert(waConnections).values({
-      id: randomUUID(),
-      storeId,
-      status: "DISCONNECTED",
-      phoneNumber: null,
-      connectedAt: null,
-    });
-
-    await tx.insert(shippingProviders).values(
-      DEFAULT_SHIPPING_PROVIDER_SEEDS.map((provider) => ({
-        id: randomUUID(),
-        storeId,
-        code: provider.code,
-        displayName: provider.displayName,
-        branchName: null,
-        aliases: "[]",
-        active: true,
-        sortOrder: provider.sortOrder,
-      })),
-    );
+  await createStoreInPostgres({
+    storeId,
+    mainBranchId,
+    ownerUserId: session.userId,
+    storeName: payload.data.storeName,
+    storeType: payload.data.storeType,
+    logoName: input.logoName,
+    logoUrl,
+    address: input.address,
+    phoneNumber: input.phoneNumber,
+    currency: input.currency,
+    supportedCurrencies: input.supportedCurrencies,
+    vatEnabled: input.vatEnabled,
+    vatRate: input.vatRate,
+    vatMode: input.vatMode,
+    roleIds,
   });
 
-  const [user] = await db
-    .select({
-      id: users.id,
-      email: users.email,
-      name: users.name,
-    })
-    .from(users)
-    .where(eq(users.id, session.userId))
-    .limit(1);
+  const user = await queryOne<{
+    id: string;
+    email: string;
+    name: string;
+  }>(
+    `
+      select
+        id,
+        email,
+        name
+      from users
+      where id = :userId
+      limit 1
+    `,
+    {
+      replacements: { userId: session.userId },
+    },
+  );
 
   if (!user) {
     return NextResponse.json({ message: "ไม่พบข้อมูลผู้ใช้" }, { status: 404 });

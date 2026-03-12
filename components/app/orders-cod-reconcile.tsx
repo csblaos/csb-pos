@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { SlideUpSheet } from "@/components/ui/slide-up-sheet";
 import { authFetch } from "@/lib/auth/client-token";
 
 type CodReconcileRow = {
@@ -31,6 +32,11 @@ type DraftValue = {
   selected: boolean;
   codAmount: string;
   codFee: string;
+};
+
+type CodReturnDraft = {
+  codFee: string;
+  codReturnNote: string;
 };
 
 const localDateString = (date: Date) => {
@@ -96,6 +102,13 @@ export function OrdersCodReconcile() {
   const [drafts, setDrafts] = useState<Record<string, DraftValue>>({});
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [codReturnTarget, setCodReturnTarget] = useState<CodReconcileRow | null>(null);
+  const [codReturnDraft, setCodReturnDraft] = useState<CodReturnDraft>({
+    codFee: "0",
+    codReturnNote: "",
+  });
+  const [returnSubmitting, setReturnSubmitting] = useState(false);
+  const [returnErrorMessage, setReturnErrorMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -320,20 +333,94 @@ export function OrdersCodReconcile() {
         .slice(0, 3)
         .map((item) => `${item.orderNo ?? "-"}: ${item.message ?? "ไม่สำเร็จ"}`);
 
-      if (failedCount > 0) {
-        setErrorMessage(
-          `ปิดยอดสำเร็จ ${settledCount} รายการ, ไม่สำเร็จ ${failedCount} รายการ` +
-            (failedMessages.length > 0 ? ` (${failedMessages.join(" | ")})` : ""),
-        );
-      } else {
-        setSuccessMessage(`ปิดยอด COD สำเร็จ ${settledCount} รายการ`);
-      }
-
+      const nextErrorMessage =
+        failedCount > 0
+          ? `ปิดยอดสำเร็จ ${settledCount} รายการ, ไม่สำเร็จ ${failedCount} รายการ` +
+            (failedMessages.length > 0 ? ` (${failedMessages.join(" | ")})` : "")
+          : null;
+      const nextSuccessMessage = failedCount > 0 ? null : `ปิดยอด COD สำเร็จ ${settledCount} รายการ`;
       await loadData();
+      setErrorMessage(nextErrorMessage);
+      setSuccessMessage(nextSuccessMessage);
     } catch {
       setErrorMessage("ปิดยอด COD ไม่สำเร็จ");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const openCodReturnSheet = (row: CodReconcileRow) => {
+    setCodReturnTarget(row);
+    setCodReturnDraft({
+      codFee: String(Math.max(0, row.codFee)),
+      codReturnNote: "",
+    });
+    setReturnErrorMessage(null);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+  };
+
+  const closeCodReturnSheet = () => {
+    if (returnSubmitting) {
+      return;
+    }
+    setCodReturnTarget(null);
+    setCodReturnDraft({
+      codFee: "0",
+      codReturnNote: "",
+    });
+    setReturnErrorMessage(null);
+  };
+
+  const onConfirmCodReturn = async () => {
+    if (!codReturnTarget) {
+      return;
+    }
+
+    const parsedFee = parseNonNegativeInt(codReturnDraft.codFee);
+    if (parsedFee === null) {
+      setReturnErrorMessage("กรุณากรอกค่าตีกลับเป็นจำนวนเต็มและไม่ติดลบ");
+      return;
+    }
+
+    setReturnSubmitting(true);
+    setReturnErrorMessage(null);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      const idempotencyKey = createIdempotencyKey();
+      const res = await authFetch(`/api/orders/${codReturnTarget.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify({
+          action: "mark_cod_returned",
+          codFee: parsedFee,
+          codReturnNote: codReturnDraft.codReturnNote.trim(),
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as { message?: string } | null;
+
+      if (!res.ok) {
+        setReturnErrorMessage(data?.message ?? "บันทึกตีกลับไม่สำเร็จ");
+        return;
+      }
+
+      const orderNo = codReturnTarget.orderNo;
+      setCodReturnTarget(null);
+      setCodReturnDraft({
+        codFee: "0",
+        codReturnNote: "",
+      });
+      setReturnErrorMessage(null);
+      await loadData();
+      setSuccessMessage(`บันทึกตีกลับแล้ว ${orderNo}`);
+    } catch {
+      setReturnErrorMessage("บันทึกตีกลับไม่สำเร็จ");
+    } finally {
+      setReturnSubmitting(false);
     }
   };
 
@@ -562,6 +649,20 @@ export function OrdersCodReconcile() {
                   {parsedAmount === null || parsedFee === null ? (
                     <p className="mt-2 text-xs text-red-600">กรอกยอดให้ถูกต้อง (จำนวนเต็มและไม่ติดลบ)</p>
                   ) : null}
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+                    <p className="text-xs text-slate-500">
+                      ถ้าพัสดุตีกลับจากขนส่ง ให้บันทึกตีกลับแยกรายออเดอร์
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 rounded-xl border-rose-200 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+                      onClick={() => openCodReturnSheet(row)}
+                      disabled={submitting || loading || returnSubmitting}
+                    >
+                      ตีกลับ
+                    </Button>
+                  </div>
                 </div>
               );
             })
@@ -623,6 +724,99 @@ export function OrdersCodReconcile() {
         <p className="text-sm text-emerald-700">{successMessage}</p>
       ) : null}
       {errorMessage ? <p className="text-sm text-red-600">{errorMessage}</p> : null}
+
+      <SlideUpSheet
+        isOpen={Boolean(codReturnTarget)}
+        onClose={closeCodReturnSheet}
+        title="บันทึกตีกลับ COD"
+        description="ใช้เมื่อพัสดุถูกตีกลับและต้องคืนสต็อกเข้าร้าน"
+        panelMaxWidthClass="min-[1200px]:max-w-lg"
+        disabled={returnSubmitting}
+        footer={
+          <>
+            {returnErrorMessage ? (
+              <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                {returnErrorMessage}
+              </p>
+            ) : null}
+            <div className={`${returnErrorMessage ? "mt-3 " : ""}grid grid-cols-2 gap-2`}>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 rounded-xl"
+                onClick={closeCodReturnSheet}
+                disabled={returnSubmitting}
+              >
+                ยกเลิก
+              </Button>
+              <Button
+                type="button"
+                className="h-10 rounded-xl bg-rose-600 hover:bg-rose-700"
+                onClick={() => void onConfirmCodReturn()}
+                disabled={returnSubmitting}
+              >
+                {returnSubmitting ? "กำลังบันทึก..." : "ยืนยันตีกลับ"}
+              </Button>
+            </div>
+          </>
+        }
+      >
+        {codReturnTarget ? (
+          <div className="space-y-4">
+            <div className="rounded-xl border bg-slate-50 p-3 text-sm">
+              <p className="font-medium text-slate-900">{codReturnTarget.orderNo}</p>
+              <p className="mt-1 text-xs text-slate-600">
+                ลูกค้า: {codReturnTarget.customerName || codReturnTarget.contactDisplayName || "ลูกค้าทั่วไป"}
+              </p>
+              <p className="mt-1 text-xs text-slate-600">
+                ขนส่ง: {toProviderLabel(codReturnTarget)} • ส่งเมื่อ {formatDateTime(codReturnTarget.shippedAt)}
+              </p>
+              <p className="mt-2 text-xs text-slate-600">
+                ยอด COD ที่คาด: {codReturnTarget.expectedCodAmount.toLocaleString("th-TH")} LAK
+              </p>
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="cod-return-fee" className="text-sm font-medium text-slate-800">
+                ค่าตีกลับ
+              </label>
+              <input
+                id="cod-return-fee"
+                type="number"
+                min={0}
+                step={1}
+                value={codReturnDraft.codFee}
+                onChange={(event) =>
+                  setCodReturnDraft((prev) => ({
+                    ...prev,
+                    codFee: event.target.value,
+                  }))
+                }
+                className="h-10 w-full rounded-xl border px-3 text-sm outline-none ring-primary focus:ring-2"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label htmlFor="cod-return-note" className="text-sm font-medium text-slate-800">
+                หมายเหตุ
+              </label>
+              <textarea
+                id="cod-return-note"
+                value={codReturnDraft.codReturnNote}
+                onChange={(event) =>
+                  setCodReturnDraft((prev) => ({
+                    ...prev,
+                    codReturnNote: event.target.value,
+                  }))
+                }
+                rows={4}
+                placeholder="เช่น ลูกค้าไม่รับของ / ติดต่อปลายทางไม่ได้"
+                className="w-full rounded-xl border px-3 py-2 text-sm outline-none ring-primary focus:ring-2"
+              />
+            </div>
+          </div>
+        ) : null}
+      </SlideUpSheet>
     </section>
   );
 }
