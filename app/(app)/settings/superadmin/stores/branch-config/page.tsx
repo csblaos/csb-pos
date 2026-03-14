@@ -5,12 +5,14 @@ import { redirect } from "next/navigation";
 import { StoresManagement } from "@/components/app/stores-management";
 import { getSession } from "@/lib/auth/session";
 import { listActiveMemberships } from "@/lib/auth/session-db";
+import { createTranslator } from "@/lib/i18n/translate";
 
 export default async function SettingsSuperadminBranchConfigPage() {
   const session = await getSession();
   if (!session) {
     redirect("/login");
   }
+  const t = createTranslator(session.language);
 
   const memberships = await listActiveMemberships(session.userId);
   if (memberships.length === 0) {
@@ -24,13 +26,14 @@ export default async function SettingsSuperadminBranchConfigPage() {
       <header className="space-y-1 px-1">
         <p className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">
           <ShieldCheck className="h-3.5 w-3.5" />
-          Superadmin Workspace
+          {t("superadmin.workspaceBadge")}
         </p>
-        <h1 className="text-[28px] font-semibold tracking-tight text-slate-900">ตั้งค่าสาขา</h1>
-        <p className="text-sm text-slate-500">จัดการสาขาของทุกร้านในความดูแลจากหน้าจัดการแยกจากผู้ใช้ทั่วไป</p>
+        <h1 className="text-[28px] font-semibold tracking-tight text-slate-900">{t("superadmin.stores.branchConfig.pageTitle")}</h1>
+        <p className="text-sm text-slate-500">{t("superadmin.stores.branchConfig.pageDescription")}</p>
       </header>
 
       <StoresManagement
+        language={session.language}
         memberships={memberships}
         activeStoreId={activeStoreId}
         activeBranchId={session.activeBranchId}
@@ -42,7 +45,7 @@ export default async function SettingsSuperadminBranchConfigPage() {
       />
 
       <div className="space-y-2">
-        <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">นำทาง</p>
+        <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{t("superadmin.stores.linksTitle")}</p>
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <Link
             href="/settings/superadmin"
@@ -52,8 +55,8 @@ export default async function SettingsSuperadminBranchConfigPage() {
               <Store className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-slate-900">กลับ Superadmin Center</span>
-              <span className="mt-0.5 block truncate text-xs text-slate-500">เลือกเมนูจัดการร้านหรือสาขา</span>
+              <span className="block truncate text-sm font-medium text-slate-900">{t("superadmin.stores.links.center.title")}</span>
+              <span className="mt-0.5 block truncate text-xs text-slate-500">{t("superadmin.stores.links.center.description")}</span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
           </Link>
@@ -66,8 +69,8 @@ export default async function SettingsSuperadminBranchConfigPage() {
               <Building2 className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-slate-900">ไปหน้าตั้งค่าร้าน</span>
-              <span className="mt-0.5 block truncate text-xs text-slate-500">สลับไปจัดการระดับร้าน</span>
+              <span className="block truncate text-sm font-medium text-slate-900">{t("superadmin.stores.links.storeConfig.title")}</span>
+              <span className="mt-0.5 block truncate text-xs text-slate-500">{t("superadmin.stores.links.storeConfig.description")}</span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
           </Link>
@@ -81,10 +84,10 @@ export default async function SettingsSuperadminBranchConfigPage() {
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium text-slate-900">
-                กลับหน้าเลือกร้าน / เปลี่ยนสาขา
+                {t("superadmin.stores.links.storeSwitcher.title")}
               </span>
               <span className="mt-0.5 block truncate text-xs text-slate-500">
-                ออกจากโหมดผู้ดูแลกลับหน้าใช้งานรายวัน
+                {t("superadmin.stores.links.storeSwitcher.description")}
               </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />

@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { SlideUpSheet } from "@/components/ui/slide-up-sheet";
@@ -46,6 +47,50 @@ const localDateString = (date: Date) => {
   return `${year}-${month}-${day}`;
 };
 
+const addDays = (date: Date, days: number) => {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+};
+
+const toDateInputValue = (date: Date) => {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const parseIsoDateValue = (value: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [yearText, monthText, dayText] = value.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+    return null;
+  }
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+  return parsed;
+};
+
+const formatIsoDateDisplay = (value: string) => {
+  const parsed = parseIsoDateValue(value);
+  if (!parsed) return "";
+  const day = `${parsed.getDate()}`.padStart(2, "0");
+  const month = `${parsed.getMonth() + 1}`.padStart(2, "0");
+  const year = parsed.getFullYear();
+  return `${day}/${month}/${year}`;
+};
+
+const calendarWeekdayLabels = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"] as const;
+
 const parseNonNegativeInt = (raw: string) => {
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0) {
@@ -83,8 +128,150 @@ const formatDateTime = (value: string | null) => {
   });
 };
 
+type CodDatePickerFieldProps = {
+  value: string;
+  onChange: (nextValue: string) => void;
+  ariaLabel: string;
+};
+
+function CodDatePickerField({ value, onChange, ariaLabel }: CodDatePickerFieldProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [viewCursor, setViewCursor] = useState<Date>(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const parsed = parseIsoDateValue(value) ?? new Date();
+    setViewCursor(new Date(parsed.getFullYear(), parsed.getMonth(), 1));
+  }, [isOpen, value]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (!containerRef.current?.contains(target)) {
+        setIsOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  const firstDayOfMonth = new Date(viewCursor.getFullYear(), viewCursor.getMonth(), 1).getDay();
+  const daysInMonth = new Date(viewCursor.getFullYear(), viewCursor.getMonth() + 1, 0).getDate();
+  const calendarCells: Array<number | null> = [
+    ...Array.from({ length: firstDayOfMonth }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, index) => index + 1),
+  ];
+  while (calendarCells.length < 42) {
+    calendarCells.push(null);
+  }
+
+  const selectedIso = parseIsoDateValue(value) ? value : "";
+  const todayIso = toDateInputValue(new Date());
+  const monthLabel = viewCursor.toLocaleDateString("th-TH", {
+    month: "long",
+    year: "numeric",
+  });
+
+  return (
+    <div ref={containerRef} className="relative min-w-0">
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        onClick={() => setIsOpen((prev) => !prev)}
+        className="flex h-10 w-full items-center justify-between gap-2 rounded-md border px-3 text-sm outline-none ring-primary transition focus:ring-2"
+      >
+        <span className={`truncate text-left ${selectedIso ? "text-slate-900" : "text-slate-400"}`}>
+          {selectedIso ? formatIsoDateDisplay(selectedIso) : "dd/mm/yyyy"}
+        </span>
+        <CalendarDays className="h-4 w-4 shrink-0 text-slate-400" />
+      </button>
+
+      {isOpen ? (
+        <div className="absolute left-0 right-0 top-[calc(100%+0.4rem)] z-[130] rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+          <div className="flex items-center justify-between pb-1">
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+              onClick={() => setViewCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <p className="text-sm font-medium text-slate-900">{monthLabel}</p>
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50"
+              onClick={() => setViewCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-7 gap-1 pb-1 text-center text-[11px] text-slate-400">
+            {calendarWeekdayLabels.map((label) => (
+              <span key={label}>{label}</span>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7 gap-1">
+            {calendarCells.map((day, index) => {
+              if (day === null) {
+                return <span key={`empty-${index}`} className="h-8 rounded-md" />;
+              }
+
+              const candidate = toDateInputValue(
+                new Date(viewCursor.getFullYear(), viewCursor.getMonth(), day),
+              );
+              const isSelected = candidate === selectedIso;
+              const isToday = candidate === todayIso;
+
+              return (
+                <button
+                  key={candidate}
+                  type="button"
+                  className={`h-8 rounded-md text-sm transition ${
+                    isSelected
+                      ? "bg-slate-900 font-medium text-white"
+                      : isToday
+                        ? "border border-slate-300 text-slate-900"
+                        : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                  onClick={() => {
+                    onChange(candidate);
+                    setIsOpen(false);
+                  }}
+                >
+                  {day}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function OrdersCodReconcile() {
-  const today = localDateString(new Date());
+  const now = new Date();
+  const today = localDateString(now);
+  const yesterday = localDateString(addDays(now, -1));
+  const last7Days = localDateString(addDays(now, -6));
+  const last30Days = localDateString(addDays(now, -29));
   const [dateFrom, setDateFrom] = useState(today);
   const [dateTo, setDateTo] = useState(today);
   const [provider, setProvider] = useState("");
@@ -111,6 +298,16 @@ export function OrdersCodReconcile() {
   const [returnErrorMessage, setReturnErrorMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const quickDatePresets = useMemo(
+    () => [
+      { key: "today", label: "วันนี้", from: today, to: today },
+      { key: "yesterday", label: "เมื่อวาน", from: yesterday, to: yesterday },
+      { key: "last7", label: "7 วัน", from: last7Days, to: today },
+      { key: "last30", label: "30 วัน", from: last30Days, to: today },
+    ],
+    [last30Days, last7Days, today, yesterday],
+  );
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -225,6 +422,7 @@ export function OrdersCodReconcile() {
   }, [selectedRows]);
 
   const selectedDiff = selectedSummary.actual - selectedSummary.expected;
+  const selectedNet = selectedSummary.actual - selectedSummary.fee;
   const selectedInvalidCount = useMemo(
     () =>
       rowDraftSummary.reduce((acc, row) => {
@@ -235,25 +433,6 @@ export function OrdersCodReconcile() {
       }, 0),
     [rowDraftSummary],
   );
-
-  const pageDraftSummary = useMemo(() => {
-    const totals = rowDraftSummary.reduce(
-      (acc, row) => {
-        acc.expected += row.expectedCodAmount;
-        acc.actual += row.codAmount ?? 0;
-        acc.fee += row.codFee ?? 0;
-        if (row.invalidInput) {
-          acc.invalidCount += 1;
-        }
-        return acc;
-      },
-      { expected: 0, actual: 0, fee: 0, invalidCount: 0 },
-    );
-    return {
-      ...totals,
-      diff: totals.actual - totals.expected,
-    };
-  }, [rowDraftSummary]);
 
   const toggleSelectAll = () => {
     const nextSelected = !allSelected;
@@ -426,25 +605,46 @@ export function OrdersCodReconcile() {
 
   return (
     <section className="space-y-4">
-      <article className="rounded-xl border bg-white p-4 shadow-sm">
+      <article className="rounded-xl border bg-white p-3 shadow-sm">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          {quickDatePresets.map((preset) => {
+            const isActive = dateFrom === preset.from && dateTo === preset.to;
+            return (
+              <button
+                key={preset.key}
+                type="button"
+                className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+                  isActive
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300 hover:bg-slate-100"
+                }`}
+                onClick={() => {
+                  setDateFrom(preset.from);
+                  setDateTo(preset.to);
+                  setPage(1);
+                }}
+              >
+                {preset.label}
+              </button>
+            );
+          })}
+        </div>
         <div className="grid grid-cols-1 gap-2 md:grid-cols-[auto_auto_minmax(0,1fr)_auto_auto]">
-          <input
-            type="date"
+          <CodDatePickerField
             value={dateFrom}
-            onChange={(event) => {
-              setDateFrom(event.target.value);
+            onChange={(nextValue) => {
+              setDateFrom(nextValue);
               setPage(1);
             }}
-            className="h-10 rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+            ariaLabel="เลือกวันที่เริ่มต้น"
           />
-          <input
-            type="date"
+          <CodDatePickerField
             value={dateTo}
-            onChange={(event) => {
-              setDateTo(event.target.value);
+            onChange={(nextValue) => {
+              setDateTo(nextValue);
               setPage(1);
             }}
-            className="h-10 rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
+            ariaLabel="เลือกวันที่สิ้นสุด"
           />
           <input
             type="text"
@@ -477,10 +677,10 @@ export function OrdersCodReconcile() {
         </div>
       </article>
 
-      <article className="rounded-xl border bg-white p-4 shadow-sm">
+      <article className="rounded-xl border bg-white p-3 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-medium">
-            รายการ COD รอปิดยอด {codPage.total.toLocaleString("th-TH")} รายการ
+            COD รอปิดยอด {codPage.total.toLocaleString("th-TH")} รายการ
           </p>
           <button
             type="button"
@@ -492,59 +692,42 @@ export function OrdersCodReconcile() {
           </button>
         </div>
 
-        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-lg border bg-slate-50 p-3">
-            <p className="text-xs text-slate-500">ยอดที่ต้องได้ (รายการที่เลือก)</p>
-            <p className="text-base font-semibold text-slate-900">
-              {selectedSummary.expected.toLocaleString("th-TH")} LAK
-            </p>
-          </div>
-          <div className="rounded-lg border bg-slate-50 p-3">
-            <p className="text-xs text-slate-500">ยอดโอนจริง (รายการที่เลือก)</p>
-            <p className="text-base font-semibold text-slate-900">
-              {selectedSummary.actual.toLocaleString("th-TH")} LAK
-            </p>
-          </div>
-          <div className="rounded-lg border bg-slate-50 p-3">
-            <p className="text-xs text-slate-500">codFee (รายการที่เลือก)</p>
-            <p className="text-base font-semibold text-slate-900">
-              {selectedSummary.fee.toLocaleString("th-TH")} LAK
-            </p>
-          </div>
-          <div className="rounded-lg border bg-slate-50 p-3">
-            <p className="text-xs text-slate-500">ส่วนต่างรับเงิน (รายการที่เลือก)</p>
-            <p
-              className={`text-base font-semibold ${
-                selectedDiff < 0 ? "text-rose-700" : selectedDiff > 0 ? "text-emerald-700" : "text-slate-900"
+        {selectedRows.length > 0 || selectedInvalidCount > 0 ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-600">
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">
+              เลือกแล้ว {selectedRows.length.toLocaleString("th-TH")}
+            </span>
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">
+              ควรได้ {selectedSummary.expected.toLocaleString("th-TH")} LAK
+            </span>
+            <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1">
+              โอนมา {selectedSummary.actual.toLocaleString("th-TH")} LAK
+            </span>
+            <span
+              className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1"
+            >
+              สุทธิ {selectedNet.toLocaleString("th-TH")} LAK
+            </span>
+            <span
+              className={`rounded-full border px-2.5 py-1 ${
+                selectedDiff < 0
+                  ? "border-rose-200 bg-rose-50 text-rose-700"
+                  : selectedDiff > 0
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                    : "border-slate-200 bg-slate-50 text-slate-600"
               }`}
             >
-              {selectedDiff.toLocaleString("th-TH")} LAK
-            </p>
-          </div>
-        </div>
-        <div className="mt-2 text-xs text-slate-500">
-          <p>
-            ร่างข้อมูลทั้งหน้าปัจจุบัน • ต้องได้ {pageDraftSummary.expected.toLocaleString("th-TH")} LAK • โอนจริง{" "}
-            {pageDraftSummary.actual.toLocaleString("th-TH")} LAK • codFee{" "}
-            {pageDraftSummary.fee.toLocaleString("th-TH")} LAK • ส่วนต่าง{" "}
-            <span
-              className={
-                pageDraftSummary.diff < 0
-                  ? "text-rose-700"
-                  : pageDraftSummary.diff > 0
-                    ? "text-emerald-700"
-                    : "text-slate-600"
-              }
-            >
-              {pageDraftSummary.diff.toLocaleString("th-TH")} LAK
+              {selectedDiff < 0 ? "ขาด" : selectedDiff > 0 ? "เกิน" : "ตรง"}
+              {" "}
+              {Math.abs(selectedDiff).toLocaleString("th-TH")} LAK
             </span>
-          </p>
-          {pageDraftSummary.invalidCount > 0 ? (
-            <p className="text-red-600">
-              มี {pageDraftSummary.invalidCount.toLocaleString("th-TH")} รายการที่กรอกยอดไม่ถูกต้อง
-            </p>
-          ) : null}
-        </div>
+            {selectedInvalidCount > 0 ? (
+              <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-rose-700">
+                ไม่ถูกต้อง {selectedInvalidCount.toLocaleString("th-TH")}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="mt-3 space-y-2">
           {rows.length <= 0 ? (
@@ -562,6 +745,8 @@ export function OrdersCodReconcile() {
               const parsedFee = parseNonNegativeInt(draft.codFee);
               const rowDiff =
                 parsedAmount !== null ? parsedAmount - row.expectedCodAmount : 0;
+              const rowNet =
+                parsedAmount !== null && parsedFee !== null ? parsedAmount - parsedFee : null;
               return (
                 <div key={row.id} className="rounded-lg border p-3">
                   <div className="flex flex-wrap items-start justify-between gap-2">
@@ -581,23 +766,21 @@ export function OrdersCodReconcile() {
                       />
                       {row.orderNo}
                     </label>
-                    <p className="text-xs text-slate-500">
-                      ส่งเมื่อ: {formatDateTime(row.shippedAt)} • {toProviderLabel(row)}
-                    </p>
+                    <p className="text-xs text-slate-500">{formatDateTime(row.shippedAt)} • {toProviderLabel(row)}</p>
                   </div>
                   <p className="mt-1 text-xs text-slate-600">
                     ลูกค้า: {row.customerName || row.contactDisplayName || "ลูกค้าทั่วไป"}
                   </p>
 
-                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-4">
+                  <div className="mt-3 grid grid-cols-2 gap-2">
                     <div className="rounded-md bg-slate-50 p-2 text-xs">
-                      <p className="text-slate-500">ยอดที่ต้องได้</p>
+                      <p className="text-slate-500">ควรได้</p>
                       <p className="font-medium">
                         {row.expectedCodAmount.toLocaleString("th-TH")} LAK
                       </p>
                     </div>
                     <div className="space-y-1 text-xs">
-                      <p className="text-slate-500">ยอดโอนจริง</p>
+                      <p className="text-slate-500">ยอดที่โอนมา</p>
                       <input
                         type="number"
                         min={0}
@@ -616,7 +799,7 @@ export function OrdersCodReconcile() {
                       />
                     </div>
                     <div className="space-y-1 text-xs">
-                      <p className="text-slate-500">codFee</p>
+                      <p className="text-slate-500">ค่าธรรมเนียม</p>
                       <input
                         type="number"
                         min={0}
@@ -635,24 +818,29 @@ export function OrdersCodReconcile() {
                       />
                     </div>
                     <div className="rounded-md bg-slate-50 p-2 text-xs">
-                      <p className="text-slate-500">ส่วนต่างรับเงิน</p>
-                      <p
-                        className={`font-medium ${
-                          rowDiff < 0 ? "text-rose-700" : rowDiff > 0 ? "text-emerald-700" : "text-slate-900"
-                        }`}
-                      >
-                        {rowDiff.toLocaleString("th-TH")} LAK
+                      <p className="text-slate-500">สุทธิหลังหักค่าธรรมเนียม</p>
+                      <p className="font-medium text-slate-900">
+                        {rowNet !== null ? `${rowNet.toLocaleString("th-TH")} LAK` : "-"}
                       </p>
                     </div>
                   </div>
 
                   {parsedAmount === null || parsedFee === null ? (
                     <p className="mt-2 text-xs text-red-600">กรอกยอดให้ถูกต้อง (จำนวนเต็มและไม่ติดลบ)</p>
-                  ) : null}
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
-                    <p className="text-xs text-slate-500">
-                      ถ้าพัสดุตีกลับจากขนส่ง ให้บันทึกตีกลับแยกรายออเดอร์
+                  ) : (
+                    <p
+                      className={`mt-2 text-xs ${
+                        rowDiff < 0 ? "text-rose-700" : rowDiff > 0 ? "text-emerald-700" : "text-slate-500"
+                      }`}
+                    >
+                      {rowDiff < 0
+                        ? `ขาดจากยอดที่ควรได้ ${Math.abs(rowDiff).toLocaleString("th-TH")} LAK`
+                        : rowDiff > 0
+                          ? `เกินจากยอดที่ควรได้ ${rowDiff.toLocaleString("th-TH")} LAK`
+                          : "ยอดที่โอนมาตรงกับยอดที่ควรได้"}
                     </p>
+                  )}
+                  <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t pt-3">
                     <Button
                       type="button"
                       variant="outline"
@@ -669,33 +857,20 @@ export function OrdersCodReconcile() {
           )}
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
-          <div className="text-xs text-slate-600">
-            <p>
-              เลือกแล้ว {selectedRows.length.toLocaleString("th-TH")} รายการ • ยอดที่ต้องได้{" "}
-              {selectedSummary.expected.toLocaleString("th-TH")} LAK
+        {selectedRows.length > 0 ? (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+            <p className="text-xs text-slate-600">
+              เลือกแล้ว {selectedRows.length.toLocaleString("th-TH")} รายการ
             </p>
-            <p>
-              ยอดโอนจริง {selectedSummary.actual.toLocaleString("th-TH")} LAK • codFee{" "}
-              {selectedSummary.fee.toLocaleString("th-TH")} LAK • ส่วนต่าง{" "}
-              <span className={selectedDiff < 0 ? "text-rose-700" : selectedDiff > 0 ? "text-emerald-700" : ""}>
-                {selectedDiff.toLocaleString("th-TH")} LAK
-              </span>
-            </p>
-            {selectedInvalidCount > 0 ? (
-              <p className="text-red-600">
-                รายการที่เลือกมีข้อมูลไม่ถูกต้อง {selectedInvalidCount.toLocaleString("th-TH")} รายการ
-              </p>
-            ) : null}
+            <Button
+              type="button"
+              onClick={() => void onSettleSelected()}
+              disabled={submitting || selectedRows.length <= 0}
+            >
+              {submitting ? "กำลังปิดยอด..." : "ยืนยันปิดยอด"}
+            </Button>
           </div>
-          <Button
-            type="button"
-            onClick={() => void onSettleSelected()}
-            disabled={submitting || selectedRows.length <= 0}
-          >
-            {submitting ? "กำลังปิดยอด..." : "ยืนยันปิดยอดที่เลือก"}
-          </Button>
-        </div>
+        ) : null}
 
         <div className="mt-3 flex items-center justify-between text-xs text-slate-500">
           <button
@@ -729,7 +904,6 @@ export function OrdersCodReconcile() {
         isOpen={Boolean(codReturnTarget)}
         onClose={closeCodReturnSheet}
         title="บันทึกตีกลับ COD"
-        description="ใช้เมื่อพัสดุถูกตีกลับและต้องคืนสต็อกเข้าร้าน"
         panelMaxWidthClass="min-[1200px]:max-w-lg"
         disabled={returnSubmitting}
         footer={

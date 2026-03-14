@@ -27,6 +27,7 @@ export default async function OnboardingPage() {
     <OnboardingWizard
       hasStoreMembership={session.hasStoreMembership}
       activeStoreType={session.activeStoreType}
+      language={session.language}
     />
   );
 }

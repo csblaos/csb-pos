@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { SuperadminPaymentPolicyConfig } from "@/components/app/superadmin-payment-policy-config";
 import { getSession } from "@/lib/auth/session";
 import { listActiveMemberships } from "@/lib/auth/session-db";
+import { getAppLanguageLocale } from "@/lib/i18n/config";
+import { createTranslator } from "@/lib/i18n/translate";
 import { getGlobalBranchPolicy } from "@/lib/branches/policy";
 import {
   getGlobalPaymentPolicy,
@@ -18,6 +20,8 @@ export default async function SettingsSuperadminGlobalConfigPage() {
   if (!session) {
     redirect("/login");
   }
+  const t = createTranslator(session.language);
+  const locale = getAppLanguageLocale(session.language);
 
   const memberships = await listActiveMemberships(session.userId);
   if (memberships.length === 0) {
@@ -49,87 +53,106 @@ export default async function SettingsSuperadminGlobalConfigPage() {
   return (
     <section className="space-y-5">
       <header className="space-y-1 px-1">
-        <h1 className="text-[28px] font-semibold tracking-tight text-slate-900">Global Configuration</h1>
-        <p className="text-sm text-slate-500">
-          ค่ากลางระดับระบบที่ส่งผลกับร้านและผู้ใช้ทั้งหมดในขอบเขตที่คุณดูแล
-        </p>
+        <h1 className="text-[28px] font-semibold tracking-tight text-slate-900">
+          {t("superadmin.globalConfig.title")}
+        </h1>
+        <p className="text-sm text-slate-500">{t("superadmin.globalConfig.description")}</p>
       </header>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs text-slate-500">Session Default</p>
+          <p className="text-xs text-slate-500">{t("superadmin.globalConfig.metric.sessionDefault")}</p>
           <p className="mt-1 text-2xl font-semibold text-slate-900">
-            {globalSessionPolicy.defaultSessionLimit.toLocaleString("th-TH")}
+            {globalSessionPolicy.defaultSessionLimit.toLocaleString(locale)}
           </p>
         </article>
         <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs text-slate-500">Branch Default</p>
+          <p className="text-xs text-slate-500">{t("superadmin.globalConfig.metric.branchDefault")}</p>
           <p className="mt-1 text-lg font-semibold text-slate-900">
-            {globalBranchPolicy.defaultCanCreateBranches ? "อนุญาต" : "ไม่อนุญาต"}
+            {globalBranchPolicy.defaultCanCreateBranches
+              ? t("superadmin.globalConfig.branchAllowed")
+              : t("superadmin.globalConfig.branchDisallowed")}
           </p>
           <p className="mt-1 text-xs text-slate-500">
             {globalBranchPolicy.defaultMaxBranchesPerStore === null
-              ? "ไม่จำกัดสาขา"
-              : `สูงสุด ${globalBranchPolicy.defaultMaxBranchesPerStore.toLocaleString("th-TH")} สาขา/ร้าน`}
+              ? t("superadmin.globalConfig.branchUnlimited")
+              : t("superadmin.globalConfig.branchMax", {
+                  count: globalBranchPolicy.defaultMaxBranchesPerStore.toLocaleString(locale),
+                })}
           </p>
         </article>
         <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs text-slate-500">Store Branch Override</p>
+          <p className="text-xs text-slate-500">{t("superadmin.globalConfig.metric.storeOverrides")}</p>
           <p className="mt-1 text-2xl font-semibold text-slate-900">
-            {storeOverrideCount.toLocaleString("th-TH")}
+            {storeOverrideCount.toLocaleString(locale)}
           </p>
-          <p className="mt-1 text-xs text-slate-500">ร้านที่ตั้งค่าเพดานสาขาเฉพาะร้าน</p>
+          <p className="mt-1 text-xs text-slate-500">{t("superadmin.globalConfig.metric.storeOverridesHint")}</p>
         </article>
         <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs text-slate-500">Superadmin Override</p>
+          <p className="text-xs text-slate-500">{t("superadmin.globalConfig.metric.superadminOverrides")}</p>
           <p className="mt-1 text-2xl font-semibold text-slate-900">
-            {superadminOverrideCount.toLocaleString("th-TH")}
+            {superadminOverrideCount.toLocaleString(locale)}
           </p>
-          <p className="mt-1 text-xs text-slate-500">บัญชีที่มีค่า override ระดับผู้ใช้</p>
+          <p className="mt-1 text-xs text-slate-500">
+            {t("superadmin.globalConfig.metric.superadminOverridesHint")}
+          </p>
         </article>
       </div>
 
       <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-4 py-3">
-          <p className="text-sm font-semibold text-slate-900">System Defaults</p>
-          <p className="mt-0.5 text-xs text-slate-500">ค่าเริ่มต้นที่ใช้เมื่อไม่มีการ override</p>
+          <p className="text-sm font-semibold text-slate-900">{t("superadmin.globalConfig.defaults.title")}</p>
+          <p className="mt-0.5 text-xs text-slate-500">{t("superadmin.globalConfig.defaults.description")}</p>
         </div>
         <ul className="divide-y divide-slate-100">
           <li className="px-4 py-3 text-sm text-slate-700">
-            Session Limit Default:{" "}
+            {t("superadmin.globalConfig.defaults.sessionLimit")}:{" "}
             <span className="font-medium">
-              {globalSessionPolicy.defaultSessionLimit.toLocaleString("th-TH")} เครื่องต่อผู้ใช้
+              {t("superadmin.globalConfig.defaults.sessionLimitValue", {
+                count: globalSessionPolicy.defaultSessionLimit.toLocaleString(locale),
+              })}
             </span>
           </li>
           <li className="px-4 py-3 text-sm text-slate-700">
-            Branch Creation Default:{" "}
+            {t("superadmin.globalConfig.defaults.branchCreation")}:{" "}
             <span className="font-medium">
-              {globalBranchPolicy.defaultCanCreateBranches ? "อนุญาตสร้างสาขา" : "ไม่อนุญาตสร้างสาขา"}
+              {globalBranchPolicy.defaultCanCreateBranches
+                ? t("superadmin.globalConfig.defaults.branchCreationAllowed")
+                : t("superadmin.globalConfig.defaults.branchCreationDisallowed")}
             </span>
           </li>
           <li className="px-4 py-3 text-sm text-slate-700">
-            Branch Quota Default:{" "}
+            {t("superadmin.globalConfig.defaults.branchQuota")}:{" "}
             <span className="font-medium">
               {globalBranchPolicy.defaultMaxBranchesPerStore === null
-                ? "ไม่จำกัด"
-                : `${globalBranchPolicy.defaultMaxBranchesPerStore.toLocaleString("th-TH")} สาขา/ร้าน`}
+                ? t("superadmin.globalConfig.branchUnlimited")
+                : t("superadmin.globalConfig.branchMax", {
+                    count: globalBranchPolicy.defaultMaxBranchesPerStore.toLocaleString(locale),
+                  })}
             </span>
           </li>
           <li className="px-4 py-3 text-sm text-slate-700">
-            Payment Account Policy:{" "}
+            {t("superadmin.globalConfig.defaults.paymentPolicy")}:{" "}
             <span className="font-medium">
-              สูงสุด {globalPaymentPolicy.maxAccountsPerStore.toLocaleString("th-TH")} บัญชี/ร้าน •{" "}
+              {t("superadmin.globalConfig.defaults.paymentPolicyValue", {
+                count: globalPaymentPolicy.maxAccountsPerStore.toLocaleString(locale),
+              })}{" "}
+              •{" "}
               {globalPaymentPolicy.requireSlipForLaoQr
-                ? "บังคับแนบสลิป QR"
-                : "ไม่บังคับแนบสลิป QR"}
+                ? t("superadmin.globalConfig.defaults.requireQrSlip")
+                : t("superadmin.globalConfig.defaults.optionalQrSlip")}
             </span>
           </li>
           <li className="px-4 py-3 text-sm text-slate-700">
-            Store Logo Upload:{" "}
+            {t("superadmin.globalConfig.defaults.logoUpload")}:{" "}
             <span className="font-medium">
-              สูงสุด {globalStoreLogoPolicy.maxSizeMb.toLocaleString("th-TH")} MB • Auto resize{" "}
-              {globalStoreLogoPolicy.autoResize ? "เปิด" : "ปิด"} • กว้างสุด{" "}
-              {globalStoreLogoPolicy.resizeMaxWidth.toLocaleString("th-TH")} px
+              {t("superadmin.globalConfig.defaults.logoUploadValue", {
+                size: globalStoreLogoPolicy.maxSizeMb.toLocaleString(locale),
+                autoResize: globalStoreLogoPolicy.autoResize
+                  ? t("superadmin.globalConfig.enabled")
+                  : t("superadmin.globalConfig.disabled"),
+                width: globalStoreLogoPolicy.resizeMaxWidth.toLocaleString(locale),
+              })}
             </span>
           </li>
         </ul>
@@ -139,23 +162,24 @@ export default async function SettingsSuperadminGlobalConfigPage() {
 
       <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-4 py-3">
-          <p className="text-sm font-semibold text-slate-900">Overrides ที่กำลังใช้งาน</p>
-          <p className="mt-0.5 text-xs text-slate-500">
-            ค่า override จะมีผลเหนือค่า default และอาจทำให้พฤติกรรมต่างร้านกัน
-          </p>
+          <p className="text-sm font-semibold text-slate-900">{t("superadmin.globalConfig.overrides.title")}</p>
+          <p className="mt-0.5 text-xs text-slate-500">{t("superadmin.globalConfig.overrides.description")}</p>
         </div>
         <div className="grid grid-cols-1 gap-3 p-4 lg:grid-cols-2">
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-              Store Overrides
+              {t("superadmin.globalConfig.overrides.storeTitle")}
             </p>
             {storeOverrideRows.length === 0 ? (
-              <p className="mt-2 text-xs text-slate-500">ไม่มีร้านที่ตั้ง branch override</p>
+              <p className="mt-2 text-xs text-slate-500">{t("superadmin.globalConfig.overrides.storeEmpty")}</p>
             ) : (
               <ul className="mt-2 space-y-1.5">
                 {storeOverrideRows.map((store) => (
                   <li key={store.id} className="text-xs text-slate-700">
-                    {store.name} • max branches {store.maxBranchesOverride?.toLocaleString("th-TH")}
+                    {store.name} •{" "}
+                    {t("superadmin.globalConfig.overrides.storeItem", {
+                      count: store.maxBranchesOverride?.toLocaleString(locale) ?? "-",
+                    })}
                   </li>
                 ))}
               </ul>
@@ -164,19 +188,27 @@ export default async function SettingsSuperadminGlobalConfigPage() {
 
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-              Superadmin Overrides
+              {t("superadmin.globalConfig.overrides.superadminTitle")}
             </p>
             {superadminOverrideRows.length === 0 ? (
-              <p className="mt-2 text-xs text-slate-500">ไม่มีบัญชี superadmin ที่ตั้ง override</p>
+              <p className="mt-2 text-xs text-slate-500">
+                {t("superadmin.globalConfig.overrides.superadminEmpty")}
+              </p>
             ) : (
               <ul className="mt-2 space-y-1.5">
                 {superadminOverrideRows.map((user) => (
                   <li key={user.userId} className="text-xs text-slate-700">
-                    {user.name} • branch{" "}
-                    {user.maxBranchesPerStore === null
-                      ? "default"
-                      : user.maxBranchesPerStore.toLocaleString("th-TH")}{" "}
-                    • session {user.sessionLimit === null ? "default" : user.sessionLimit.toLocaleString("th-TH")}
+                    {user.name} •{" "}
+                    {t("superadmin.globalConfig.overrides.superadminItem", {
+                      branch:
+                        user.maxBranchesPerStore === null
+                          ? t("superadmin.globalConfig.default")
+                          : user.maxBranchesPerStore.toLocaleString(locale),
+                      session:
+                        user.sessionLimit === null
+                          ? t("superadmin.globalConfig.default")
+                          : user.sessionLimit.toLocaleString(locale),
+                    })}
                   </li>
                 ))}
               </ul>
@@ -186,7 +218,9 @@ export default async function SettingsSuperadminGlobalConfigPage() {
       </article>
 
       <div className="space-y-2">
-        <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">นำทาง</p>
+        <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+          {t("superadmin.globalConfig.linksTitle")}
+        </p>
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <Link
             href="/settings/superadmin/quotas"
@@ -196,8 +230,12 @@ export default async function SettingsSuperadminGlobalConfigPage() {
               <Gauge className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-slate-900">ไป Quota & Billing Control</span>
-              <span className="mt-0.5 block truncate text-xs text-slate-500">ดูการใช้งานโควตาต่อร้าน</span>
+              <span className="block truncate text-sm font-medium text-slate-900">
+                {t("superadmin.globalConfig.links.quotas.title")}
+              </span>
+              <span className="mt-0.5 block truncate text-xs text-slate-500">
+                {t("superadmin.globalConfig.links.quotas.description")}
+              </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
           </Link>
@@ -211,9 +249,11 @@ export default async function SettingsSuperadminGlobalConfigPage() {
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium text-slate-900">
-                ไป Security & Compliance
+                {t("superadmin.globalConfig.links.security.title")}
               </span>
-              <span className="mt-0.5 block truncate text-xs text-slate-500">ตรวจความเสี่ยงระดับสิทธิ์และผู้ใช้</span>
+              <span className="mt-0.5 block truncate text-xs text-slate-500">
+                {t("superadmin.globalConfig.links.security.description")}
+              </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
           </Link>
@@ -226,8 +266,12 @@ export default async function SettingsSuperadminGlobalConfigPage() {
               <Settings2 className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-slate-900">กลับ Superadmin Center</span>
-              <span className="mt-0.5 block truncate text-xs text-slate-500">กลับหน้า Home ของผู้ดูแล</span>
+              <span className="block truncate text-sm font-medium text-slate-900">
+                {t("superadmin.globalConfig.links.center.title")}
+              </span>
+              <span className="mt-0.5 block truncate text-xs text-slate-500">
+                {t("superadmin.globalConfig.links.center.description")}
+              </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
           </Link>
@@ -241,10 +285,10 @@ export default async function SettingsSuperadminGlobalConfigPage() {
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium text-slate-900">
-                กลับหน้าเลือกร้าน / เปลี่ยนสาขา
+                {t("superadmin.globalConfig.links.storeSwitcher.title")}
               </span>
               <span className="mt-0.5 block truncate text-xs text-slate-500">
-                ออกจากโหมดผู้ดูแลกลับหน้าใช้งานรายวัน
+                {t("superadmin.globalConfig.links.storeSwitcher.description")}
               </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />

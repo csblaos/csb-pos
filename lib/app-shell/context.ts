@@ -25,6 +25,7 @@ const readAppShellContext = cache(async () => {
       activeStoreType: null,
       activeStoreName: "-",
       canViewNotifications: false,
+      language: "th" as const,
     };
   }
 
@@ -48,6 +49,7 @@ const readAppShellContext = cache(async () => {
     activeStoreName: activeStoreProfile?.name ?? session.activeStoreName ?? "-",
     canViewNotifications:
       permissionKeys.includes("*") || permissionKeys.includes("settings.view"),
+    language: session.language,
   };
 });
 

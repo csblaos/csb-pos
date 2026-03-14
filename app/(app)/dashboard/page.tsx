@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { StorefrontDashboardByType } from "@/components/storefront/dashboard/registry";
 import { getAppShellContext } from "@/lib/app-shell/context";
+import { createTranslator } from "@/lib/i18n/translate";
 import {
   isPermissionGranted,
 } from "@/lib/rbac/access";
@@ -18,6 +19,7 @@ const emptyDashboardData: DashboardViewData = {
     ordersCountToday: 0,
     pendingPaymentCount: 0,
     lowStockCount: 0,
+    pendingCodReconcileCount: 0,
   },
   lowStockItems: [],
   purchaseApReminder: {
@@ -46,8 +48,10 @@ export default async function DashboardPage() {
     }
 
     const canView = isPermissionGranted(permissionKeys, "dashboard.view");
+    const canViewOrders = isPermissionGranted(permissionKeys, "orders.view");
     const canViewInventory = isPermissionGranted(permissionKeys, "inventory.view");
     const canViewReports = isPermissionGranted(permissionKeys, "reports.view");
+    const t = createTranslator(session.language);
 
     if (!canView) {
       const fallbackRoute = getPreferredAuthorizedRoute(permissionKeys);
@@ -57,8 +61,8 @@ export default async function DashboardPage() {
 
       return (
         <section className="space-y-2">
-          <h1 className="text-xl font-semibold">แดชบอร์ด</h1>
-          <p className="text-sm text-red-600">คุณไม่มีสิทธิ์เข้าถึงแดชบอร์ด</p>
+          <h1 className="text-xl font-semibold">{t("dashboard.title")}</h1>
+          <p className="text-sm text-red-600">{t("dashboard.noPermission")}</p>
         </section>
       );
     }
@@ -79,6 +83,7 @@ export default async function DashboardPage() {
         storeType={activeStoreType}
         session={session}
         dashboardDataPromise={dashboardDataPromise}
+        canViewOrders={canViewOrders}
         canViewInventory={canViewInventory}
         canViewReports={canViewReports}
       />

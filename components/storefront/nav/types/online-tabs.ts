@@ -3,10 +3,9 @@ import { Boxes, LayoutGrid, ReceiptText, Settings, Warehouse } from "lucide-reac
 import type { StorefrontNavTab } from "@/components/storefront/nav/types";
 
 export const onlineStorefrontTabs: StorefrontNavTab[] = [
-  { href: "/dashboard", label: "แดชบอร์ด", icon: LayoutGrid, permission: "dashboard.view" },
-  { href: "/orders", label: "ออเดอร์", icon: ReceiptText, permission: "orders.view" },
-  { href: "/stock", label: "สต็อก", icon: Warehouse, permission: "inventory.view" },
-  { href: "/products", label: "สินค้า", icon: Boxes, permission: "products.view" },
-  { href: "/settings", label: "ตั้งค่า", icon: Settings, permission: "settings.view" },
+  { href: "/dashboard", labelKey: "nav.dashboard", icon: LayoutGrid, permission: "dashboard.view" },
+  { href: "/orders", labelKey: "nav.orders", icon: ReceiptText, permission: "orders.view" },
+  { href: "/stock", labelKey: "nav.stock", icon: Warehouse, permission: "inventory.view" },
+  { href: "/products", labelKey: "nav.products", icon: Boxes, permission: "products.view" },
+  { href: "/settings", labelKey: "nav.settings", icon: Settings, permission: "settings.view" },
 ];
-

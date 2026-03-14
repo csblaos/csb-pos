@@ -2,6 +2,7 @@ import dynamic from "next/dynamic";
 import { redirect } from "next/navigation";
 
 import { getAppShellContext } from "@/lib/app-shell/context";
+import { createTranslator } from "@/lib/i18n/translate";
 import {
   isPermissionGranted,
 } from "@/lib/rbac/access";
@@ -20,12 +21,12 @@ import { getPurchaseOrderListPage } from "@/server/services/purchase.service";
 import { listCategories } from "@/lib/products/service";
 
 const StockRecordingForm = dynamic(
-  () =>
+        () =>
     import("@/components/app/stock-recording-form").then((module) => module.StockRecordingForm),
   {
     loading: () => (
       <div className="rounded-xl border bg-white p-4 text-sm text-muted-foreground">
-        กำลังโหลด...
+        Loading...
       </div>
     ),
   },
@@ -37,7 +38,7 @@ const StockInventoryView = dynamic(
   {
     loading: () => (
       <div className="rounded-xl border bg-white p-4 text-sm text-muted-foreground">
-        กำลังโหลด...
+        Loading...
       </div>
     ),
   },
@@ -51,7 +52,7 @@ const StockMovementHistory = dynamic(
   {
     loading: () => (
       <div className="rounded-xl border bg-white p-4 text-sm text-muted-foreground">
-        กำลังโหลด...
+        Loading...
       </div>
     ),
   },
@@ -65,7 +66,7 @@ const PurchaseOrderList = dynamic(
   {
     loading: () => (
       <div className="rounded-xl border bg-white p-4 text-sm text-muted-foreground">
-        กำลังโหลด...
+        Loading...
       </div>
     ),
   },
@@ -102,6 +103,7 @@ export default async function StockPage({
     if (!session.activeStoreId) {
       redirect("/onboarding");
     }
+    const t = createTranslator(session.language);
     const activeStoreId = session.activeStoreId;
 
     const canView = isPermissionGranted(permissionKeys, "inventory.view");
@@ -113,8 +115,8 @@ export default async function StockPage({
     if (!canView) {
       return (
         <section className="space-y-2">
-          <h1 className="text-xl font-semibold">สต็อก</h1>
-          <p className="text-sm text-red-600">คุณไม่มีสิทธิ์เข้าถึงโมดูลสต็อก</p>
+          <h1 className="text-xl font-semibold">{t("stock.pageTitle")}</h1>
+          <p className="text-sm text-red-600">{t("stock.noPermission")}</p>
         </section>
       );
     }
@@ -190,23 +192,25 @@ export default async function StockPage({
     const storeOutStockThreshold = storeProfile?.outStockThreshold ?? 0;
     const storeLowStockThreshold = storeProfile?.lowStockThreshold ?? 10;
     const inactiveTabFallback = (
-      <StockTabLoadingState message="กำลังเตรียมข้อมูลของแท็บนี้..." />
+      <StockTabLoadingState language={session.language} message={t("stock.loadingPreparingTab")} />
     );
 
     return (
       <section className="space-y-4">
         <header className="space-y-1">
-          <h1 className="text-xl font-semibold">สต็อก</h1>
+          <h1 className="text-xl font-semibold">{t("stock.pageTitle")}</h1>
           <p className="text-sm text-muted-foreground">
-            จัดการรับเข้า ปรับสต็อก สั่งซื้อ และตรวจสอบยอดคงเหลือ
+            {t("stock.pageDescription")}
           </p>
         </header>
 
         <StockTabs
+          language={session.language}
           initialTab={initialTab}
           recordingTab={
             needsProductCatalog ? (
               <StockRecordingForm
+                language={session.language}
                 initialProducts={initialProducts}
                 canCreate={canPostMovement}
                 canAdjust={canAdjust}
@@ -217,6 +221,7 @@ export default async function StockPage({
           inventoryTab={
             needsInventoryData ? (
               <StockInventoryView
+                language={session.language}
                 products={initialProducts}
                 categories={categories}
                 storeOutStockThreshold={storeOutStockThreshold}
@@ -228,7 +233,7 @@ export default async function StockPage({
           }
           historyTab={
             needsHistoryData ? (
-              <StockMovementHistory movements={movements} />
+              <StockMovementHistory language={session.language} movements={movements} />
             ) : (
               inactiveTabFallback
             )
@@ -236,6 +241,7 @@ export default async function StockPage({
           purchaseTab={
             needsPurchaseData ? (
               <PurchaseOrderList
+                language={session.language}
                 purchaseOrders={initialPOs}
                 activeStoreId={activeStoreId}
                 userId={session.userId}

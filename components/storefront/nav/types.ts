@@ -2,8 +2,7 @@ import type { LucideIcon } from "lucide-react";
 
 export type StorefrontNavTab = {
   href: string;
-  label: string;
+  labelKey: string;
   icon: LucideIcon;
   permission: string;
 };
-

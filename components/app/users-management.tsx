@@ -2,12 +2,14 @@
 
 import { Check, ChevronRight, Copy, KeyRound, Loader2, Mail, Plus, Search, Smartphone, UserRound } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 
 import { Button } from "@/components/ui/button";
 import { SlideUpSheet } from "@/components/ui/slide-up-sheet";
 import { authFetch } from "@/lib/auth/client-token";
+import { createTranslator, formatNumberByLanguage } from "@/lib/i18n/translate";
+import type { AppLanguage } from "@/lib/i18n/types";
 
 type MemberItem = {
   userId: string;
@@ -45,6 +47,7 @@ type ExistingUserCandidate = {
 };
 
 type UsersManagementProps = {
+  language: AppLanguage;
   members: MemberItem[];
   roles: RoleOption[];
   branches: BranchOption[];
@@ -52,12 +55,6 @@ type UsersManagementProps = {
   canUpdate: boolean;
   canLinkExisting: boolean;
   defaultSessionLimit: number;
-};
-
-const statusLabel: Record<MemberItem["status"], string> = {
-  ACTIVE: "ใช้งาน",
-  INVITED: "รอเปิดใช้งาน",
-  SUSPENDED: "ระงับ",
 };
 
 const statusToneClassName: Record<MemberItem["status"], string> = {
@@ -72,19 +69,7 @@ const statusDotClassName: Record<MemberItem["status"], string> = {
   SUSPENDED: "bg-rose-500",
 };
 
-const statusCompactLabel: Record<MemberItem["status"], string> = {
-  ACTIVE: "ใช้งาน",
-  INVITED: "รอ",
-  SUSPENDED: "ระงับ",
-};
-
-const statusOptions: Array<{ value: MemberItem["status"]; label: string }> = [
-  { value: "ACTIVE", label: "ใช้งาน" },
-  { value: "INVITED", label: "รอเปิดใช้งาน" },
-  { value: "SUSPENDED", label: "ระงับ" },
-];
-
-const normalizeSessionLimit = (value: string) => {
+const normalizeSessionLimit = (value: string, invalidMessage: string) => {
   const raw = value.trim();
   if (!raw) {
     return { ok: true as const, value: null as number | null };
@@ -94,7 +79,7 @@ const normalizeSessionLimit = (value: string) => {
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 10) {
     return {
       ok: false as const,
-      message: "จำนวนอุปกรณ์ต้องเป็นตัวเลข 1-10 หรือเว้นว่างเพื่อใช้ค่าเริ่มต้นระบบ",
+      message: invalidMessage,
     };
   }
 
@@ -118,6 +103,7 @@ const normalizeBranchIds = (branchIds: string[]) =>
   [...new Set(branchIds)].sort((a, b) => a.localeCompare(b));
 
 export function UsersManagement({
+  language,
   members,
   roles,
   branches,
@@ -127,6 +113,7 @@ export function UsersManagement({
   defaultSessionLimit,
 }: UsersManagementProps) {
   const router = useRouter();
+  const t = useMemo(() => createTranslator(language), [language]);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
   const [createErrorMessage, setCreateErrorMessage] = useState<string | null>(null);
   const [editErrorMessage, setEditErrorMessage] = useState<string | null>(null);
@@ -161,6 +148,30 @@ export function UsersManagement({
   const membersById = useMemo(() => new Map(members.map((member) => [member.userId, member])), [members]);
   const editingMember = editingMemberId ? membersById.get(editingMemberId) ?? null : null;
   const isEditModalOpen = Boolean(editingMember);
+  const statusLabel = useMemo<Record<MemberItem["status"], string>>(
+    () => ({
+      ACTIVE: t("superadmin.users.status.active"),
+      INVITED: t("superadmin.users.status.invited"),
+      SUSPENDED: t("superadmin.users.status.suspended"),
+    }),
+    [t],
+  );
+  const statusCompactLabel = useMemo<Record<MemberItem["status"], string>>(
+    () => ({
+      ACTIVE: t("superadmin.users.status.activeCompact"),
+      INVITED: t("superadmin.users.status.invitedCompact"),
+      SUSPENDED: t("superadmin.users.status.suspendedCompact"),
+    }),
+    [t],
+  );
+  const statusOptions = useMemo<Array<{ value: MemberItem["status"]; label: string }>>(
+    () => [
+      { value: "ACTIVE", label: t("superadmin.users.status.active") },
+      { value: "INVITED", label: t("superadmin.users.status.invited") },
+      { value: "SUSPENDED", label: t("superadmin.users.status.suspended") },
+    ],
+    [t],
+  );
 
   useEffect(() => {
     const defaultRoleId = getDefaultRoleId(roles);
@@ -218,7 +229,7 @@ export function UsersManagement({
       | null;
 
     if (!response.ok) {
-      setEditErrorMessage(data?.message ?? "โหลดสิทธิ์สาขาไม่สำเร็จ");
+      setEditErrorMessage(data?.message ?? t("superadmin.users.toast.branchAccessLoadFailed"));
       setIsLoadingEditBranchAccess(false);
       return;
     }
@@ -263,7 +274,7 @@ export function UsersManagement({
     setTemporaryPassword(null);
   };
 
-  const loadExistingCandidates = async (query: string) => {
+  const loadExistingCandidates = useCallback(async (query: string) => {
     setIsLoadingExistingCandidates(true);
     setExistingCandidatesError(null);
 
@@ -292,7 +303,7 @@ export function UsersManagement({
 
       if (!response.ok) {
         setExistingCandidates([]);
-        setExistingCandidatesError(data?.message ?? "โหลดรายชื่อผู้ใช้ที่เพิ่มได้ไม่สำเร็จ");
+        setExistingCandidatesError(data?.message ?? t("superadmin.users.toast.candidatesLoadFailed"));
         return;
       }
 
@@ -303,11 +314,11 @@ export function UsersManagement({
       );
     } catch {
       setExistingCandidates([]);
-      setExistingCandidatesError("โหลดรายชื่อผู้ใช้ที่เพิ่มได้ไม่สำเร็จ");
+      setExistingCandidatesError(t("superadmin.users.toast.candidatesLoadFailed"));
     } finally {
       setIsLoadingExistingCandidates(false);
     }
-  };
+  }, [t]);
 
   useEffect(() => {
     if (!isCreateModalOpen || createMode !== "existing" || !canLinkExisting) {
@@ -321,7 +332,7 @@ export function UsersManagement({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [isCreateModalOpen, createMode, canLinkExisting, existingQuery]);
+  }, [isCreateModalOpen, createMode, canLinkExisting, existingQuery, loadExistingCandidates]);
 
   const copyTextToClipboard = async (text: string, successMessage: string) => {
     if (!text || typeof window === "undefined" || !window.navigator?.clipboard) {
@@ -332,7 +343,7 @@ export function UsersManagement({
       await window.navigator.clipboard.writeText(text);
       toast.success(successMessage);
     } catch {
-      toast.error("คัดลอกรหัสชั่วคราวไม่สำเร็จ");
+      toast.error(t("superadmin.users.toast.copyFailed"));
     }
   };
 
@@ -340,14 +351,14 @@ export function UsersManagement({
     if (!temporaryPassword) {
       return;
     }
-    await copyTextToClipboard(temporaryPassword, "คัดลอกรหัสชั่วคราวแล้ว");
+    await copyTextToClipboard(temporaryPassword, t("superadmin.users.toast.temporaryPasswordCopied"));
   };
 
   const copyCreatedTemporaryPassword = async () => {
     if (!createdTemporaryPassword) {
       return;
     }
-    await copyTextToClipboard(createdTemporaryPassword, "คัดลอกรหัสผ่านเริ่มต้นแล้ว");
+    await copyTextToClipboard(createdTemporaryPassword, t("superadmin.users.toast.initialPasswordCopied"));
   };
 
   const resetMemberPassword = async () => {
@@ -376,32 +387,32 @@ export function UsersManagement({
       | null;
 
     if (!response.ok) {
-      setEditErrorMessage(data?.message ?? "รีเซ็ตรหัสผ่านไม่สำเร็จ");
+      setEditErrorMessage(data?.message ?? t("superadmin.users.toast.resetPasswordFailed"));
       setLoadingKey(null);
       return;
     }
 
     if (!data?.temporaryPassword) {
-      setEditErrorMessage("ไม่พบรหัสผ่านชั่วคราวจากระบบ");
+      setEditErrorMessage(t("superadmin.users.toast.temporaryPasswordMissing"));
       setLoadingKey(null);
       return;
     }
 
     setTemporaryPassword(data.temporaryPassword);
     setIsResetPasswordConfirmOpen(false);
-    toast.success("รีเซ็ตรหัสผ่านชั่วคราวเรียบร้อย");
+    toast.success(t("superadmin.users.toast.resetPasswordSuccess"));
     setLoadingKey(null);
     router.refresh();
   };
 
   const createUser = async () => {
     if (!formRoleId) {
-      setCreateErrorMessage("กรุณาเลือกบทบาท");
+      setCreateErrorMessage(t("superadmin.users.validation.roleRequired"));
       return;
     }
 
     if (!formName.trim() || !formEmail.trim()) {
-      setCreateErrorMessage("กรุณากรอกชื่อและอีเมลให้ครบ");
+      setCreateErrorMessage(t("superadmin.users.validation.nameEmailRequired"));
       return;
     }
 
@@ -429,13 +440,13 @@ export function UsersManagement({
       | null;
 
     if (!response.ok) {
-      setCreateErrorMessage(data?.message ?? "เพิ่มผู้ใช้ไม่สำเร็จ");
+      setCreateErrorMessage(data?.message ?? t("superadmin.users.toast.createFailed"));
       setLoadingKey(null);
       return;
     }
 
     if (!data?.temporaryPassword) {
-      setCreateErrorMessage("ไม่พบรหัสผ่านชั่วคราวจากระบบ");
+      setCreateErrorMessage(t("superadmin.users.toast.temporaryPasswordMissing"));
       setLoadingKey(null);
       return;
     }
@@ -444,19 +455,19 @@ export function UsersManagement({
     setCreatedUserEmail(formEmail.trim().toLowerCase());
     setFormName("");
     setFormEmail("");
-    toast.success("เพิ่มผู้ใช้เรียบร้อยแล้ว");
+    toast.success(t("superadmin.users.toast.createSuccess"));
     setLoadingKey(null);
     router.refresh();
   };
 
   const addExistingUserToStore = async () => {
     if (!existingRoleId) {
-      setCreateErrorMessage("กรุณาเลือกบทบาท");
+      setCreateErrorMessage(t("superadmin.users.validation.roleRequired"));
       return;
     }
 
     if (!selectedExistingUserId) {
-      setCreateErrorMessage("กรุณาเลือกผู้ใช้ที่ต้องการเพิ่ม");
+      setCreateErrorMessage(t("superadmin.users.validation.existingUserRequired"));
       return;
     }
 
@@ -482,7 +493,7 @@ export function UsersManagement({
       | null;
 
     if (!response.ok) {
-      setCreateErrorMessage(data?.message ?? "เพิ่มผู้ใช้เดิมเข้าร้านไม่สำเร็จ");
+      setCreateErrorMessage(data?.message ?? t("superadmin.users.toast.addExistingFailed"));
       setLoadingKey(null);
       return;
     }
@@ -492,7 +503,7 @@ export function UsersManagement({
     setSelectedExistingUserId("");
     setExistingCandidatesError(null);
     setIsCreateModalOpen(false);
-    toast.success("เพิ่มผู้ใช้เดิมเข้าร้านเรียบร้อยแล้ว");
+    toast.success(t("superadmin.users.toast.addExistingSuccess"));
     setLoadingKey(null);
     router.refresh();
   };
@@ -503,11 +514,14 @@ export function UsersManagement({
     }
 
     if (!editRoleId) {
-      setEditErrorMessage("กรุณาเลือกบทบาท");
+      setEditErrorMessage(t("superadmin.users.validation.roleRequired"));
       return;
     }
 
-    const normalizedLimit = normalizeSessionLimit(editSessionLimit);
+    const normalizedLimit = normalizeSessionLimit(
+      editSessionLimit,
+      t("superadmin.users.validation.sessionLimit"),
+    );
     if (!normalizedLimit.ok) {
       setEditErrorMessage(normalizedLimit.message);
       return;
@@ -528,7 +542,7 @@ export function UsersManagement({
     const hasAnyChanges = roleDirty || statusDirty || sessionDirty || branchDirty;
 
     if (!hasAnyChanges) {
-      toast.success("ยังไม่มีข้อมูลที่เปลี่ยนแปลง");
+      toast.success(t("superadmin.users.toast.noChanges"));
       return;
     }
 
@@ -536,7 +550,7 @@ export function UsersManagement({
     setEditErrorMessage(null);
 
     if (editBranchMode === "SELECTED" && nextBranchIds.length === 0) {
-      setEditErrorMessage("กรุณาเลือกอย่างน้อย 1 สาขา หรือเปลี่ยนเป็นเข้าถึงทุกสาขา");
+      setEditErrorMessage(t("superadmin.users.validation.branchSelectionRequired"));
       setLoadingKey(null);
       return;
     }
@@ -563,17 +577,17 @@ export function UsersManagement({
 
     try {
       if (roleDirty) {
-        await runPatch({ action: "assign_role", roleId: editRoleId }, "เปลี่ยนบทบาทไม่สำเร็จ");
+        await runPatch({ action: "assign_role", roleId: editRoleId }, t("superadmin.users.toast.assignRoleFailed"));
       }
 
       if (statusDirty) {
-        await runPatch({ action: "set_status", status: editStatus }, "เปลี่ยนสถานะไม่สำเร็จ");
+        await runPatch({ action: "set_status", status: editStatus }, t("superadmin.users.toast.setStatusFailed"));
       }
 
       if (sessionDirty) {
         await runPatch(
           { action: "set_session_limit", sessionLimit: normalizedLimit.value },
-          "บันทึกจำนวนอุปกรณ์ไม่สำเร็จ",
+          t("superadmin.users.toast.sessionLimitSaveFailed"),
         );
       }
 
@@ -584,15 +598,15 @@ export function UsersManagement({
             mode: editBranchMode,
             branchIds: editBranchMode === "SELECTED" ? nextBranchIds : [],
           },
-          "บันทึกสิทธิ์เข้าถึงสาขาไม่สำเร็จ",
+          t("superadmin.users.toast.branchAccessSaveFailed"),
         );
       }
 
       setEditingMemberId(null);
-      toast.success("บันทึกข้อมูลสมาชิกเรียบร้อยแล้ว");
+      toast.success(t("superadmin.users.toast.saveSuccess"));
       router.refresh();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "บันทึกข้อมูลสมาชิกไม่สำเร็จ";
+      const message = error instanceof Error ? error.message : t("superadmin.users.toast.saveFailed");
       setEditErrorMessage(message);
     } finally {
       setLoadingKey(null);
@@ -612,13 +626,17 @@ export function UsersManagement({
       <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold text-slate-900">สมาชิกทั้งหมด {members.length.toLocaleString("th-TH")} คน</p>
-            <p className="text-xs text-slate-500">แตะรายการสมาชิกเพื่อจัดการบทบาท สถานะ และอุปกรณ์ที่เข้าใช้งานได้</p>
+            <p className="text-sm font-semibold text-slate-900">
+              {t("superadmin.users.management.summary", {
+                count: formatNumberByLanguage(language, members.length),
+              })}
+            </p>
+            <p className="text-xs text-slate-500">{t("superadmin.users.management.summaryHint")}</p>
           </div>
           {canCreate ? (
             <Button className="h-10 w-full rounded-xl sm:w-auto" onClick={openCreateModal}>
               <Plus className="h-4 w-4" />
-              เพิ่มสมาชิก
+              {t("superadmin.users.management.addMember")}
             </Button>
           ) : null}
         </div>
@@ -626,10 +644,10 @@ export function UsersManagement({
 
       <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-4 py-3">
-          <h2 className="text-sm font-semibold text-slate-900">รายชื่อสมาชิก</h2>
+          <h2 className="text-sm font-semibold text-slate-900">{t("superadmin.users.management.listTitle")}</h2>
         </div>
         {members.length === 0 ? (
-          <div className="px-4 py-8 text-center text-sm text-slate-500">ยังไม่มีสมาชิกในร้านนี้</div>
+          <div className="px-4 py-8 text-center text-sm text-slate-500">{t("superadmin.users.management.empty")}</div>
         ) : (
           <ul className="divide-y divide-slate-100">
             {members.map((member) => (
@@ -651,8 +669,8 @@ export function UsersManagement({
                         className="inline-flex shrink-0 items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-700"
                         title={
                           member.sessionLimit === null
-                            ? "จำกัดอุปกรณ์ตามค่าเริ่มต้นระบบ"
-                            : `จำกัดอุปกรณ์ ${member.sessionLimit} เครื่อง`
+                            ? t("superadmin.users.deviceLimit.defaultTitle")
+                            : t("superadmin.users.deviceLimit.countTitle", { count: member.sessionLimit })
                         }
                       >
                         <Smartphone className="h-3 w-3" />
@@ -671,7 +689,7 @@ export function UsersManagement({
                         <>
                           <span className="text-slate-300">•</span>
                           <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
-                            รอเปลี่ยนรหัส
+                            {t("superadmin.users.password.pending")}
                           </span>
                         </>
                       ) : null}
@@ -688,8 +706,8 @@ export function UsersManagement({
       <SlideUpSheet
         isOpen={isCreateModalOpen}
         onClose={closeCreateModal}
-        title="เพิ่มสมาชิกในร้าน"
-        description="สร้างบัญชีใหม่หรือเพิ่มผู้ใช้เดิมเข้าร้าน"
+        title={t("superadmin.users.createSheet.title")}
+        description={t("superadmin.users.createSheet.description")}
         panelMaxWidthClass="min-[1200px]:max-w-md"
         disabled={loadingKey === "create-user" || loadingKey === "add-existing-user"}
         footer={
@@ -713,16 +731,16 @@ export function UsersManagement({
                   }}
                   disabled={loadingKey !== null}
                 >
-                  เพิ่มอีกคน
+                  {t("superadmin.users.createSheet.addAnother")}
                 </Button>
                 <Button type="button" className="h-10 rounded-xl" onClick={closeCreateModal} disabled={loadingKey !== null}>
-                  เสร็จสิ้น
+                  {t("superadmin.users.createSheet.done")}
                 </Button>
               </div>
             ) : (
               <div className={`${createErrorMessage ? "mt-3 " : ""}grid grid-cols-2 gap-2`}>
                 <Button type="button" variant="outline" className="h-10 rounded-xl" onClick={closeCreateModal} disabled={loadingKey !== null}>
-                  ยกเลิก
+                  {t("common.cancel")}
                 </Button>
                 <Button
                   type="button"
@@ -733,12 +751,12 @@ export function UsersManagement({
                   {loadingKey === "create-user" || loadingKey === "add-existing-user" ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      กำลังบันทึก...
+                      {t("superadmin.users.createSheet.saving")}
                     </>
                   ) : createMode === "new" ? (
-                    "เพิ่มผู้ใช้"
+                    t("superadmin.users.createSheet.submitCreate")
                   ) : (
-                    "เพิ่มผู้ใช้เดิม"
+                    t("superadmin.users.createSheet.submitExisting")
                   )}
                 </Button>
               </div>
@@ -760,7 +778,7 @@ export function UsersManagement({
                 }}
                 disabled={loadingKey !== null}
               >
-                สร้างผู้ใช้ใหม่
+                {t("superadmin.users.createSheet.modeNew")}
               </button>
               <button
                 type="button"
@@ -775,7 +793,7 @@ export function UsersManagement({
                 }}
                 disabled={loadingKey !== null}
               >
-                เพิ่มผู้ใช้เดิม
+                {t("superadmin.users.createSheet.modeExisting")}
               </button>
             </div>
           ) : null}
@@ -784,9 +802,11 @@ export function UsersManagement({
             createdTemporaryPassword ? (
               <div className="space-y-3">
                 <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                  <p className="text-xs font-medium text-emerald-700">สร้างสมาชิกสำเร็จ</p>
+                  <p className="text-xs font-medium text-emerald-700">{t("superadmin.users.createSheet.createdTitle")}</p>
                   <p className="mt-1 text-xs text-emerald-700">
-                    ส่งรหัสชั่วคราวนี้ให้ผู้ใช้ {createdUserEmail ? `(${createdUserEmail})` : ""} และระบบจะบังคับเปลี่ยนรหัสเมื่อเข้าใช้งานครั้งแรก
+                    {t("superadmin.users.createSheet.createdDescription", {
+                      email: createdUserEmail ? `(${createdUserEmail})` : "",
+                    })}
                   </p>
                   <div className="mt-2 flex items-center gap-2">
                     <code className="flex-1 rounded-lg border border-emerald-200 bg-white px-2 py-1 text-sm font-semibold text-emerald-700">
@@ -799,7 +819,7 @@ export function UsersManagement({
                       onClick={copyCreatedTemporaryPassword}
                     >
                       <Copy className="h-3.5 w-3.5" />
-                      คัดลอก
+                      {t("superadmin.users.actions.copy")}
                     </Button>
                   </div>
                 </div>
@@ -808,7 +828,7 @@ export function UsersManagement({
               <div className="space-y-3">
                 <div className="space-y-1.5">
                   <label className="text-xs text-slate-500" htmlFor="new-user-name">
-                    ชื่อผู้ใช้
+                    {t("superadmin.users.form.name")}
                   </label>
                   <input
                     id="new-user-name"
@@ -820,7 +840,7 @@ export function UsersManagement({
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs text-slate-500" htmlFor="new-user-email">
-                    อีเมล
+                    {t("superadmin.users.form.email")}
                   </label>
                   <input
                     id="new-user-email"
@@ -833,7 +853,7 @@ export function UsersManagement({
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs text-slate-500" htmlFor="new-user-role">
-                    บทบาท
+                    {t("superadmin.users.form.role")}
                   </label>
                   <select
                     id="new-user-role"
@@ -850,18 +870,18 @@ export function UsersManagement({
                   </select>
                 </div>
                 <p className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
-                  ระบบจะสร้างรหัสผ่านชั่วคราวอัตโนมัติ และบังคับผู้ใช้เปลี่ยนรหัสเมื่อเข้าสู่ระบบครั้งแรก
+                  {t("superadmin.users.createSheet.temporaryPasswordHint")}
                 </p>
               </div>
             )
           ) : (
             <div className="space-y-3">
               <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                เพิ่มได้เฉพาะผู้ใช้ที่อยู่ในร้านภายใต้ SUPERADMIN เดียวกัน
+                {t("superadmin.users.createSheet.existingScopeHint")}
               </p>
               <div className="space-y-1.5">
                 <label className="text-xs text-slate-500" htmlFor="existing-user-search">
-                  ค้นหาผู้ใช้เดิม (ชื่อหรืออีเมล)
+                  {t("superadmin.users.createSheet.searchLabel")}
                 </label>
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -872,7 +892,7 @@ export function UsersManagement({
                     onChange={(event) => setExistingQuery(event.target.value)}
                     className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-9 pr-20 text-sm outline-none ring-primary transition focus:border-slate-300 focus:bg-white focus:ring-2"
                     disabled={!canCreate || loadingKey !== null}
-                    placeholder="พิมพ์ชื่อหรืออีเมล เช่น somchai@email.com"
+                    placeholder={t("superadmin.users.createSheet.searchPlaceholder")}
                   />
                   <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
                     {isLoadingExistingCandidates ? (
@@ -884,9 +904,9 @@ export function UsersManagement({
                         className="inline-flex h-6 items-center rounded-full border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-500 transition hover:bg-slate-100"
                         onClick={() => setExistingQuery("")}
                         disabled={!canCreate || loadingKey !== null}
-                        aria-label="ล้างคำค้นหา"
+                        aria-label={t("superadmin.users.actions.clearSearch")}
                       >
-                        ล้าง
+                        {t("superadmin.users.actions.clear")}
                       </button>
                     ) : null}
                   </div>
@@ -894,7 +914,7 @@ export function UsersManagement({
               </div>
               <div className="space-y-1.5">
                 <label className="text-xs text-slate-500" htmlFor="existing-user-role">
-                  บทบาทในร้านนี้
+                  {t("superadmin.users.createSheet.roleInStore")}
                 </label>
                 <select
                   id="existing-user-role"
@@ -918,13 +938,13 @@ export function UsersManagement({
               ) : null}
 
               <div className="space-y-2">
-                <p className="text-xs text-slate-500">รายชื่อผู้ใช้ที่เพิ่มได้</p>
+                <p className="text-xs text-slate-500">{t("superadmin.users.createSheet.candidatesTitle")}</p>
                 <div className="max-h-56 overflow-y-auto rounded-xl border border-slate-200 bg-white">
                   {isLoadingExistingCandidates ? (
-                    <div className="px-3 py-3 text-sm text-slate-500">กำลังโหลดรายชื่อผู้ใช้...</div>
+                    <div className="px-3 py-3 text-sm text-slate-500">{t("superadmin.users.createSheet.candidatesLoading")}</div>
                   ) : existingCandidates.length === 0 ? (
                     <div className="px-3 py-3 text-sm text-slate-500">
-                      ไม่พบผู้ใช้ที่เพิ่มได้ในร้านอื่นของ SUPERADMIN นี้
+                      {t("superadmin.users.createSheet.candidatesEmpty")}
                     </div>
                   ) : (
                     <ul className="divide-y divide-slate-100">
@@ -945,7 +965,9 @@ export function UsersManagement({
                                 <p className="truncate text-sm font-medium text-slate-900">{candidate.name}</p>
                                 <p className="truncate text-xs text-slate-500">{candidate.email}</p>
                                 <p className="mt-0.5 truncate text-[11px] text-slate-500">
-                                  อยู่ในร้าน: {candidate.sourceStores.join(", ")}
+                                  {t("superadmin.users.createSheet.sourceStores", {
+                                    stores: candidate.sourceStores.join(", "),
+                                  })}
                                 </p>
                               </span>
                               {selected ? <Check className="h-4 w-4 shrink-0 self-center text-emerald-600" /> : null}
@@ -965,8 +987,8 @@ export function UsersManagement({
       <SlideUpSheet
         isOpen={isEditModalOpen}
         onClose={closeEditModal}
-        title={editingMember?.name ?? "แก้ไขสมาชิก"}
-        description={editingMember?.email ?? "จัดการบทบาท สถานะ และสิทธิ์เข้าถึงสาขา"}
+        title={editingMember?.name ?? t("superadmin.users.editSheet.titleFallback")}
+        description={editingMember?.email ?? t("superadmin.users.editSheet.descriptionFallback")}
         panelMaxWidthClass="min-[1200px]:max-w-[45rem]"
         disabled={loadingKey === "save-member" || loadingKey === "reset-password"}
         footer={
@@ -979,16 +1001,16 @@ export function UsersManagement({
               ) : null}
               <div className={`${editErrorMessage ? "mt-3 " : ""}grid grid-cols-2 gap-2`}>
                 <Button type="button" variant="outline" className="h-10 rounded-xl" onClick={closeEditModal} disabled={loadingKey !== null}>
-                  ยกเลิก
+                  {t("common.cancel")}
                 </Button>
                 <Button type="button" className="h-10 rounded-xl" onClick={saveMemberChanges} disabled={!canUpdate || loadingKey !== null}>
                   {loadingKey === "save-member" ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      กำลังบันทึก...
+                      {t("superadmin.users.editSheet.saving")}
                     </>
                   ) : (
-                    "บันทึกการเปลี่ยนแปลง"
+                    t("superadmin.users.editSheet.saveChanges")
                   )}
                 </Button>
               </div>
@@ -1000,7 +1022,7 @@ export function UsersManagement({
           <div className="space-y-3">
             <div className="grid gap-4 sm:grid-cols-2">
               <article className="space-y-1.5 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <p className="text-xs text-slate-500">บทบาท</p>
+                <p className="text-xs text-slate-500">{t("superadmin.users.form.role")}</p>
                 <select
                   value={editRoleId}
                   onChange={(event) => setEditRoleId(event.target.value)}
@@ -1016,7 +1038,7 @@ export function UsersManagement({
               </article>
 
               <article className="space-y-1.5 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                <p className="text-xs text-slate-500">สถานะ</p>
+                <p className="text-xs text-slate-500">{t("superadmin.users.form.status")}</p>
                 <div className="grid grid-cols-3 gap-1">
                   {statusOptions.map((status) => (
                     <button
@@ -1037,7 +1059,7 @@ export function UsersManagement({
               </article>
 
               <article className="space-y-1.5 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:col-span-2">
-                <p className="text-xs text-slate-500">จำกัดอุปกรณ์เข้าสู่ระบบ</p>
+                <p className="text-xs text-slate-500">{t("superadmin.users.form.sessionLimit")}</p>
                 <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
                   <input
                     type="number"
@@ -1045,18 +1067,20 @@ export function UsersManagement({
                     max={10}
                     value={editSessionLimit}
                     onChange={(event) => setEditSessionLimit(event.target.value)}
-                    placeholder="ว่าง = ค่าเริ่มต้นระบบ"
+                    placeholder={t("superadmin.users.form.sessionLimitPlaceholder")}
                     className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none ring-primary focus:ring-2"
                     disabled={!canUpdate || loadingKey !== null}
                   />
                   <span className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-500">
-                    ปัจจุบัน: {editingMember.sessionLimit ?? defaultSessionLimit}
+                    {t("superadmin.users.form.currentSessionLimit", {
+                      count: editingMember.sessionLimit ?? defaultSessionLimit,
+                    })}
                   </span>
                 </div>
               </article>
 
               <article className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:col-span-2">
-                <p className="text-xs text-slate-500">สิทธิ์เข้าถึงสาขา</p>
+                <p className="text-xs text-slate-500">{t("superadmin.users.form.branchAccess")}</p>
                 <div className="grid grid-cols-2 gap-1 rounded-lg border border-slate-200 bg-white p-1">
                   <button
                     type="button"
@@ -1068,7 +1092,7 @@ export function UsersManagement({
                     onClick={() => setEditBranchMode("ALL")}
                     disabled={!canUpdate || loadingKey !== null || isLoadingEditBranchAccess}
                   >
-                    ทุกสาขา
+                    {t("superadmin.users.branchMode.all")}
                   </button>
                   <button
                     type="button"
@@ -1080,16 +1104,16 @@ export function UsersManagement({
                     onClick={() => setEditBranchMode("SELECTED")}
                     disabled={!canUpdate || loadingKey !== null || isLoadingEditBranchAccess}
                   >
-                    เลือกสาขา
+                    {t("superadmin.users.branchMode.selected")}
                   </button>
                 </div>
 
                 {isLoadingEditBranchAccess ? (
-                  <p className="text-xs text-slate-500">กำลังโหลดสิทธิ์สาขา...</p>
+                  <p className="text-xs text-slate-500">{t("superadmin.users.branchAccess.loading")}</p>
                 ) : editBranchMode === "SELECTED" ? (
                   <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-2">
                     {branches.length === 0 ? (
-                      <p className="text-xs text-slate-500">ยังไม่มีข้อมูลสาขาในร้านนี้</p>
+                      <p className="text-xs text-slate-500">{t("superadmin.users.branchAccess.empty")}</p>
                     ) : (
                       <ul className="space-y-1">
                         {branches.map((branch) => {
@@ -1113,7 +1137,7 @@ export function UsersManagement({
                                 />
                                 <span className="text-xs text-slate-700">
                                   {branch.name}
-                                  {branch.code === "MAIN" ? " (MAIN)" : ""}
+                                  {branch.code === "MAIN" ? t("superadmin.users.branchAccess.mainSuffix") : ""}
                                 </span>
                               </label>
                             </li>
@@ -1124,7 +1148,7 @@ export function UsersManagement({
                   </div>
                 ) : (
                   <p className="text-xs text-slate-500">
-                    ผู้ใช้คนนี้สามารถสลับและใช้งานได้ทุกสาขาในร้านนี้
+                    {t("superadmin.users.branchAccess.allHint")}
                   </p>
                 )}
               </article>
@@ -1133,32 +1157,48 @@ export function UsersManagement({
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
               <p className="inline-flex items-center gap-1.5">
                 <Mail className="h-3.5 w-3.5" />
-                สิทธิ์ระบบ: {editingMember.systemRole}
+                {t("superadmin.users.meta.systemRole", { value: editingMember.systemRole })}
               </p>
               <p className="mt-1 inline-flex items-center gap-1.5">
                 <UserRound className="h-3.5 w-3.5" />
-                สถานะปัจจุบัน: {statusLabel[editingMember.status]}
+                {t("superadmin.users.meta.currentStatus", { value: statusLabel[editingMember.status] })}
               </p>
               <p className="mt-1">
-                สร้างบัญชีโดย: {editingMember.createdByName ?? (editingMember.createdByUserId ? "ไม่ทราบชื่อ" : "ระบบ")}
+                {t("superadmin.users.meta.createdBy", {
+                  value:
+                    editingMember.createdByName ??
+                    (editingMember.createdByUserId
+                      ? t("superadmin.users.meta.unknownName")
+                      : t("superadmin.users.meta.system")),
+                })}
               </p>
               <p className="mt-1">
-                เพิ่มเข้าร้านโดย: {editingMember.addedByName ?? (editingMember.addedByUserId ? "ไม่ทราบชื่อ" : "ระบบ")}
+                {t("superadmin.users.meta.addedBy", {
+                  value:
+                    editingMember.addedByName ??
+                    (editingMember.addedByUserId
+                      ? t("superadmin.users.meta.unknownName")
+                      : t("superadmin.users.meta.system")),
+                })}
               </p>
               <p className="mt-1">
-                สถานะรหัสผ่าน: {editingMember.mustChangePassword ? "ต้องเปลี่ยนรหัสก่อนเข้าใช้งาน" : "ปกติ"}
+                {t("superadmin.users.meta.passwordStatus", {
+                  value: editingMember.mustChangePassword
+                    ? t("superadmin.users.password.mustChange")
+                    : t("superadmin.users.password.normal"),
+                })}
               </p>
             </div>
 
             <article className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
-              <p className="text-xs font-medium text-slate-700">รีเซ็ตรหัสผ่านชั่วคราว</p>
+              <p className="text-xs font-medium text-slate-700">{t("superadmin.users.reset.title")}</p>
               <p className="text-xs text-slate-500">
-                ระบบจะสร้างรหัสแบบใช้ครั้งเดียว และบังคับให้ผู้ใช้เปลี่ยนรหัสใหม่เมื่อเข้าสู่ระบบครั้งถัดไป
+                {t("superadmin.users.reset.description")}
               </p>
 
               {temporaryPassword ? (
                 <div className="space-y-2 rounded-xl border border-emerald-200 bg-emerald-50 p-2">
-                  <p className="text-xs text-emerald-700">รหัสชั่วคราวใหม่</p>
+                  <p className="text-xs text-emerald-700">{t("superadmin.users.reset.newPassword")}</p>
                   <div className="flex items-center gap-2">
                     <code className="flex-1 rounded-lg border border-emerald-200 bg-white px-2 py-1 text-sm font-semibold text-emerald-700">
                       {temporaryPassword}
@@ -1170,7 +1210,7 @@ export function UsersManagement({
                       onClick={copyTemporaryPassword}
                     >
                       <Copy className="h-3.5 w-3.5" />
-                      คัดลอก
+                      {t("superadmin.users.actions.copy")}
                     </Button>
                   </div>
                 </div>
@@ -1178,7 +1218,7 @@ export function UsersManagement({
 
               {!temporaryPassword && isResetPasswordConfirmOpen ? (
                 <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-2">
-                  <p className="text-xs text-amber-700">ยืนยันรีเซ็ตรหัสผ่านของสมาชิกคนนี้ใช่หรือไม่?</p>
+                  <p className="text-xs text-amber-700">{t("superadmin.users.reset.confirmPrompt")}</p>
                   <div className="grid grid-cols-2 gap-2">
                     <Button
                       type="button"
@@ -1187,7 +1227,7 @@ export function UsersManagement({
                       onClick={() => setIsResetPasswordConfirmOpen(false)}
                       disabled={loadingKey === "reset-password"}
                     >
-                      ยกเลิก
+                      {t("common.cancel")}
                     </Button>
                     <Button
                       type="button"
@@ -1198,10 +1238,10 @@ export function UsersManagement({
                       {loadingKey === "reset-password" ? (
                         <>
                           <Loader2 className="h-4 w-4 animate-spin" />
-                          กำลังรีเซ็ต...
+                          {t("superadmin.users.reset.resetting")}
                         </>
                       ) : (
-                        "ยืนยันรีเซ็ต"
+                        t("superadmin.users.reset.confirmAction")
                       )}
                     </Button>
                   </div>
@@ -1217,7 +1257,7 @@ export function UsersManagement({
                   disabled={!canUpdate || loadingKey !== null}
                 >
                   <KeyRound className="h-3.5 w-3.5" />
-                  รีเซ็ตรหัสผ่านชั่วคราว
+                  {t("superadmin.users.reset.openAction")}
                 </Button>
               ) : null}
             </article>

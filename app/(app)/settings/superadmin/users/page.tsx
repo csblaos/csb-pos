@@ -9,6 +9,9 @@ import { ensureMainBranchExists } from "@/lib/branches/access";
 import { getSession } from "@/lib/auth/session";
 import { listActiveMemberships } from "@/lib/auth/session-db";
 import { queryMany } from "@/lib/db/query";
+import { getAppLanguageLocale } from "@/lib/i18n/config";
+import { createTranslator } from "@/lib/i18n/translate";
+import type { AppLanguage } from "@/lib/i18n/types";
 import { listStoreBranchesFromPostgres } from "@/lib/platform/postgres-auth-rbac";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 import { getGlobalSessionPolicy } from "@/lib/system-config/policy";
@@ -43,11 +46,13 @@ function UsersManagementFallback() {
 
 async function UsersManagementContent({
   storeId,
+  language,
   canCreate,
   canUpdate,
   defaultSessionLimit,
 }: {
   storeId: string;
+  language: AppLanguage;
   canCreate: boolean;
   canUpdate: boolean;
   defaultSessionLimit: number;
@@ -122,6 +127,7 @@ async function UsersManagementContent({
 
   return (
     <UsersManagement
+      language={language}
       members={members}
       roles={roleOptions}
       branches={branches}
@@ -138,6 +144,8 @@ export default async function SettingsSuperadminUsersPage() {
   if (!session) {
     redirect("/login");
   }
+  const t = createTranslator(session.language);
+  const locale = getAppLanguageLocale(session.language);
 
   const memberships = await listActiveMemberships(session.userId);
   if (memberships.length === 0) {
@@ -156,12 +164,10 @@ export default async function SettingsSuperadminUsersPage() {
   if (!canView) {
     return (
       <section className="space-y-3">
-        <h1 className="text-xl font-semibold">Superadmin: จัดการผู้ใช้</h1>
-        <p className="text-sm text-red-600">
-          คุณไม่มีสิทธิ์ดูสมาชิกของร้านที่กำลังเลือก กรุณาเปลี่ยนร้านหรือปรับสิทธิ์ก่อน
-        </p>
+        <h1 className="text-xl font-semibold">{t("superadmin.users.title")}</h1>
+        <p className="text-sm text-red-600">{t("superadmin.users.noPermission")}</p>
         <Link href="/settings/stores" className="text-sm font-medium text-blue-700 hover:underline">
-          ไปหน้าเลือกร้าน / เปลี่ยนสาขา
+          {t("superadmin.users.noPermissionLink")}
         </Link>
       </section>
     );
@@ -197,15 +203,14 @@ export default async function SettingsSuperadminUsersPage() {
       <header className="space-y-1 px-1">
         <p className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">
           <ShieldCheck className="h-3.5 w-3.5" />
-          Superadmin Workspace
+          {t("superadmin.users.workspaceBadge")}
         </p>
-        <h1 className="text-[28px] font-semibold tracking-tight text-slate-900">จัดการผู้ใช้ข้ามร้าน</h1>
-        <p className="text-sm text-slate-500">
-          เลือกร้านที่ต้องการด้านล่าง แล้วจัดการสมาชิกของร้านนั้นได้ทันที
-        </p>
+        <h1 className="text-[28px] font-semibold tracking-tight text-slate-900">{t("superadmin.users.title")}</h1>
+        <p className="text-sm text-slate-500">{t("superadmin.users.description")}</p>
       </header>
 
       <StoresManagement
+        language={session.language}
         memberships={memberships}
         activeStoreId={session.activeStoreId}
         activeBranchId={session.activeBranchId}
@@ -218,75 +223,66 @@ export default async function SettingsSuperadminUsersPage() {
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs text-slate-500">สมาชิก ACTIVE</p>
+          <p className="text-xs text-slate-500">{t("superadmin.users.metric.active")}</p>
           <p className="mt-1 text-2xl font-semibold text-slate-900">
-            {activeCount.toLocaleString("th-TH")}
+            {activeCount.toLocaleString(locale)}
           </p>
         </article>
         <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs text-slate-500">คำเชิญค้าง</p>
+          <p className="text-xs text-slate-500">{t("superadmin.users.metric.invited")}</p>
           <p className="mt-1 text-2xl font-semibold text-slate-900">
-            {invitedCount.toLocaleString("th-TH")}
+            {invitedCount.toLocaleString(locale)}
           </p>
         </article>
         <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs text-slate-500">สมาชิก SUSPENDED</p>
+          <p className="text-xs text-slate-500">{t("superadmin.users.metric.suspended")}</p>
           <p className="mt-1 text-2xl font-semibold text-slate-900">
-            {suspendedCount.toLocaleString("th-TH")}
+            {suspendedCount.toLocaleString(locale)}
           </p>
         </article>
         <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs text-slate-500">Session Default</p>
+          <p className="text-xs text-slate-500">{t("superadmin.users.metric.sessionDefault")}</p>
           <p className="mt-1 text-2xl font-semibold text-slate-900">
-            {globalSessionPolicy.defaultSessionLimit.toLocaleString("th-TH")}
+            {globalSessionPolicy.defaultSessionLimit.toLocaleString(locale)}
           </p>
         </article>
       </div>
 
       <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-4 py-3">
-          <p className="text-sm font-semibold text-slate-900">Role Template (แนะนำ)</p>
-          <p className="mt-0.5 text-xs text-slate-500">
-            ใช้เป็น baseline เวลาตั้งสิทธิ์ เพื่อให้การกำหนด role เร็วและสม่ำเสมอทุกสาขา
-          </p>
+          <p className="text-sm font-semibold text-slate-900">{t("superadmin.users.roleTemplate.title")}</p>
+          <p className="mt-0.5 text-xs text-slate-500">{t("superadmin.users.roleTemplate.description")}</p>
         </div>
         <ul className="divide-y divide-slate-100">
           <li className="px-4 py-3">
-            <p className="text-sm font-medium text-slate-900">Owner</p>
-            <p className="mt-1 text-xs text-slate-500">
-              เข้าถึงการตั้งค่าร้าน สาขา โควตา และจัดการสมาชิกทั้งหมดของร้าน
-            </p>
+            <p className="text-sm font-medium text-slate-900">{t("superadmin.users.roleTemplate.owner.title")}</p>
+            <p className="mt-1 text-xs text-slate-500">{t("superadmin.users.roleTemplate.owner.description")}</p>
           </li>
           <li className="px-4 py-3">
-            <p className="text-sm font-medium text-slate-900">Admin</p>
-            <p className="mt-1 text-xs text-slate-500">
-              จัดการผู้ใช้ สินค้า สต็อก และออเดอร์ โดยไม่แตะ policy ระดับระบบ
-            </p>
+            <p className="text-sm font-medium text-slate-900">{t("superadmin.users.roleTemplate.admin.title")}</p>
+            <p className="mt-1 text-xs text-slate-500">{t("superadmin.users.roleTemplate.admin.description")}</p>
           </li>
           <li className="px-4 py-3">
-            <p className="text-sm font-medium text-slate-900">Manager</p>
-            <p className="mt-1 text-xs text-slate-500">
-              โฟกัสงานปฏิบัติการประจำวัน อนุมัติออเดอร์ ดูรายงาน และควบคุมสต็อก
-            </p>
+            <p className="text-sm font-medium text-slate-900">{t("superadmin.users.roleTemplate.manager.title")}</p>
+            <p className="mt-1 text-xs text-slate-500">{t("superadmin.users.roleTemplate.manager.description")}</p>
           </li>
           <li className="px-4 py-3">
-            <p className="text-sm font-medium text-slate-900">Cashier</p>
-            <p className="mt-1 text-xs text-slate-500">
-              ใช้งานขายหน้าร้าน/หน้าบ้านเป็นหลัก ไม่มีสิทธิ์แก้ค่าหลักของระบบ
-            </p>
+            <p className="text-sm font-medium text-slate-900">{t("superadmin.users.roleTemplate.cashier.title")}</p>
+            <p className="mt-1 text-xs text-slate-500">{t("superadmin.users.roleTemplate.cashier.description")}</p>
           </li>
         </ul>
       </article>
 
       <div className="space-y-2">
         <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-          จัดการสมาชิกของร้านที่เลือกอยู่
+          {t("superadmin.users.manageCurrentStore")}
         </p>
       </div>
 
       <Suspense fallback={<UsersManagementFallback />}>
         <UsersManagementContent
           storeId={session.activeStoreId}
+          language={session.language}
           canCreate={canCreate}
           canUpdate={canUpdate}
           defaultSessionLimit={globalSessionPolicy.defaultSessionLimit}
@@ -294,7 +290,9 @@ export default async function SettingsSuperadminUsersPage() {
       </Suspense>
 
       <div className="space-y-2">
-        <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">นำทาง</p>
+        <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+          {t("superadmin.users.linksTitle")}
+        </p>
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <Link
             href="/settings/superadmin"
@@ -304,8 +302,12 @@ export default async function SettingsSuperadminUsersPage() {
               <Users className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-slate-900">กลับ Superadmin Center</span>
-              <span className="mt-0.5 block truncate text-xs text-slate-500">ไปหน้าหลักการจัดการของ Superadmin</span>
+              <span className="block truncate text-sm font-medium text-slate-900">
+                {t("superadmin.users.links.center.title")}
+              </span>
+              <span className="mt-0.5 block truncate text-xs text-slate-500">
+                {t("superadmin.users.links.center.description")}
+              </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
           </Link>
@@ -318,8 +320,12 @@ export default async function SettingsSuperadminUsersPage() {
               <KeyRound className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-slate-900">ไปจัดการสิทธิ์ (Roles)</span>
-              <span className="mt-0.5 block truncate text-xs text-slate-500">ปรับ role ของร้านที่เลือกอยู่</span>
+              <span className="block truncate text-sm font-medium text-slate-900">
+                {t("superadmin.users.links.roles.title")}
+              </span>
+              <span className="mt-0.5 block truncate text-xs text-slate-500">
+                {t("superadmin.users.links.roles.description")}
+              </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
           </Link>
@@ -333,10 +339,10 @@ export default async function SettingsSuperadminUsersPage() {
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium text-slate-900">
-                กลับหน้าเลือกร้าน / เปลี่ยนสาขา
+                {t("superadmin.users.links.storeSwitcher.title")}
               </span>
               <span className="mt-0.5 block truncate text-xs text-slate-500">
-                ออกจากโหมดผู้ดูแลกลับหน้าใช้งานรายวัน
+                {t("superadmin.users.links.storeSwitcher.description")}
               </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />

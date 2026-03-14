@@ -15,10 +15,13 @@ import {
   StockTabToolbar,
 } from "@/components/app/stock-tab-feedback";
 import { authFetch } from "@/lib/auth/client-token";
+import { createTranslator, formatNumberByLanguage } from "@/lib/i18n/translate";
+import type { AppLanguage } from "@/lib/i18n/types";
 import type { StockProductOption } from "@/lib/inventory/queries";
 import type { CategoryItem, ProductListItem } from "@/lib/products/service";
 
 type StockInventoryViewProps = {
+  language: AppLanguage;
   products: StockProductOption[];
   categories: CategoryItem[];
   storeOutStockThreshold: number;
@@ -71,6 +74,7 @@ function mergeUniqueProducts(
 }
 
 export function StockInventoryView({
+  language,
   products,
   categories,
   storeOutStockThreshold,
@@ -78,6 +82,7 @@ export function StockInventoryView({
   pageSize,
   initialHasMore,
 }: StockInventoryViewProps) {
+  const t = useMemo(() => createTranslator(language), [language]);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -521,7 +526,7 @@ export function StockInventoryView({
           `พบสินค้า: ${matchedProduct.name} (อยู่นอกหน้ารายการที่โหลดตอนนี้)`,
         );
       } catch {
-        toast.error("ค้นหาสินค้าจากบาร์โค้ดไม่สำเร็จ");
+        toast.error(t("stock.inventory.searchByBarcodeFailed"));
       } finally {
         setIsSearchingByBarcode(false);
       }
@@ -534,6 +539,7 @@ export function StockInventoryView({
       productPage,
       resolveProductFromBarcode,
       selectedCategoryId,
+      t,
     ],
   );
 
@@ -548,6 +554,7 @@ export function StockInventoryView({
   return (
     <section className="space-y-4">
       <StockTabToolbar
+        language={language}
         isRefreshing={isRefreshingData}
         lastUpdatedAt={lastUpdatedAt}
         onRefresh={() => {
@@ -565,7 +572,7 @@ export function StockInventoryView({
               : "bg-white hover:bg-slate-50"
           }`}
         >
-          <p className="text-xs text-slate-600">สต็อกหมด</p>
+          <p className="text-xs text-slate-600">{t("stock.inventory.out")}</p>
           <p className="text-2xl font-bold text-red-600">{stats.out}</p>
         </button>
 
@@ -578,7 +585,7 @@ export function StockInventoryView({
               : "bg-white hover:bg-slate-50"
           }`}
         >
-          <p className="text-xs text-slate-600">สต็อกต่ำ</p>
+          <p className="text-xs text-slate-600">{t("stock.inventory.low")}</p>
           <p className="text-2xl font-bold text-amber-600">{stats.low}</p>
         </button>
 
@@ -591,9 +598,9 @@ export function StockInventoryView({
               : "bg-white hover:bg-slate-50"
           }`}
         >
-          <p className="text-xs text-slate-600">ทั้งหมด</p>
+          <p className="text-xs text-slate-600">{t("stock.inventory.all")}</p>
           <p className="text-2xl font-bold text-emerald-600">
-            {productItems.length.toLocaleString("th-TH")}
+            {formatNumberByLanguage(language, productItems.length)}
           </p>
         </button>
       </div>
@@ -607,7 +614,7 @@ export function StockInventoryView({
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="ค้นหาสินค้า (SKU, ชื่อ)..."
+                placeholder={t("stock.inventory.searchPlaceholder")}
                 className="h-10 w-full rounded-md border pl-9 pr-9 text-sm outline-none ring-primary focus:ring-2"
               />
               {searchQuery && (
@@ -640,7 +647,7 @@ export function StockInventoryView({
                 onChange={(e) => setSelectedCategoryId(e.target.value)}
                 className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2 sm:w-auto"
               >
-                <option value="">ทุกหมวดหมู่</option>
+                <option value="">{t("stock.inventory.allCategories")}</option>
                 {categories.map((category) => (
                   <option key={category.id} value={category.id}>
                     {category.name}
@@ -656,25 +663,28 @@ export function StockInventoryView({
                 onChange={(e) => setSortBy(e.target.value as SortOption)}
                 className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2 sm:w-auto"
               >
-                <option value="name">ชื่อ ก-ฮ</option>
-                <option value="sku">SKU</option>
-                <option value="stock-low">สต็อกน้อย-มาก</option>
-                <option value="stock-high">สต็อกมาก-น้อย</option>
+                <option value="name">{t("stock.inventory.sort.name")}</option>
+                <option value="sku">{t("stock.inventory.sort.sku")}</option>
+                <option value="stock-low">{t("stock.inventory.sort.lowToHigh")}</option>
+                <option value="stock-high">{t("stock.inventory.sort.highToLow")}</option>
               </select>
             </div>
           </div>
         </div>
 
         <p className="mt-2 text-xs text-slate-500">
-          แสดง {filteredAndSortedProducts.length.toLocaleString("th-TH")} จาก{" "}
-          {productItems.length.toLocaleString("th-TH")} รายการ
+          {t("stock.inventory.showing", {
+            visible: formatNumberByLanguage(language, filteredAndSortedProducts.length),
+            total: formatNumberByLanguage(language, productItems.length),
+          })}
         </p>
       </article>
 
       {isRefreshingData && productItems.length === 0 ? (
-        <StockTabLoadingState message="กำลังอัปเดตรายการสต็อก..." />
+        <StockTabLoadingState language={language} message={t("stock.feedback.refreshing")} />
       ) : dataError && productItems.length === 0 ? (
         <StockTabErrorState
+          language={language}
           message={dataError}
           onRetry={() => {
             void refreshInventoryData();
@@ -682,8 +692,9 @@ export function StockInventoryView({
         />
       ) : productItems.length === 0 ? (
         <StockTabEmptyState
-          title="ยังไม่มีรายการสต็อก"
-          description="ตรวจสอบสิทธิ์หรือกดรีเฟรชอีกครั้ง"
+          language={language}
+          title={t("stock.inventory.emptyTitle")}
+          description={t("stock.inventory.emptyDescription")}
         />
       ) : (
         <>
@@ -691,7 +702,7 @@ export function StockInventoryView({
             {filteredAndSortedProducts.length === 0 ? (
               <article className="rounded-xl border bg-white p-8 text-center shadow-sm">
                 <Package className="mx-auto h-12 w-12 text-slate-300" />
-                <p className="mt-2 text-sm text-slate-600">ไม่พบสินค้าที่ตรงกับเงื่อนไข</p>
+                <p className="mt-2 text-sm text-slate-600">{t("stock.inventory.noMatch")}</p>
               </article>
             ) : (
               filteredAndSortedProducts.map((product) => {
@@ -716,7 +727,7 @@ export function StockInventoryView({
                             <p className="text-xs text-slate-500">{product.sku}</p>
                             <p className="text-sm font-medium">{product.name}</p>
                             <p className="text-xs text-slate-500">
-                              หน่วยหลัก: {product.baseUnitCode}
+                              {t("stock.inventory.baseUnit")}: {product.baseUnitCode}
                             </p>
                           </div>
                           <span
@@ -726,20 +737,20 @@ export function StockInventoryView({
                                 : "bg-slate-200 text-slate-600"
                             }`}
                           >
-                            {product.active ? "ใช้งาน" : "ปิด"}
+                            {product.active ? t("stock.inventory.active") : t("stock.inventory.inactive")}
                           </span>
                         </div>
 
                         <div className="mt-3 grid grid-cols-3 gap-2">
                           <div className="rounded-lg bg-slate-50 p-2">
-                            <p className="text-xs text-slate-600">คงเหลือ</p>
+                            <p className="text-xs text-slate-600">{t("stock.inventory.onHand")}</p>
                             <p className="text-lg font-bold text-slate-900">
                               {product.onHand.toLocaleString("th-TH")}
                             </p>
                           </div>
 
                           <div className="rounded-lg bg-amber-50 p-2">
-                            <p className="text-xs text-amber-700">จอง</p>
+                            <p className="text-xs text-amber-700">{t("stock.inventory.reserved")}</p>
                             <p className="text-lg font-bold text-amber-900">
                               {product.reserved.toLocaleString("th-TH")}
                             </p>
@@ -763,7 +774,7 @@ export function StockInventoryView({
                                     : "text-emerald-700"
                               }`}
                             >
-                              พร้อมขาย
+                              {t("stock.inventory.available")}
                             </p>
                             <p
                               className={`text-lg font-bold ${
@@ -796,7 +807,7 @@ export function StockInventoryView({
                 }}
                 disabled={isLoadingMoreProducts}
               >
-                {isLoadingMoreProducts ? "กำลังโหลด..." : "โหลดเพิ่ม"}
+                {isLoadingMoreProducts ? t("stock.loading") : t("stock.inventory.loadMore")}
               </Button>
             </div>
           ) : null}
@@ -806,16 +817,16 @@ export function StockInventoryView({
       <SlideUpSheet
         isOpen={showScannerPermission}
         onClose={() => setShowScannerPermission(false)}
-        title="ขออนุญาตใช้กล้อง"
-        description="ระบบต้องใช้กล้องเพื่อสแกนบาร์โค้ดสินค้า"
+        title={t("stock.inventory.scannerPermissionTitle")}
+        description={t("stock.inventory.scannerPermissionDescription")}
       >
         <div className="space-y-3">
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-            <p className="font-medium text-slate-700">ทำไมต้องใช้กล้อง?</p>
+            <p className="font-medium text-slate-700">{t("stock.inventory.scannerWhy")}</p>
             <ul className="mt-2 list-disc space-y-1 pl-4">
-              <li>สแกนบาร์โค้ดได้เร็วขึ้น</li>
-              <li>ลดความผิดพลาดจากการพิมพ์</li>
-              <li>ใช้งานได้ทันทีในหน้านี้</li>
+              <li>{t("stock.inventory.scannerWhyFast")}</li>
+              <li>{t("stock.inventory.scannerWhyLessError")}</li>
+              <li>{t("stock.inventory.scannerWhyInline")}</li>
             </ul>
           </div>
 
@@ -826,7 +837,7 @@ export function StockInventoryView({
               className="h-10 flex-1"
               onClick={() => setShowScannerPermission(false)}
             >
-              ยกเลิก
+              {t("common.cancel")}
             </Button>
             <Button
               type="button"
@@ -838,7 +849,7 @@ export function StockInventoryView({
                 setHasSeenScannerPermission(true);
               }}
             >
-              อนุญาตและสแกน
+              {t("stock.inventory.allowAndScan")}
             </Button>
           </div>
         </div>
@@ -847,8 +858,8 @@ export function StockInventoryView({
       <SlideUpSheet
         isOpen={showScanner}
         onClose={() => setShowScanner(false)}
-        title="สแกนบาร์โค้ด"
-        description="ส่องกล้องไปที่บาร์โค้ดสินค้า"
+        title={t("stock.inventory.scannerTitle")}
+        description={t("stock.inventory.scannerDescription")}
       >
         <div className="p-4">
           {showScanner ? (

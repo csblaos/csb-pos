@@ -18,7 +18,7 @@
 | `/api/auth/login` | `POST` | `Public` | login และสร้าง session |
 | `/api/auth/logout` | `POST` | `Public` | logout/clear session |
 | `/api/auth/signup` | `POST` | `Public` | signup |
-| `/api/settings/account` | `GET,PATCH` | `Session` | profile/password ของผู้ใช้ปัจจุบัน |
+| `/api/settings/account` | `GET,PATCH` | `Session` | profile/password/language ของผู้ใช้ปัจจุบัน; `GET` คืน `preferredLanguage`; `PATCH` รองรับ `action=update_profile`, `action=change_password`, `action=update_language` |
 
 ## Onboarding / Store Switching
 

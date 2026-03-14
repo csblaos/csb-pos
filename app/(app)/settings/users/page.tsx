@@ -8,6 +8,7 @@ import { ensureMainBranchExists } from "@/lib/branches/access";
 import { getSession } from "@/lib/auth/session";
 import { getUserSystemRole } from "@/lib/auth/system-admin";
 import { queryMany } from "@/lib/db/query";
+import type { AppLanguage } from "@/lib/i18n/types";
 import { listStoreBranchesFromPostgres } from "@/lib/platform/postgres-auth-rbac";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 import { getGlobalSessionPolicy } from "@/lib/system-config/policy";
@@ -42,11 +43,13 @@ function UsersManagementFallback() {
 
 async function UsersManagementContent({
   storeId,
+  language,
   canCreate,
   canUpdate,
   canLinkExisting,
 }: {
   storeId: string;
+  language: AppLanguage;
   canCreate: boolean;
   canUpdate: boolean;
   canLinkExisting: boolean;
@@ -122,6 +125,7 @@ async function UsersManagementContent({
 
   return (
     <UsersManagement
+      language={language}
       members={members}
       roles={roleOptions}
       branches={branches}
@@ -194,6 +198,7 @@ export default async function SettingsUsersPage() {
       <Suspense fallback={<UsersManagementFallback />}>
         <UsersManagementContent
           storeId={session.activeStoreId}
+          language={session.language}
           canCreate={canCreate}
           canUpdate={canUpdate}
           canLinkExisting={canLinkExisting}

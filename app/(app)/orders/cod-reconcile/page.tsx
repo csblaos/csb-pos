@@ -1,4 +1,3 @@
-import Link from "next/link";
 import dynamic from "next/dynamic";
 import { redirect } from "next/navigation";
 
@@ -43,9 +42,6 @@ export default async function OrdersCodReconcilePage() {
       <section className="space-y-2">
         <h1 className="text-xl font-semibold">COD Reconcile</h1>
         <p className="text-sm text-red-600">คุณไม่มีสิทธิ์เข้าถึงหน้านี้</p>
-        <Link href="/orders" className="text-sm font-medium text-blue-700 hover:underline">
-          กลับไปหน้ารายการขาย
-        </Link>
       </section>
     );
   }
@@ -60,11 +56,6 @@ export default async function OrdersCodReconcilePage() {
       </header>
 
       <OrdersCodReconcile />
-
-      <Link href="/orders" className="text-sm font-medium text-blue-700 hover:underline">
-        กลับไปหน้ารายการขาย
-      </Link>
     </section>
   );
 }
-

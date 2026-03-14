@@ -4,10 +4,16 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
-import { Bell, Maximize2, Minimize2, RefreshCw } from "lucide-react";
+import { Bell, LayoutGrid, Maximize2, Minimize2, RefreshCw } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { MenuBackButton } from "@/components/ui/menu-back-button";
+import { SlideUpSheet } from "@/components/ui/slide-up-sheet";
 import { authFetch } from "@/lib/auth/client-token";
+import { getAppLanguageLocale } from "@/lib/i18n/config";
+import { createTranslator, formatNumberByLanguage } from "@/lib/i18n/translate";
+import type { AppLanguage } from "@/lib/i18n/types";
+import { clearNewOrderDraftState, hasNewOrderDraftFlag } from "@/lib/orders/new-order-draft";
 
 type AppTopNavProps = {
   activeStoreName: string;
@@ -15,6 +21,7 @@ type AppTopNavProps = {
   activeBranchName: string | null;
   shellTitle: string;
   canViewNotifications: boolean;
+  language: AppLanguage;
 };
 
 const navRoots = [
@@ -99,7 +106,7 @@ function getStoreInitial(storeName: string) {
   return normalizedName.slice(0, 1).toUpperCase();
 }
 
-function formatShortDateTime(value: string | null): string {
+function formatShortDateTime(value: string | null, language: AppLanguage): string {
   if (!value) {
     return "-";
   }
@@ -109,7 +116,7 @@ function formatShortDateTime(value: string | null): string {
     return "-";
   }
 
-  return parsed.toLocaleString("th-TH", {
+  return parsed.toLocaleString(getAppLanguageLocale(language), {
     day: "numeric",
     month: "short",
     hour: "2-digit",
@@ -123,6 +130,7 @@ export function AppTopNav({
   activeBranchName,
   shellTitle,
   canViewNotifications,
+  language,
 }: AppTopNavProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -139,6 +147,9 @@ export function AppTopNav({
   const [notificationError, setNotificationError] = useState<string | null>(null);
   const [markingReadId, setMarkingReadId] = useState<string | null>(null);
   const [isClientReady, setIsClientReady] = useState(false);
+  const [isQuickNavOpen, setIsQuickNavOpen] = useState(false);
+  const [pendingQuickNavHref, setPendingQuickNavHref] = useState<string | null>(null);
+  const t = useMemo(() => createTranslator(language), [language]);
   const notificationBoxRef = useRef<HTMLDivElement | null>(null);
   const notificationPanelRef = useRef<HTMLDivElement | null>(null);
 
@@ -168,8 +179,19 @@ export function AppTopNav({
     return undefined;
   }, [pathname]);
   const backButtonLabel = pathname.startsWith("/orders/new")
-    ? "กลับรายการออเดอร์"
-    : "ย้อนกลับ";
+    ? t("topNav.backToOrders")
+    : t("topNav.back");
+  const isOrderCreatePath = pathname === "/orders/new" || pathname.startsWith("/orders/new/");
+  const quickNavItems = useMemo(
+    () => [
+      { href: "/orders", label: t("topNav.quick.orders") },
+      { href: "/stock", label: t("topNav.quick.stock") },
+      { href: "/products", label: t("topNav.quick.products") },
+      { href: "/reports", label: t("topNav.quick.reports") },
+      { href: "/settings", label: t("topNav.quick.settings") },
+    ],
+    [t],
+  );
 
   useEffect(() => {
     if (!pathname.startsWith("/settings/superadmin/")) {
@@ -270,7 +292,7 @@ export function AppTopNav({
           }
 
           if (!silent) {
-            setNotificationError(data?.message ?? "โหลดการแจ้งเตือนไม่สำเร็จ");
+            setNotificationError(data?.message ?? t("topNav.notification.loadFailed"));
           }
           return;
         }
@@ -279,7 +301,7 @@ export function AppTopNav({
         setNotificationSummary(data.summary ?? emptyNotificationSummary);
       } catch {
         if (!silent) {
-          setNotificationError("เชื่อมต่อไม่สำเร็จ");
+          setNotificationError(t("topNav.notification.connectFailed"));
         }
       } finally {
         if (!silent) {
@@ -287,7 +309,7 @@ export function AppTopNav({
         }
       }
     },
-    [isSmallViewport, showNotificationButton],
+    [isSmallViewport, showNotificationButton, t],
   );
 
   const markNotificationRead = useCallback(async (notificationId: string) => {
@@ -375,6 +397,11 @@ export function AppTopNav({
     setIsNotificationOpen(false);
   }, [pathname]);
 
+  useEffect(() => {
+    setIsQuickNavOpen(false);
+    setPendingQuickNavHref(null);
+  }, [pathname]);
+
   const toggleFullscreen = async () => {
     const fullscreenDocument = document as FullscreenDocument;
     const rootElement = document.documentElement as FullscreenElement;
@@ -402,9 +429,13 @@ export function AppTopNav({
       <div className="border-b border-slate-100 px-3 py-2.5">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-xs font-semibold text-slate-900">งานแจ้งเตือนล่าสุด</p>
+            <p className="text-xs font-semibold text-slate-900">
+              {t("topNav.notification.latest")}
+            </p>
             <p className="text-[11px] text-slate-500">
-              ยังไม่อ่าน {notificationSummary.unreadCount.toLocaleString("th-TH")} รายการ
+              {t("topNav.notification.unreadCount", {
+                count: formatNumberByLanguage(language, notificationSummary.unreadCount),
+              })}
             </p>
           </div>
           <div className="flex items-center gap-1">
@@ -415,8 +446,8 @@ export function AppTopNav({
                 void loadNotifications();
               }}
               disabled={isNotificationLoading}
-              title="รีเฟรช"
-              aria-label="รีเฟรช"
+              title={t("topNav.notification.refresh")}
+              aria-label={t("topNav.notification.refresh")}
             >
               <RefreshCw
                 className={`h-3.5 w-3.5 ${isNotificationLoading ? "animate-spin" : ""}`}
@@ -435,7 +466,7 @@ export function AppTopNav({
           </div>
         ) : null}
         {!notificationError && notifications.length === 0 ? (
-          <p className="py-5 text-center text-xs text-slate-500">ยังไม่มีรายการแจ้งเตือน</p>
+          <p className="py-5 text-center text-xs text-slate-500">{t("topNav.notification.noItems")}</p>
         ) : (
           <ul className="space-y-2">
             {notifications.map((item) => {
@@ -455,7 +486,7 @@ export function AppTopNav({
                       <p className="mt-1 truncate text-[10px] text-slate-500">
                         {poNumber ? `PO ${poNumber}` : "PO -"}
                         {supplierName ? ` · ${supplierName}` : ""}
-                        {item.dueDate ? ` · due ${formatShortDateTime(item.dueDate)}` : ""}
+                        {item.dueDate ? ` · due ${formatShortDateTime(item.dueDate, language)}` : ""}
                       </p>
                     </div>
                     {item.dueStatus ? (
@@ -466,14 +497,18 @@ export function AppTopNav({
                             : "bg-amber-100 text-amber-700"
                         }`}
                       >
-                        {item.dueStatus === "OVERDUE" ? "เกินกำหนด" : "ใกล้ครบกำหนด"}
+                        {item.dueStatus === "OVERDUE"
+                          ? t("topNav.notification.overdue")
+                          : t("topNav.notification.dueSoon")}
                       </span>
                     ) : null}
                   </div>
 
                   <div className="mt-2 flex items-center justify-between gap-2">
                     <p className="text-[10px] text-slate-500">
-                      ตรวจล่าสุด {formatShortDateTime(item.lastDetectedAt)}
+                      {t("topNav.notification.lastChecked", {
+                        value: formatShortDateTime(item.lastDetectedAt, language),
+                      })}
                     </p>
                     <div className="flex items-center gap-1.5">
                       {item.status === "UNREAD" ? (
@@ -485,7 +520,7 @@ export function AppTopNav({
                           }}
                           disabled={markingReadId === item.id}
                         >
-                          อ่านแล้ว
+                          {t("topNav.notification.markRead")}
                         </button>
                       ) : null}
                       <Link
@@ -493,7 +528,7 @@ export function AppTopNav({
                         className="rounded-full bg-slate-900 px-2 py-1 text-[10px] font-medium text-white transition-colors hover:bg-slate-800"
                         onClick={() => setIsNotificationOpen(false)}
                       >
-                        เปิดงาน AP
+                        {t("topNav.notification.openApWork")}
                       </Link>
                     </div>
                   </div>
@@ -510,11 +545,31 @@ export function AppTopNav({
           className="inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
           onClick={() => setIsNotificationOpen(false)}
         >
-          เปิด Notification Center
+          {t("topNav.notification.openCenter")}
         </Link>
       </div>
     </>
     );
+  };
+
+  const navigateFromQuickNav = (href: string) => {
+    if (isOrderCreatePath && hasNewOrderDraftFlag()) {
+      setPendingQuickNavHref(href);
+      setIsQuickNavOpen(false);
+      return;
+    }
+    setIsQuickNavOpen(false);
+    router.push(href);
+  };
+
+  const confirmNavigateFromQuickNav = () => {
+    if (!pendingQuickNavHref) {
+      return;
+    }
+    clearNewOrderDraftState();
+    const href = pendingQuickNavHref;
+    setPendingQuickNavHref(null);
+    router.push(href);
   };
 
   const mobileNotificationPopover =
@@ -547,7 +602,7 @@ export function AppTopNav({
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={activeStoreLogoUrl}
-                  alt={`โลโก้ร้าน ${activeStoreName}`}
+                  alt={`Store logo ${activeStoreName}`}
                   className="h-full w-full object-cover"
                 />
               ) : (
@@ -572,20 +627,32 @@ export function AppTopNav({
         {showStoreSwitchButton ? (
           <Link
             href="/settings/stores"
-            title="เปลี่ยนร้าน"
-            aria-label="เปลี่ยนร้าน"
+            title={t("topNav.changeStore")}
+            aria-label={t("topNav.changeStore")}
             className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 active:scale-[0.98] xl:px-3"
           >
             <StoreSwitchIcon className="h-3.5 w-3.5" />
-            <span className="hidden xl:inline">เปลี่ยนร้าน</span>
+            <span className="hidden xl:inline">{t("topNav.changeStore")}</span>
           </Link>
+        ) : null}
+        {isOrderCreatePath ? (
+          <button
+            type="button"
+            title={t("topNav.menu")}
+            aria-label={t("topNav.menu")}
+            onClick={() => setIsQuickNavOpen(true)}
+            className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 active:scale-[0.98] md:h-9"
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+            <span>{t("topNav.menu")}</span>
+          </button>
         ) : null}
         {showNotificationButton ? (
           <div ref={notificationBoxRef} className="relative">
             <button
               type="button"
-              title="การแจ้งเตือน"
-              aria-label="การแจ้งเตือน"
+              title={t("topNav.notifications")}
+              aria-label={t("topNav.notifications")}
               aria-expanded={isNotificationOpen}
               onClick={() => {
                 setIsNotificationOpen((current) => {
@@ -603,7 +670,7 @@ export function AppTopNav({
                 <span className="absolute -right-1 -top-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-semibold leading-4 text-white">
                   {notificationSummary.unreadCount > 99
                     ? "99+"
-                    : notificationSummary.unreadCount.toLocaleString("th-TH")}
+                    : formatNumberByLanguage(language, notificationSummary.unreadCount)}
                 </span>
               ) : null}
             </button>
@@ -622,8 +689,8 @@ export function AppTopNav({
           <button
             type="button"
             onClick={toggleFullscreen}
-            title={isFullscreen ? "ออกจากโหมดเต็มจอ" : "เข้าโหมดเต็มจอ"}
-            aria-label={isFullscreen ? "ออกจากโหมดเต็มจอ" : "เข้าโหมดเต็มจอ"}
+            title={isFullscreen ? t("topNav.exitFullscreen") : t("topNav.enterFullscreen")}
+            aria-label={isFullscreen ? t("topNav.exitFullscreen") : t("topNav.enterFullscreen")}
             className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-sm transition-colors hover:bg-slate-50 active:scale-[0.98] md:h-9 md:w-9"
           >
             {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
@@ -631,6 +698,79 @@ export function AppTopNav({
         ) : null}
       </div>
       {mobileNotificationPopover}
+      <SlideUpSheet
+        isOpen={isQuickNavOpen}
+        onClose={() => setIsQuickNavOpen(false)}
+        title={t("topNav.goToOtherMenu")}
+        panelMaxWidthClass="min-[1200px]:max-w-md"
+        footer={
+          <Button
+            type="button"
+            variant="outline"
+            className="h-10 rounded-xl"
+            onClick={() => setIsQuickNavOpen(false)}
+          >
+            {t("common.close")}
+          </Button>
+        }
+      >
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {quickNavItems.map((item) => (
+            <button
+              key={item.href}
+              type="button"
+              onClick={() => navigateFromQuickNav(item.href)}
+              className="flex min-h-14 items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-3 text-left text-sm font-medium text-slate-800 transition hover:bg-slate-50"
+            >
+              <span>{item.label}</span>
+              <span className="text-xs text-slate-400">{t("topNav.goToPage")}</span>
+            </button>
+          ))}
+        </div>
+      </SlideUpSheet>
+      {isClientReady && pendingQuickNavHref
+        ? createPortal(
+            <div
+              className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/40 px-4"
+              onClick={(event) => {
+                if (event.target === event.currentTarget) {
+                  setPendingQuickNavHref(null);
+                }
+              }}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="leave-order-quick-nav-dialog-title"
+                className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-4 shadow-xl"
+              >
+                <h3
+                  id="leave-order-quick-nav-dialog-title"
+                  className="text-sm font-semibold text-slate-900"
+                >
+                  {t("topNav.leaveCreateOrderTitle")}
+                </h3>
+                <p className="mt-1 text-xs text-slate-600">
+                  {t("topNav.leaveCreateOrderDescription")}
+                </p>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9"
+                    onClick={() => setPendingQuickNavHref(null)}
+                  >
+                    {t("topNav.stayHere")}
+                  </Button>
+                  <Button type="button" className="h-9" onClick={confirmNavigateFromQuickNav}>
+                    {t("topNav.leaveToMenu")}
+                  </Button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

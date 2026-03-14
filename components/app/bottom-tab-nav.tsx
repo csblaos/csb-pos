@@ -4,11 +4,14 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { getStorefrontTabs } from "@/components/storefront/nav/registry";
+import { createTranslator } from "@/lib/i18n/translate";
+import type { AppLanguage } from "@/lib/i18n/types";
 import { type StoreType } from "@/lib/storefront/types";
 
 type BottomTabNavProps = {
   permissionKeys: string[];
   storeType?: StoreType | null;
+  language: AppLanguage;
 };
 
 const hasPermission = (permissionKeys: string[], key: string) =>
@@ -22,16 +25,16 @@ const getActiveTabHref = (pathname: string, hrefs: string[]) => {
   return sortedHrefs.find((href) => isPathInTab(pathname, href)) ?? null;
 };
 
-const getCompactLabel = (label: string, href: string) => {
+const getCompactLabelKey = (labelKey: string, href: string) => {
   if (href === "/orders") {
-    return "ออเดอร์";
+    return "nav.ordersCompact";
   }
 
   if (href === "/dashboard") {
-    return "หน้าหลัก";
+    return "nav.homeCompact";
   }
 
-  return label;
+  return labelKey;
 };
 
 const getGridColumnsClass = (tabCount: number) => {
@@ -56,12 +59,13 @@ const getGridColumnsClass = (tabCount: number) => {
 
 const HIDE_NAV_PATH_PREFIXES = ["/orders/new"];
 
-export function BottomTabNav({ permissionKeys, storeType }: BottomTabNavProps) {
+export function BottomTabNav({ permissionKeys, storeType, language }: BottomTabNavProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [optimisticPath, setOptimisticPath] = useState<string | null>(null);
   const [, startTransition] = useTransition();
   const tabs = getStorefrontTabs(storeType);
+  const t = useMemo(() => createTranslator(language), [language]);
   const visibleTabs = tabs.filter((tab) => hasPermission(permissionKeys, tab.permission));
   const currentPath = optimisticPath ?? pathname;
   const activeTabHref = useMemo(
@@ -127,7 +131,7 @@ export function BottomTabNav({ permissionKeys, storeType }: BottomTabNavProps) {
 
   return (
     <nav
-      aria-label="เมนูหลัก"
+      aria-label={t("topNav.menu")}
       className="pointer-events-none fixed bottom-0 left-0 right-0 z-20 w-full bg-white min-[1200px]:left-1/2 min-[1200px]:right-auto min-[1200px]:max-w-[var(--app-shell-max-width-desktop)] min-[1200px]:-translate-x-1/2"
       style={{
         paddingBottom: "env(safe-area-inset-bottom)",
@@ -169,8 +173,8 @@ export function BottomTabNav({ permissionKeys, storeType }: BottomTabNavProps) {
                       isActive ? "font-semibold text-slate-900" : "font-medium text-slate-500"
                     }`}
                   >
-                    <span className="sm:hidden">{getCompactLabel(tab.label, tab.href)}</span>
-                    <span className="hidden sm:inline">{tab.label}</span>
+                    <span className="sm:hidden">{t(getCompactLabelKey(tab.labelKey, tab.href))}</span>
+                    <span className="hidden sm:inline">{t(tab.labelKey)}</span>
                   </span>
                 </button>
               </li>

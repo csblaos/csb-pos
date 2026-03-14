@@ -6,12 +6,14 @@ import {
   clearSessionCookie,
   deleteSessionById,
 } from "@/lib/auth/session";
+import { resolveAppLanguage } from "@/lib/i18n/config";
 import {
   findActiveMembershipByStoreFromPostgres,
   findPrimaryMembershipFromPostgres,
   getUserMembershipFlagsFromPostgres,
   listActiveMembershipsFromPostgres,
 } from "@/lib/platform/postgres-auth-rbac";
+import { queryOne } from "@/lib/db/query";
 
 type SessionUser = {
   id: string;
@@ -32,6 +34,22 @@ export type UserMembershipFlags = {
   hasInvitedMembership: boolean;
   hasSuspendedMembership: boolean;
 };
+
+async function findPreferredLanguage(userId: string) {
+  const user = await queryOne<{ preferredLanguage: string | null }>(
+    `
+      select preferred_language as "preferredLanguage"
+      from users
+      where id = :userId
+      limit 1
+    `,
+    {
+      replacements: { userId },
+    },
+  );
+
+  return resolveAppLanguage(user?.preferredLanguage);
+}
 
 async function findPrimaryMembership(userId: string) {
   const postgresMembership = await findPrimaryMembershipFromPostgres(userId);
@@ -103,10 +121,13 @@ export async function buildSessionForUser(
     activeBranchCode = targetBranch?.code ?? null;
   }
 
+  const language = await findPreferredLanguage(user.id);
+
   return {
     userId: user.id,
     email: user.email,
     displayName: user.name,
+    language,
     hasStoreMembership: Boolean(membership),
     activeStoreId: membership?.storeId ?? null,
     activeStoreName: membership?.storeName ?? null,

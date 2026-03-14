@@ -21,6 +21,8 @@ import {
   StockTabToolbar,
 } from "@/components/app/stock-tab-feedback";
 import { authFetch } from "@/lib/auth/client-token";
+import { createTranslator, formatNumberByLanguage } from "@/lib/i18n/translate";
+import type { AppLanguage } from "@/lib/i18n/types";
 import type {
   InventoryMovementView,
   StockProductOption,
@@ -28,6 +30,7 @@ import type {
 import type { ProductListItem } from "@/lib/products/service";
 
 type StockRecordingFormProps = {
+  language: AppLanguage;
   initialProducts: StockProductOption[];
   canCreate: boolean;
   canAdjust: boolean;
@@ -39,12 +42,6 @@ type AdjustMode = "INCREASE" | "DECREASE";
 const RECORDING_MOVEMENT_QUERY_KEY = "recordingType";
 const RECORDING_PRODUCT_QUERY_KEY = "recordingProductId";
 
-const movementLabel: Record<MovementType, string> = {
-  IN: "รับเข้า",
-  ADJUST: "ปรับสต็อก",
-  RETURN: "รับคืน",
-};
-
 const movementBadgeClass: Record<InventoryMovementView["type"], string> = {
   IN: "bg-emerald-100 text-emerald-700",
   OUT: "bg-rose-100 text-rose-700",
@@ -52,15 +49,6 @@ const movementBadgeClass: Record<InventoryMovementView["type"], string> = {
   RELEASE: "bg-slate-200 text-slate-700",
   ADJUST: "bg-blue-100 text-blue-700",
   RETURN: "bg-purple-100 text-purple-700",
-};
-
-const movementTypeLabelMap: Record<InventoryMovementView["type"], string> = {
-  IN: "รับเข้า",
-  OUT: "ตัดออก",
-  RESERVE: "จอง",
-  RELEASE: "ยกเลิกจอง",
-  ADJUST: "ปรับสต็อก",
-  RETURN: "รับคืน",
 };
 
 function parseMovementTypeQuery(value: string | null): MovementType | null {
@@ -71,11 +59,13 @@ function parseMovementTypeQuery(value: string | null): MovementType | null {
 }
 
 export function StockRecordingForm({
+  language,
   initialProducts,
   canCreate,
   canAdjust,
   canInbound,
 }: StockRecordingFormProps) {
+  const t = useMemo(() => createTranslator(language), [language]);
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -103,6 +93,25 @@ export function StockRecordingForm({
     }
     return options;
   }, [canAdjust, canInbound]);
+  const movementLabels = useMemo<Record<MovementType, string>>(
+    () => ({
+      IN: t("stock.history.type.in"),
+      ADJUST: t("stock.history.type.adjust"),
+      RETURN: t("stock.history.type.return"),
+    }),
+    [t],
+  );
+  const movementTypeLabels = useMemo<Record<InventoryMovementView["type"], string>>(
+    () => ({
+      IN: t("stock.history.type.in"),
+      OUT: t("stock.history.type.out"),
+      RESERVE: t("stock.history.type.reserve"),
+      RELEASE: t("stock.history.type.release"),
+      ADJUST: t("stock.history.type.adjust"),
+      RETURN: t("stock.history.type.return"),
+    }),
+    [t],
+  );
 
   const [productId, setProductId] = useState<string>(productIdFromQuery);
   const [movementType, setMovementType] = useState<MovementType>(() => {
@@ -342,12 +351,12 @@ export function StockRecordingForm({
           setShowSearchDropdown(true);
         }
       } catch {
-        toast.error("ค้นหาสินค้าไม่สำเร็จ");
+        toast.error(t("stock.recording.searchProductsFailed"));
       } finally {
         setIsSearching(false);
       }
     },
-    [],
+    [t],
   );
 
   useEffect(() => {
@@ -385,12 +394,12 @@ export function StockRecordingForm({
         | null;
 
       if (!res.ok) {
-        setDataError(data?.message ?? "โหลดข้อมูลแท็บบันทึกสต็อกไม่สำเร็จ");
+        setDataError(data?.message ?? t("stock.recording.loadTabFailed"));
         return;
       }
 
       if (!data?.ok || !Array.isArray(data.products)) {
-        setDataError("รูปแบบข้อมูลสินค้าไม่ถูกต้อง");
+        setDataError(t("stock.recording.invalidProductData"));
         return;
       }
 
@@ -398,11 +407,11 @@ export function StockRecordingForm({
       setDataError(null);
       setLastUpdatedAt(new Date().toISOString());
     } catch {
-      setDataError("เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่");
+      setDataError(t("stock.recording.connectionFailed"));
     } finally {
       setIsRefreshingData(false);
     }
-  }, []);
+  }, [t]);
 
   const quickPresets = useMemo(() => {
     const presets: {
@@ -416,31 +425,31 @@ export function StockRecordingForm({
     if (canInbound) {
       presets.push({
         id: "inbound",
-        label: "รับเข้า",
+        label: t("stock.recording.preset.inbound"),
         movementType: "IN",
-        noteTemplate: "รับเข้าเพิ่มเติม",
+        noteTemplate: t("stock.recording.preset.inboundNote"),
       });
     }
 
     if (canAdjust) {
       presets.push({
         id: "adjust",
-        label: "ปรับยอด",
+        label: t("stock.recording.preset.adjust"),
         movementType: "ADJUST",
         adjustMode: "INCREASE",
-        noteTemplate: "ปรับยอดจากการตรวจนับ",
+        noteTemplate: t("stock.recording.preset.adjustNote"),
       });
       presets.push({
         id: "waste",
-        label: "ของเสีย",
+        label: t("stock.recording.preset.waste"),
         movementType: "ADJUST",
         adjustMode: "DECREASE",
-        noteTemplate: "ตัดของเสีย/หมดอายุ",
+        noteTemplate: t("stock.recording.preset.wasteNote"),
       });
     }
 
     return presets;
-  }, [canAdjust, canInbound]);
+  }, [canAdjust, canInbound, t]);
 
   const applyPreset = useCallback(
     (preset: {
@@ -545,16 +554,16 @@ export function StockRecordingForm({
 
         if (exactMatch) {
           selectProductFromSearch(exactMatch);
-          toast.success(`พบสินค้า: ${exactMatch.name}`);
+          toast.success(t("stock.recording.barcodeFound", { name: exactMatch.name }));
         } else if (products.length > 0) {
           selectProductFromSearch(products[0]);
-          toast.success(`พบสินค้า: ${products[0].name}`);
+          toast.success(t("stock.recording.barcodeFound", { name: products[0].name }));
         } else {
-          toast.error("ไม่พบสินค้าที่มีบาร์โค้ดนี้");
+          toast.error(t("stock.recording.barcodeNotFound"));
         }
       }
     } catch {
-      toast.error("ค้นหาสินค้าไม่สำเร็จ");
+      toast.error(t("stock.recording.barcodeSearchFailed"));
     } finally {
       setIsSearching(false);
     }
@@ -570,12 +579,12 @@ export function StockRecordingForm({
 
   const submitMovement = async () => {
     if (!canCreate) {
-      setErrorMessage("คุณไม่มีสิทธิ์บันทึกสต็อก");
+      setErrorMessage(t("stock.recording.noPermission"));
       return;
     }
 
     if (!productId) {
-      setErrorMessage("กรุณาเลือกสินค้า");
+      setErrorMessage(t("stock.recording.chooseProduct"));
       return;
     }
 
@@ -606,7 +615,7 @@ export function StockRecordingForm({
       | null;
 
     if (!response.ok) {
-      setErrorMessage(data?.message ?? "บันทึกสต็อกไม่สำเร็จ");
+      setErrorMessage(data?.message ?? t("stock.recording.saveFailed"));
       setLoading(false);
       return;
     }
@@ -630,7 +639,7 @@ export function StockRecordingForm({
           qtyBase: qtyBasePreview,
           note: note.trim() ? note.trim() : null,
           createdAt: now,
-          createdByName: "คุณ",
+          createdByName: t("stock.recording.currentUser"),
         },
         ...previous.slice(0, 4), // เก็บแค่ 5 รายการล่าสุด
       ]);
@@ -645,7 +654,7 @@ export function StockRecordingForm({
       }
     }
 
-    setSuccessMessage("✅ บันทึกรายการสต็อกเรียบร้อย");
+    setSuccessMessage(`✅ ${t("stock.recording.savedSuccess")}`);
     setNote("");
     setQty("1");
     setLastUpdatedAt(new Date().toISOString());
@@ -655,6 +664,7 @@ export function StockRecordingForm({
   return (
     <section className="space-y-4">
       <StockTabToolbar
+        language={language}
         isRefreshing={isRefreshingData}
         lastUpdatedAt={lastUpdatedAt}
         onRefresh={() => {
@@ -666,9 +676,9 @@ export function StockRecordingForm({
       <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">
         <div className="flex items-start justify-between gap-2">
           <div>
-            <p className="font-semibold text-blue-900">ฟอร์มนี้ใช้สำหรับงานปรับจำนวนสต็อก</p>
+            <p className="font-semibold text-blue-900">{t("stock.recording.guideTitle")}</p>
             <p className="mt-1 text-xs text-blue-800">
-              ไม่บันทึกต้นทุนสินค้าและไม่รองรับอัตราแลกเปลี่ยน (rate)
+              {t("stock.recording.guideDescription")}
             </p>
           </div>
           <button
@@ -677,24 +687,24 @@ export function StockRecordingForm({
             aria-expanded={isUsageGuideOpen}
             className="inline-flex shrink-0 items-center gap-1 rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-medium text-blue-800 transition hover:bg-blue-100"
           >
-            {isUsageGuideOpen ? "ซ่อนรายละเอียด" : "อ่านวิธีใช้"}
+            {isUsageGuideOpen ? t("stock.recording.guideHide") : t("stock.recording.guideShow")}
             {isUsageGuideOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
           </button>
         </div>
         {isUsageGuideOpen ? (
           <ul className="mt-2 space-y-1 text-xs text-blue-700">
-            <li>• <strong>ตรวจนับสต็อก</strong> (Stock Take) - ปรับยอดให้ตรงกับความเป็นจริง</li>
-            <li>• <strong>รับคืนจากลูกค้า</strong> - สินค้าที่รับคืนมาเพิ่มเข้าสต็อก</li>
-            <li>• <strong>โอนระหว่างสาขา</strong> - รับ/ส่งสินค้าระหว่างสาขา</li>
-            <li>• <strong>ของแถม/ตัวอย่าง</strong> - เจ้าของนำมาเพิ่มโดยไม่ผ่าน PO</li>
+            <li>• {t("stock.recording.guideItem.stockTake")}</li>
+            <li>• {t("stock.recording.guideItem.customerReturn")}</li>
+            <li>• {t("stock.recording.guideItem.branchTransfer")}</li>
+            <li>• {t("stock.recording.guideItem.sample")}</li>
           </ul>
         ) : null}
       </div>
 
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-        <p className="font-semibold">ถ้าคุณกำลังซื้อสินค้าเข้าใหม่ ให้ไปแท็บสั่งซื้อ (PO)</p>
+        <p className="font-semibold">{t("stock.recording.purchaseWarningTitle")}</p>
         <p className="mt-1">
-          PO จะเก็บต้นทุน, เจ้าหนี้, และ workflow ปิดเรท/ชำระปลายเดือนให้ครบกว่า Recording
+          {t("stock.recording.purchaseWarningDescription")}
         </p>
         <Button
           type="button"
@@ -702,13 +712,13 @@ export function StockRecordingForm({
           className="mt-2 h-8 border-amber-200 bg-white px-3 text-xs text-amber-800 hover:bg-amber-100"
           onClick={jumpToPurchaseTab}
         >
-          ไปแท็บสั่งซื้อ (PO)
+          {t("stock.recording.goToPurchase")}
         </Button>
       </div>
 
       {quickPresets.length > 0 ? (
         <article className="space-y-2 rounded-xl border bg-white p-3 shadow-sm">
-          <p className="text-xs font-medium text-slate-700">ทางลัดงานที่ใช้บ่อย</p>
+          <p className="text-xs font-medium text-slate-700">{t("stock.recording.frequentShortcuts")}</p>
           <div className="flex flex-wrap gap-2">
             {quickPresets.map((preset) => (
               <Button
@@ -727,9 +737,13 @@ export function StockRecordingForm({
       ) : null}
 
       {isRefreshingData && productItems.length === 0 ? (
-        <StockTabLoadingState message="กำลังอัปเดตข้อมูลแท็บบันทึกสต็อก..." />
+        <StockTabLoadingState
+          language={language}
+          message={t("stock.feedback.loadingData")}
+        />
       ) : dataError && productItems.length === 0 ? (
         <StockTabErrorState
+          language={language}
           message={dataError}
           onRetry={() => {
             void refreshRecordingData();
@@ -737,18 +751,19 @@ export function StockRecordingForm({
         />
       ) : productItems.length === 0 ? (
         <StockTabEmptyState
-          title="ยังไม่มีสินค้าให้เลือกบันทึกสต็อก"
-          description="ตรวจสอบสิทธิ์หรือกดรีเฟรชอีกครั้ง"
+          language={language}
+          title={t("stock.recording.selectProductTitle")}
+          description={t("stock.inventory.emptyDescription")}
         />
       ) : null}
 
       {productItems.length > 0 ? (
         <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
-        <h2 className="text-sm font-semibold">บันทึกการเคลื่อนไหวสต็อก</h2>
+        <h2 className="text-sm font-semibold">{t("stock.recording.entryFormTitle")}</h2>
 
         <div className="space-y-2">
           <label className="text-xs text-muted-foreground" htmlFor="stock-product-search">
-            สินค้า
+            {t("stock.recording.product")}
           </label>
 
           <div className="relative">
@@ -766,7 +781,7 @@ export function StockRecordingForm({
                       setShowSearchDropdown(true);
                     }
                   }}
-                  placeholder="ค้นหาสินค้า (SKU, ชื่อ, บาร์โค้ด)..."
+                  placeholder={t("stock.recording.searchPlaceholder")}
                   className="h-10 w-full rounded-md border pl-9 pr-9 text-sm outline-none ring-primary focus:ring-2"
                   disabled={loading}
                 />
@@ -807,7 +822,9 @@ export function StockRecordingForm({
               onClick={() => setShowProductPicker(true)}
               disabled={loading || productItems.length === 0}
             >
-              ดูสินค้าทั้งหมด ({productItems.length.toLocaleString("th-TH")})
+              {t("stock.recording.viewAllProducts", {
+                count: formatNumberByLanguage(language, productItems.length),
+              })}
             </Button>
 
             {showSearchDropdown && searchResults.length > 0 && (
@@ -827,7 +844,10 @@ export function StockRecordingForm({
                       )}
                       {product.stock && (
                         <p className="mt-1 text-xs text-blue-600">
-                          สต็อก: {product.stock.onHand.toLocaleString("th-TH")} {product.baseUnitCode}
+                          {t("stock.recording.remaining", {
+                            count: formatNumberByLanguage(language, product.stock.onHand),
+                            unit: product.baseUnitCode,
+                          })}
                         </p>
                       )}
                     </div>
@@ -846,22 +866,22 @@ export function StockRecordingForm({
 
           {selectedProduct && currentStock !== null && (
             <div className="rounded-lg bg-blue-50 p-3 text-sm">
-              <p className="font-medium text-blue-900">📦 สต็อกปัจจุบัน</p>
+              <p className="font-medium text-blue-900">📦 {t("stock.recording.currentStock")}</p>
               <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
                 <div>
-                  <p className="text-blue-700">คงเหลือ</p>
+                  <p className="text-blue-700">{t("stock.inventory.onHand")}</p>
                   <p className="font-semibold text-blue-900">
                     {currentStock.onHand.toLocaleString("th-TH")}
                   </p>
                 </div>
                 <div>
-                  <p className="text-blue-700">จอง</p>
+                  <p className="text-blue-700">{t("stock.inventory.reserved")}</p>
                   <p className="font-semibold text-blue-900">
                     {currentStock.reserved.toLocaleString("th-TH")}
                   </p>
                 </div>
                 <div>
-                  <p className="text-blue-700">พร้อมขาย</p>
+                  <p className="text-blue-700">{t("stock.inventory.available")}</p>
                   <p className={`font-semibold ${currentStock.available < 0 ? "text-red-600" : "text-blue-900"}`}>
                     {currentStock.available.toLocaleString("th-TH")}
                   </p>
@@ -870,7 +890,7 @@ export function StockRecordingForm({
 
               {qtyBasePreview !== null && (
                 <div className="mt-2 border-t border-blue-200 pt-2">
-                  <p className="text-blue-700">หลังทำรายการนี้</p>
+                  <p className="text-blue-700">{t("stock.recording.afterThisAction")}</p>
                   <p className={`font-semibold ${(currentStock.onHand + qtyBasePreview) < 0 ? "text-red-600" : "text-emerald-600"}`}>
                     {(currentStock.onHand + qtyBasePreview).toLocaleString("th-TH")} {selectedProduct.baseUnitCode}
                     {" "}
@@ -882,14 +902,14 @@ export function StockRecordingForm({
           )}
 
           {loadingStock && (
-            <p className="text-xs text-slate-500">กำลังโหลดข้อมูลสต็อก...</p>
+            <p className="text-xs text-slate-500">{t("stock.recording.loadingStock")}</p>
           )}
         </div>
 
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-2">
             <label className="text-xs text-muted-foreground" htmlFor="stock-type">
-              ประเภท
+              {t("stock.recording.type")}
             </label>
             <select
               id="stock-type"
@@ -900,7 +920,7 @@ export function StockRecordingForm({
             >
               {movementTypeOptions.map((type) => (
                 <option key={type} value={type}>
-                  {movementLabel[type]}
+                  {movementLabels[type]}
                 </option>
               ))}
             </select>
@@ -908,7 +928,7 @@ export function StockRecordingForm({
 
           <div className="space-y-2">
             <label className="text-xs text-muted-foreground" htmlFor="stock-unit">
-              หน่วย
+              {t("stock.recording.unit")}
             </label>
             <select
               id="stock-unit"
@@ -948,7 +968,7 @@ export function StockRecordingForm({
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-2">
             <label className="text-xs text-muted-foreground" htmlFor="stock-qty">
-              จำนวน
+              {t("stock.recording.quantity")}
             </label>
             <input
               id="stock-qty"
@@ -965,7 +985,7 @@ export function StockRecordingForm({
           {movementType === "ADJUST" ? (
             <div className="space-y-2">
               <label className="text-xs text-muted-foreground" htmlFor="stock-adjust-mode">
-                รูปแบบการปรับ
+                {t("stock.recording.adjustMode")}
               </label>
               <select
                 id="stock-adjust-mode"
@@ -974,8 +994,8 @@ export function StockRecordingForm({
                 className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
                 disabled={loading}
               >
-                <option value="INCREASE">ปรับเพิ่ม</option>
-                <option value="DECREASE">ปรับลด</option>
+                <option value="INCREASE">{t("stock.recording.adjustIncrease")}</option>
+                <option value="DECREASE">{t("stock.recording.adjustDecrease")}</option>
               </select>
             </div>
           ) : null}
@@ -983,7 +1003,7 @@ export function StockRecordingForm({
 
         <div className="space-y-2">
           <label className="text-xs text-muted-foreground" htmlFor="stock-note">
-            หมายเหตุ (ถ้ามี)
+            {t("stock.recording.note")}
           </label>
           <textarea
             id="stock-note"
@@ -991,14 +1011,17 @@ export function StockRecordingForm({
             onChange={(event) => setNote(event.target.value)}
             className="min-h-20 w-full rounded-md border px-3 py-2 text-sm outline-none ring-primary focus:ring-2"
             disabled={loading}
-            placeholder="เช่น รับเข้าจากซัพพลายเออร์, ปรับจากการตรวจนับ"
+            placeholder={t("stock.recording.notePlaceholder")}
           />
         </div>
 
         <p className="text-xs text-blue-700">
           {selectedUnit && qtyBasePreview !== null
-            ? `รายการนี้จะบันทึกเป็น ${qtyBasePreview.toLocaleString("th-TH")} ${selectedProduct?.baseUnitCode ?? "หน่วยหลัก"}`
-            : "กรุณากรอกจำนวนให้แปลงเป็นหน่วยหลักได้"}
+            ? t("stock.recording.baseQtyPreview", {
+                count: formatNumberByLanguage(language, qtyBasePreview),
+                unit: selectedProduct?.baseUnitCode ?? t("stock.inventory.baseUnit"),
+              })
+            : t("stock.recording.baseQtyPreviewInvalid")}
         </p>
 
         {successMessage && <p className="text-sm text-emerald-700">{successMessage}</p>}
@@ -1014,7 +1037,7 @@ export function StockRecordingForm({
                 void refreshRecordingData();
               }}
             >
-              ลองใหม่
+              {t("stock.feedback.retry")}
             </Button>
           </div>
         ) : null}
@@ -1025,7 +1048,7 @@ export function StockRecordingForm({
             onClick={submitMovement}
             disabled={loading || !canCreate || !productId}
           >
-            {loading ? "กำลังบันทึก..." : "บันทึกสต็อก"}
+            {loading ? t("stock.recording.saving") : t("stock.recording.save")}
           </Button>
         </div>
         </article>
@@ -1035,7 +1058,7 @@ export function StockRecordingForm({
       {recentMovements.length > 0 && (
         <article className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold">รายการที่บันทึกเมื่อสักครู่</h2>
+            <h2 className="text-sm font-semibold">{t("stock.recording.recentTitle")}</h2>
             <button
               type="button"
               onClick={() => {
@@ -1045,7 +1068,7 @@ export function StockRecordingForm({
               }}
               className="text-xs text-blue-600 hover:text-blue-700"
             >
-              ดูประวัติทั้งหมด →
+              {t("stock.recording.viewAllHistory")}
             </button>
           </div>
 
@@ -1058,20 +1081,25 @@ export function StockRecordingForm({
                     <p className="text-sm font-medium">{movement.productName}</p>
                   </div>
                   <span className={`rounded-full px-2 py-1 text-xs ${movementBadgeClass[movement.type]}`}>
-                    {movementTypeLabelMap[movement.type]}
+                    {movementTypeLabels[movement.type]}
                   </span>
                 </div>
 
                 <p className="mt-2 text-sm">
-                  จำนวนฐาน {movement.qtyBase.toLocaleString("th-TH")}
+                  {t("stock.recording.baseQty")} {movement.qtyBase.toLocaleString("th-TH")}
                 </p>
 
                 {movement.note && (
-                  <p className="mt-1 text-xs text-muted-foreground">หมายเหตุ: {movement.note}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("stock.recording.notePrefix")} {movement.note}
+                  </p>
                 )}
 
                 <p className="mt-1 text-xs text-muted-foreground">
-                  โดย {movement.createdByName ?? "-"} • {new Date(movement.createdAt).toLocaleString("th-TH")}
+                  {t("stock.recording.byUserAt", {
+                    user: movement.createdByName ?? "-",
+                    dateTime: new Date(movement.createdAt).toLocaleString("th-TH"),
+                  })}
                 </p>
               </div>
             ))}
@@ -1082,8 +1110,10 @@ export function StockRecordingForm({
       <SlideUpSheet
         isOpen={showProductPicker}
         onClose={() => setShowProductPicker(false)}
-        title="เลือกสินค้า"
-        description={`${productItems.length.toLocaleString("th-TH")} รายการในสาขานี้`}
+        title={t("stock.recording.selectProductTitle")}
+        description={t("stock.recording.selectProductDescription", {
+          count: formatNumberByLanguage(language, productItems.length),
+        })}
       >
         <div className="space-y-3">
           <input
@@ -1091,13 +1121,13 @@ export function StockRecordingForm({
             value={productPickerQuery}
             onChange={(event) => setProductPickerQuery(event.target.value)}
             className="h-10 w-full rounded-lg border px-3 text-sm outline-none ring-primary focus:ring-2"
-            placeholder="ค้นหาจากชื่อหรือ SKU"
+            placeholder={t("stock.recording.selectProductSearch")}
           />
 
           <div className="max-h-[56dvh] space-y-1 overflow-y-auto rounded-lg border border-slate-200 bg-white p-1">
             {filteredProductItems.length === 0 ? (
               <p className="px-3 py-6 text-center text-xs text-slate-500">
-                ไม่พบสินค้าที่ตรงกับคำค้นหา
+                {t("stock.recording.selectProductEmpty")}
               </p>
             ) : (
               filteredProductItems.map((item) => (
@@ -1114,7 +1144,10 @@ export function StockRecordingForm({
                   <p className="text-sm font-medium">{item.name}</p>
                   <p className="text-xs text-slate-500">{item.sku}</p>
                   <p className="text-xs text-slate-500">
-                    คงเหลือ {item.onHand.toLocaleString("th-TH")} {item.baseUnitCode}
+                    {t("stock.recording.remaining", {
+                      count: formatNumberByLanguage(language, item.onHand),
+                      unit: item.baseUnitCode,
+                    })}
                   </p>
                 </button>
               ))
@@ -1127,16 +1160,16 @@ export function StockRecordingForm({
       <SlideUpSheet
         isOpen={showScannerPermission}
         onClose={() => setShowScannerPermission(false)}
-        title="ขออนุญาตใช้กล้อง"
-        description="ระบบต้องใช้กล้องเพื่อสแกนบาร์โค้ดสินค้า"
+        title={t("stock.inventory.scannerPermissionTitle")}
+        description={t("stock.inventory.scannerPermissionDescription")}
       >
         <div className="space-y-3">
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-            <p className="font-medium text-slate-700">ทำไมต้องใช้กล้อง?</p>
+            <p className="font-medium text-slate-700">{t("stock.inventory.scannerWhy")}</p>
             <ul className="mt-2 list-disc space-y-1 pl-4">
-              <li>สแกนบาร์โค้ดได้เร็วขึ้น</li>
-              <li>ลดความผิดพลาดจากการพิมพ์</li>
-              <li>ใช้งานได้ทันทีในหน้านี้</li>
+              <li>{t("stock.inventory.scannerWhyFast")}</li>
+              <li>{t("stock.inventory.scannerWhyLessError")}</li>
+              <li>{t("stock.inventory.scannerWhyInline")}</li>
             </ul>
           </div>
 
@@ -1147,7 +1180,7 @@ export function StockRecordingForm({
               className="h-10 flex-1"
               onClick={() => setShowScannerPermission(false)}
             >
-              ยกเลิก
+              {t("common.cancel")}
             </Button>
             <Button
               type="button"
@@ -1159,7 +1192,7 @@ export function StockRecordingForm({
                 setShowScanner(true);
               }}
             >
-              อนุญาตและสแกน
+              {t("stock.inventory.allowAndScan")}
             </Button>
           </div>
         </div>
@@ -1169,8 +1202,8 @@ export function StockRecordingForm({
       <SlideUpSheet
         isOpen={showScanner}
         onClose={() => setShowScanner(false)}
-        title="สแกนบาร์โค้ด"
-        description="ส่องกล้องไปที่บาร์โค้ดสินค้า"
+        title={t("stock.inventory.scannerTitle")}
+        description={t("stock.inventory.scannerDescription")}
       >
         <div className="p-4">
           <BarcodeScannerPanel

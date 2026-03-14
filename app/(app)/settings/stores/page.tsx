@@ -6,12 +6,14 @@ import { StoresManagement } from "@/components/app/stores-management";
 import { getSession } from "@/lib/auth/session";
 import { listActiveMemberships } from "@/lib/auth/session-db";
 import { getUserSystemRole } from "@/lib/auth/system-admin";
+import { createTranslator } from "@/lib/i18n/translate";
 
 export default async function SettingsStoresPage() {
   const session = await getSession();
   if (!session) {
     redirect("/login");
   }
+  const t = createTranslator(session.language);
 
   const memberships = await listActiveMemberships(session.userId);
   if (memberships.length === 0) {
@@ -26,13 +28,12 @@ export default async function SettingsStoresPage() {
   return (
     <section className="space-y-5">
       <header className="space-y-1 px-1">
-        <h1 className="text-[28px] font-semibold tracking-tight text-slate-900">เลือกร้าน / เปลี่ยนสาขา</h1>
-        <p className="text-sm text-slate-500">
-          สลับร้านที่กำลังใช้งาน และแสดงเฉพาะสาขาของร้านที่เลือกอยู่เท่านั้น
-        </p>
+        <h1 className="text-[28px] font-semibold tracking-tight text-slate-900">{t("stores.page.title")}</h1>
+        <p className="text-sm text-slate-500">{t("stores.page.description")}</p>
       </header>
 
       <StoresManagement
+        language={session.language}
         memberships={memberships}
         activeStoreId={activeStoreId}
         activeBranchId={session.activeBranchId}
@@ -45,7 +46,7 @@ export default async function SettingsStoresPage() {
 
       {isSuperadmin ? (
         <div className="space-y-2">
-          <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">พื้นที่ผู้ดูแล</p>
+          <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{t("stores.page.adminArea")}</p>
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <Link
               href="/settings/superadmin"
@@ -56,10 +57,10 @@ export default async function SettingsStoresPage() {
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-medium text-slate-900">
-                  ไป Superadmin Center
+                  {t("stores.page.adminCenterTitle")}
                 </span>
                 <span className="mt-0.5 block truncate text-xs text-slate-500">
-                  จัดการร้าน/สาขาทั้งหมดในหน้าที่แยกจากผู้ใช้ทั่วไป
+                  {t("stores.page.adminCenterDescription")}
                 </span>
               </span>
               <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
@@ -69,7 +70,7 @@ export default async function SettingsStoresPage() {
       ) : null}
 
       <div className="space-y-2">
-        <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">นำทาง</p>
+        <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{t("stores.page.navigation")}</p>
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <Link
             href="/settings"
@@ -79,8 +80,8 @@ export default async function SettingsStoresPage() {
               <Settings2 className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-slate-900">กลับหน้าตั้งค่า</span>
-              <span className="mt-0.5 block truncate text-xs text-slate-500">กลับไปรายการตั้งค่าทั้งหมด</span>
+              <span className="block truncate text-sm font-medium text-slate-900">{t("stores.page.backSettingsTitle")}</span>
+              <span className="mt-0.5 block truncate text-xs text-slate-500">{t("stores.page.backSettingsDescription")}</span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
           </Link>

@@ -2,6 +2,24 @@
 
 ไฟล์นี้บันทึก "ทำไม" ของการออกแบบสำคัญ เพื่อให้ AI/คนทำงานต่อไม่เดาเอง
 
+## ADR-024: Multi-language ใช้ Key-based i18n และเก็บภาษาในผู้ใช้
+
+- Date: March 13, 2026
+- Status: Accepted
+- Decision:
+  - รองรับหลายภาษาด้วย key-based i18n สำหรับ `lo`, `th`, `en`
+  - เก็บ preference ภาษาไว้ที่ `users.preferred_language` และ hydrate เข้า session/app shell
+  - rollout แบบเป็น phase โดยเริ่มจาก `settings > language`, app shell, top nav, bottom nav ก่อน
+  - default language ของระบบตั้งเป็น `th` เพื่อคง behavior เดิมของผู้ใช้ปัจจุบันระหว่างเริ่ม rollout
+- Reason:
+  - การใช้ key-based i18n ทำให้แยก translation ออกจาก framework และลดภาระตอนย้าย transport/API ไป Express ในอนาคต
+  - การเก็บใน DB ระดับผู้ใช้ดีกว่า localStorage-only เพราะรองรับหลายอุปกรณ์และ session refresh ได้เสถียร
+  - การเริ่มจาก shell/navigation ก่อนลดความเสี่ยงของ rollout และไม่ต้องแปลทั้งระบบรวดเดียว
+- Consequence:
+  - ข้อความใหม่ควรถูกเพิ่มผ่าน translation keys ไม่ใช่ hardcoded string โดยตรง
+  - หน้า domain ใหญ่ เช่น dashboard/orders/stock/products/reports จะถูกแปลต่อเป็น phase ถัดไป
+  - session/account flow ต้อง rebuild session เมื่อผู้ใช้เปลี่ยนภาษา
+
 ## ADR-023: เตรียมย้ายไป Express โดยแยก RequestContext ออกจาก Service ก่อนย้าย Transport
 
 - Date: March 10, 2026

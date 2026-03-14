@@ -11,6 +11,8 @@ import {
 } from "@/lib/auth/session";
 import { buildSessionForUser } from "@/lib/auth/session-db";
 import { execute, queryOne } from "@/lib/db/query";
+import { resolveAppLanguage } from "@/lib/i18n/config";
+import { appLanguageValues } from "@/lib/i18n/types";
 import { readJsonRouteRequest } from "@/lib/http/route-handler";
 import { safeLogAuditEvent } from "@/server/services/audit.service";
 
@@ -25,9 +27,15 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(8).max(128),
 });
 
+const updateLanguageSchema = z.object({
+  action: z.literal("update_language"),
+  language: z.enum(appLanguageValues),
+});
+
 const patchAccountSchema = z.discriminatedUnion("action", [
   updateProfileSchema,
   changePasswordSchema,
+  updateLanguageSchema,
 ]);
 
 export async function GET() {
@@ -42,6 +50,7 @@ export async function GET() {
     email: string;
     mustChangePassword: boolean;
     passwordUpdatedAt: string | null;
+    preferredLanguage: string | null;
   }>(
     `
       select
@@ -49,7 +58,8 @@ export async function GET() {
         name,
         email,
         must_change_password as "mustChangePassword",
-        password_updated_at as "passwordUpdatedAt"
+        password_updated_at as "passwordUpdatedAt",
+        preferred_language as "preferredLanguage"
       from users
       where id = :userId
       limit 1
@@ -130,20 +140,24 @@ export async function PATCH(request: Request) {
     auditAction =
       payload.data.action === "update_profile"
         ? "account.profile.update"
-        : "account.password.change";
+        : payload.data.action === "update_language"
+          ? "account.language.update"
+          : "account.password.change";
 
     const user = await queryOne<{
       id: string;
       name: string;
       email: string;
       passwordHash: string;
+      preferredLanguage: string | null;
     }>(
       `
         select
           id,
           name,
           email,
-          password_hash as "passwordHash"
+          password_hash as "passwordHash",
+          preferred_language as "preferredLanguage"
         from users
         where id = :userId
         limit 1
@@ -263,6 +277,114 @@ export async function PATCH(request: Request) {
         user: {
           name: nextName,
           email: user.email,
+        },
+      });
+
+      if (sessionCookie) {
+        response.cookies.set(
+          sessionCookie.name,
+          sessionCookie.value,
+          sessionCookie.options,
+        );
+      }
+
+      return response;
+    }
+
+    if (payload.data.action === "update_language") {
+      const nextLanguage = resolveAppLanguage(payload.data.language);
+      const currentLanguage = resolveAppLanguage(user.preferredLanguage);
+
+      if (nextLanguage === currentLanguage) {
+        await safeLogAuditEvent({
+          scope: auditScope,
+          storeId: auditStoreId,
+          actorUserId: session.userId,
+          actorName: session.displayName,
+          actorRole: session.activeRoleName,
+          action: auditAction,
+          entityType: "user_account",
+          entityId: user.id,
+          metadata: {
+            noChange: true,
+            preferredLanguage: currentLanguage,
+          },
+          requestContext,
+        });
+
+        return NextResponse.json({
+          ok: true,
+          user: {
+            preferredLanguage: currentLanguage,
+          },
+        });
+      }
+
+      await execute(
+        `
+          update users
+          set preferred_language = :preferredLanguage
+          where id = :userId
+        `,
+        {
+          replacements: {
+            preferredLanguage: nextLanguage,
+            userId: user.id,
+          },
+        },
+      );
+
+      let sessionCookie: Awaited<ReturnType<typeof createSessionCookie>> | null = null;
+      let warning: string | null = null;
+
+      try {
+        const nextSession = await buildSessionForUser(
+          {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+          },
+          {
+            preferredStoreId: session.activeStoreId,
+            preferredBranchId: session.activeBranchId,
+          },
+        );
+        sessionCookie = await createSessionCookie(nextSession);
+      } catch (error) {
+        if (error instanceof SessionStoreUnavailableError) {
+          warning = "บันทึกภาษาแล้ว แต่ยังรีเฟรชเซสชันไม่สำเร็จ กรุณารีเฟรชหน้าอีกครั้ง";
+        } else {
+          throw error;
+        }
+      }
+
+      await safeLogAuditEvent({
+        scope: auditScope,
+        storeId: auditStoreId,
+        actorUserId: session.userId,
+        actorName: session.displayName,
+        actorRole: session.activeRoleName,
+        action: auditAction,
+        entityType: "user_account",
+        entityId: user.id,
+        metadata: {
+          sessionRefreshWarning: Boolean(warning),
+        },
+        before: {
+          preferredLanguage: currentLanguage,
+        },
+        after: {
+          preferredLanguage: nextLanguage,
+        },
+        requestContext,
+      });
+
+      const response = NextResponse.json({
+        ok: true,
+        warning,
+        token: sessionCookie?.value,
+        user: {
+          preferredLanguage: nextLanguage,
         },
       });
 

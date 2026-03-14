@@ -2,9 +2,13 @@
 
 import { Edit, FileText, Package, ShoppingCart } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
+
+import { createTranslator } from "@/lib/i18n/translate";
+import type { AppLanguage } from "@/lib/i18n/types";
 
 type StockTabsProps = {
+  language: AppLanguage;
   recordingTab: ReactNode;
   inventoryTab: ReactNode;
   historyTab: ReactNode;
@@ -12,18 +16,12 @@ type StockTabsProps = {
   initialTab?: string;
 };
 
-const tabs = [
-  { id: "inventory", label: "ดูสต็อก", labelMobile: "สต็อก", icon: Package },
-  { id: "purchase", label: "สั่งซื้อ", labelMobile: "PO", icon: ShoppingCart },
-  { id: "recording", label: "บันทึกสต็อก", labelMobile: "บันทึก", icon: Edit },
-  { id: "history", label: "ประวัติ", labelMobile: "ประวัติ", icon: FileText },
-] as const;
-
-type TabId = (typeof tabs)[number]["id"];
+type TabId = "inventory" | "purchase" | "recording" | "history";
 const isTabId = (value: string | null): value is TabId =>
   value === "recording" || value === "inventory" || value === "history" || value === "purchase";
 
 export function StockTabs({
+  language,
   recordingTab,
   inventoryTab,
   historyTab,
@@ -32,6 +30,37 @@ export function StockTabs({
 }: StockTabsProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const t = useMemo(() => createTranslator(language), [language]);
+  const tabs = useMemo(
+    () =>
+      [
+        {
+          id: "inventory",
+          label: t("stock.tabs.inventory"),
+          labelMobile: t("stock.tabs.inventoryShort"),
+          icon: Package,
+        },
+        {
+          id: "purchase",
+          label: t("stock.tabs.purchase"),
+          labelMobile: t("stock.tabs.purchaseShort"),
+          icon: ShoppingCart,
+        },
+        {
+          id: "recording",
+          label: t("stock.tabs.recording"),
+          labelMobile: t("stock.tabs.recordingShort"),
+          icon: Edit,
+        },
+        {
+          id: "history",
+          label: t("stock.tabs.history"),
+          labelMobile: t("stock.tabs.historyShort"),
+          icon: FileText,
+        },
+      ] as const,
+    [t],
+  );
   const tabFromQuery = searchParams.get("tab");
   const initialActiveTab: TabId = isTabId(tabFromQuery)
     ? tabFromQuery

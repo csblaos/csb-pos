@@ -17,6 +17,8 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth/session";
 import { listActiveMemberships } from "@/lib/auth/session-db";
 import { queryMany } from "@/lib/db/query";
+import { getAppLanguageLocale } from "@/lib/i18n/config";
+import { createTranslator } from "@/lib/i18n/translate";
 
 const toNumber = (value: unknown) => Number(value ?? 0);
 
@@ -25,6 +27,8 @@ export default async function SettingsSuperadminStoresPage() {
   if (!session) {
     redirect("/login");
   }
+  const t = createTranslator(session.language);
+  const locale = getAppLanguageLocale(session.language);
 
   const memberships = await listActiveMemberships(session.userId);
   if (memberships.length === 0) {
@@ -154,49 +158,45 @@ export default async function SettingsSuperadminStoresPage() {
     <section className="space-y-5">
       <header className="space-y-1 px-1">
         <h1 className="text-[28px] font-semibold tracking-tight text-slate-900">
-          Operations & Governance
+          {t("superadmin.stores.title")}
         </h1>
-        <p className="text-sm text-slate-500">
-          ศูนย์จัดการร้านและสาขาข้ามร้าน พร้อมสัญญาณแจ้งเตือนจุดที่ควรแก้ไขก่อน
-        </p>
+        <p className="text-sm text-slate-500">{t("superadmin.stores.description")}</p>
       </header>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs text-slate-500">ร้านทั้งหมด</p>
+          <p className="text-xs text-slate-500">{t("superadmin.stores.metric.totalStores")}</p>
           <p className="mt-1 text-2xl font-semibold text-slate-900">
-            {governanceRows.length.toLocaleString("th-TH")}
+            {governanceRows.length.toLocaleString(locale)}
           </p>
         </article>
         <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs text-slate-500">สาขาทั้งหมด</p>
+          <p className="text-xs text-slate-500">{t("superadmin.stores.metric.totalBranches")}</p>
           <p className="mt-1 text-2xl font-semibold text-slate-900">
-            {totalBranches.toLocaleString("th-TH")}
+            {totalBranches.toLocaleString(locale)}
           </p>
         </article>
         <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs text-slate-500">สมาชิก ACTIVE</p>
+          <p className="text-xs text-slate-500">{t("superadmin.stores.metric.activeMembers")}</p>
           <p className="mt-1 text-2xl font-semibold text-slate-900">
-            {totalActiveMembers.toLocaleString("th-TH")}
+            {totalActiveMembers.toLocaleString(locale)}
           </p>
         </article>
         <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-xs text-slate-500">ร้านที่ต้องตรวจสอบ</p>
+          <p className="text-xs text-slate-500">{t("superadmin.stores.metric.needsAttention")}</p>
           <p className="mt-1 text-2xl font-semibold text-slate-900">
-            {storesNeedAttention.toLocaleString("th-TH")}
+            {storesNeedAttention.toLocaleString(locale)}
           </p>
         </article>
       </div>
 
       <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 px-4 py-3">
-          <p className="text-sm font-semibold text-slate-900">Store Governance Board</p>
-          <p className="mt-0.5 text-xs text-slate-500">
-            เรียงร้านที่มีความเสี่ยงขึ้นก่อน เช่น ไม่มีสาขาหลัก ไม่มีสมาชิก ACTIVE หรือมี channel error
-          </p>
+          <p className="text-sm font-semibold text-slate-900">{t("superadmin.stores.board.title")}</p>
+          <p className="mt-0.5 text-xs text-slate-500">{t("superadmin.stores.board.description")}</p>
         </div>
         {governanceRows.length === 0 ? (
-          <p className="px-4 py-4 text-sm text-slate-500">ยังไม่มีร้านในความดูแล</p>
+          <p className="px-4 py-4 text-sm text-slate-500">{t("superadmin.stores.board.empty")}</p>
         ) : (
           <ul className="divide-y divide-slate-100">
             {governanceRows.map((row) => (
@@ -217,7 +217,9 @@ export default async function SettingsSuperadminStoresPage() {
                         : "border-emerald-200 bg-emerald-50 text-emerald-700"
                     }`}
                   >
-                    {row.needsAttention ? "ต้องตรวจสอบ" : "ปกติ"}
+                    {row.needsAttention
+                      ? t("superadmin.stores.board.attention")
+                      : t("superadmin.stores.board.normal")}
                   </span>
                 </div>
 
@@ -225,13 +227,17 @@ export default async function SettingsSuperadminStoresPage() {
                   <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                     <p className="inline-flex items-center gap-1 font-medium">
                       <AlertTriangle className="h-3.5 w-3.5" />
-                      ประเด็นที่พบ
+                      {t("superadmin.stores.board.issues")}
                     </p>
                     <p className="mt-1">
-                      {row.branchCount === 0 ? "ไม่มีสาขาในระบบ • " : ""}
-                      {row.active === 0 ? "ไม่มีสมาชิก ACTIVE • " : ""}
-                      {row.suspended > 0 ? `มีสมาชิก SUSPENDED ${row.suspended.toLocaleString("th-TH")} คน • ` : ""}
-                      {row.hasChannelError ? "พบปัญหาการเชื่อมต่อช่องทาง" : ""}
+                      {row.branchCount === 0 ? `${t("superadmin.stores.board.issue.noBranches")} • ` : ""}
+                      {row.active === 0 ? `${t("superadmin.stores.board.issue.noActiveMembers")} • ` : ""}
+                      {row.suspended > 0
+                        ? `${t("superadmin.stores.board.issue.suspended", {
+                            count: row.suspended.toLocaleString(locale),
+                          })} • `
+                        : ""}
+                      {row.hasChannelError ? t("superadmin.stores.board.issue.channelError") : ""}
                     </p>
                   </div>
                 ) : null}
@@ -243,7 +249,7 @@ export default async function SettingsSuperadminStoresPage() {
 
       <div className="space-y-2">
         <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-          เมนูจัดการ
+          {t("superadmin.stores.menuTitle")}
         </p>
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <Link
@@ -254,9 +260,11 @@ export default async function SettingsSuperadminStoresPage() {
               <Store className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-slate-900">ตั้งค่าร้าน</span>
+              <span className="block truncate text-sm font-medium text-slate-900">
+                {t("superadmin.stores.menu.storeConfig.title")}
+              </span>
               <span className="mt-0.5 block truncate text-xs text-slate-500">
-                สร้างร้านใหม่และจัดการข้อมูลระดับร้าน
+                {t("superadmin.stores.menu.storeConfig.description")}
               </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
@@ -270,9 +278,11 @@ export default async function SettingsSuperadminStoresPage() {
               <Building2 className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-slate-900">ตั้งค่าสาขา</span>
+              <span className="block truncate text-sm font-medium text-slate-900">
+                {t("superadmin.stores.menu.branchConfig.title")}
+              </span>
               <span className="mt-0.5 block truncate text-xs text-slate-500">
-                สร้างสาขาและกำหนดนโยบายแชร์ข้อมูลแต่ละสาขา
+                {t("superadmin.stores.menu.branchConfig.description")}
               </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
@@ -286,9 +296,11 @@ export default async function SettingsSuperadminStoresPage() {
               <Users className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-slate-900">จัดการผู้ใช้</span>
+              <span className="block truncate text-sm font-medium text-slate-900">
+                {t("superadmin.stores.menu.users.title")}
+              </span>
               <span className="mt-0.5 block truncate text-xs text-slate-500">
-                เลือกร้านและจัดการสมาชิกของแต่ละร้านจากหน้าเดียว
+                {t("superadmin.stores.menu.users.description")}
               </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
@@ -303,10 +315,10 @@ export default async function SettingsSuperadminStoresPage() {
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium text-slate-900">
-                Security & Compliance
+                {t("superadmin.stores.menu.security.title")}
               </span>
               <span className="mt-0.5 block truncate text-xs text-slate-500">
-                ตรวจความเสี่ยงด้านสิทธิ์และเหตุการณ์สำคัญ
+                {t("superadmin.stores.menu.security.description")}
               </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
@@ -316,7 +328,7 @@ export default async function SettingsSuperadminStoresPage() {
 
       <div className="space-y-2">
         <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-          วิเคราะห์และกำกับ
+          {t("superadmin.stores.analyticsTitle")}
         </p>
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <Link
@@ -327,9 +339,11 @@ export default async function SettingsSuperadminStoresPage() {
               <BarChart3 className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-slate-900">ภาพรวมข้ามร้าน</span>
+              <span className="block truncate text-sm font-medium text-slate-900">
+                {t("superadmin.stores.analytics.overview.title")}
+              </span>
               <span className="mt-0.5 block truncate text-xs text-slate-500">
-                สรุป KPI หลักของร้านทั้งหมดในหน้าเดียว
+                {t("superadmin.stores.analytics.overview.description")}
               </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
@@ -344,10 +358,10 @@ export default async function SettingsSuperadminStoresPage() {
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium text-slate-900">
-                การเชื่อมต่อช่องทาง
+                {t("superadmin.stores.analytics.integrations.title")}
               </span>
               <span className="mt-0.5 block truncate text-xs text-slate-500">
-                ตรวจสถานะ Facebook / WhatsApp ของทุกร้าน
+                {t("superadmin.stores.analytics.integrations.description")}
               </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
@@ -361,9 +375,11 @@ export default async function SettingsSuperadminStoresPage() {
               <ClipboardList className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-slate-900">Audit Log</span>
+              <span className="block truncate text-sm font-medium text-slate-900">
+                {t("superadmin.stores.analytics.audit.title")}
+              </span>
               <span className="mt-0.5 block truncate text-xs text-slate-500">
-                ไทม์ไลน์กิจกรรมล่าสุดของระบบที่คุณดูแล
+                {t("superadmin.stores.analytics.audit.description")}
               </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
@@ -377,9 +393,11 @@ export default async function SettingsSuperadminStoresPage() {
               <Gauge className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-slate-900">Quota & Policy</span>
+              <span className="block truncate text-sm font-medium text-slate-900">
+                {t("superadmin.stores.analytics.quotas.title")}
+              </span>
               <span className="mt-0.5 block truncate text-xs text-slate-500">
-                ตรวจสิทธิ์และโควตาสร้างร้าน/สาขาแยกร้าน
+                {t("superadmin.stores.analytics.quotas.description")}
               </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
@@ -393,9 +411,11 @@ export default async function SettingsSuperadminStoresPage() {
               <Settings2 className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-slate-900">Global Configuration</span>
+              <span className="block truncate text-sm font-medium text-slate-900">
+                {t("superadmin.stores.analytics.globalConfig.title")}
+              </span>
               <span className="mt-0.5 block truncate text-xs text-slate-500">
-                ตรวจและกำกับค่ากลางของทั้งระบบ
+                {t("superadmin.stores.analytics.globalConfig.description")}
               </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
@@ -405,7 +425,7 @@ export default async function SettingsSuperadminStoresPage() {
 
       <div className="space-y-2">
         <p className="px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-          นำทาง
+          {t("superadmin.stores.linksTitle")}
         </p>
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <Link
@@ -417,10 +437,10 @@ export default async function SettingsSuperadminStoresPage() {
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium text-slate-900">
-                หน้าเลือกร้าน / เปลี่ยนสาขา
+                {t("superadmin.stores.links.storeSwitcher.title")}
               </span>
               <span className="mt-0.5 block truncate text-xs text-slate-500">
-                กลับไปหน้าปฏิบัติงานประจำวันของผู้ใช้
+                {t("superadmin.stores.links.storeSwitcher.description")}
               </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
@@ -434,8 +454,12 @@ export default async function SettingsSuperadminStoresPage() {
               <Settings2 className="h-4 w-4" />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-slate-900">กลับหน้าตั้งค่า</span>
-              <span className="mt-0.5 block truncate text-xs text-slate-500">กลับไปรายการตั้งค่าทั้งหมด</span>
+              <span className="block truncate text-sm font-medium text-slate-900">
+                {t("superadmin.stores.links.settings.title")}
+              </span>
+              <span className="mt-0.5 block truncate text-xs text-slate-500">
+                {t("superadmin.stores.links.settings.description")}
+              </span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5" />
           </Link>

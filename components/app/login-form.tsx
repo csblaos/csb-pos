@@ -2,20 +2,20 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import { Button } from "@/components/ui/button";
 import { SlideUpSheet } from "@/components/ui/slide-up-sheet";
 import { clearClientAuthToken, setClientAuthToken } from "@/lib/auth/client-token";
+import { createTranslator } from "@/lib/i18n/translate";
+import type { AppLanguage } from "@/lib/i18n/types";
 
-const loginSchema = z.object({
-  email: z.string().email("กรอกอีเมลให้ถูกต้อง"),
-  password: z.string().min(8, "รหัสผ่านอย่างน้อย 8 ตัวอักษร"),
-});
-
-type LoginInput = z.infer<typeof loginSchema>;
+type LoginInput = {
+  email: string;
+  password: string;
+};
 
 type LoginResponse = {
   ok?: boolean;
@@ -61,7 +61,12 @@ const demoAccounts = [
   },
 ] as const;
 
-export function LoginForm() {
+type LoginFormProps = {
+  language: AppLanguage;
+};
+
+export function LoginForm({ language }: LoginFormProps) {
+  const t = useMemo(() => createTranslator(language), [language]);
   const [serverError, setServerError] = useState<string | null>(null);
   const [copiedAccountId, setCopiedAccountId] = useState<string | null>(null);
 
@@ -72,6 +77,13 @@ export function LoginForm() {
   const [forceChangeConfirmPassword, setForceChangeConfirmPassword] = useState("");
   const [forceChangeError, setForceChangeError] = useState<string | null>(null);
   const [isForceChanging, setIsForceChanging] = useState(false);
+
+  const loginSchema = useMemo(() =>
+    z.object({
+      email: z.string().email(t("auth.login.validation.email")),
+      password: z.string().min(8, t("auth.login.validation.password")),
+    }),
+  [t]);
 
   const form = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
@@ -116,7 +128,7 @@ export function LoginForm() {
     const data = (await response.json().catch(() => null)) as LoginResponse | null;
 
     if (!response.ok) {
-      setServerError(data?.message ?? "เข้าสู่ระบบไม่สำเร็จ กรุณาลองใหม่");
+      setServerError(data?.message ?? t("auth.login.error"));
       return;
     }
 
@@ -132,17 +144,17 @@ export function LoginForm() {
     setForceChangeError(null);
 
     if (forceChangePassword.trim().length < 8) {
-      setForceChangeError("รหัสผ่านใหม่ต้องมีอย่างน้อย 8 ตัวอักษร");
+      setForceChangeError(t("auth.login.forceChange.validation.password"));
       return;
     }
 
     if (forceChangePassword !== forceChangeConfirmPassword) {
-      setForceChangeError("ยืนยันรหัสผ่านใหม่ไม่ตรงกัน");
+      setForceChangeError(t("auth.login.forceChange.validation.confirm"));
       return;
     }
 
     if (forceChangePassword === forceChangeCurrentPassword) {
-      setForceChangeError("รหัสผ่านใหม่ต้องไม่ซ้ำรหัสผ่านชั่วคราว");
+      setForceChangeError(t("auth.login.forceChange.validation.mustChange"));
       return;
     }
 
@@ -163,12 +175,12 @@ export function LoginForm() {
 
       const data = (await response.json().catch(() => null)) as LoginResponse | null;
       if (!response.ok) {
-        setForceChangeError(data?.message ?? "เปลี่ยนรหัสผ่านไม่สำเร็จ");
+        setForceChangeError(data?.message ?? t("auth.login.forceChange.error"));
         return;
       }
 
       if (data?.requiresPasswordChange) {
-        setForceChangeError(data.message ?? "ยังไม่สามารถเปลี่ยนรหัสผ่านได้");
+        setForceChangeError(data.message ?? t("auth.login.forceChange.stillBlocked"));
         return;
       }
 
@@ -218,7 +230,7 @@ export function LoginForm() {
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
         <div className="space-y-2">
           <label htmlFor="email" className="text-sm font-medium">
-            อีเมล
+            {t("auth.login.email")}
           </label>
           <input
             id="email"
@@ -232,7 +244,7 @@ export function LoginForm() {
 
         <div className="space-y-2">
           <label htmlFor="password" className="text-sm font-medium">
-            รหัสผ่าน
+            {t("auth.login.password")}
           </label>
           <input
             id="password"
@@ -247,13 +259,13 @@ export function LoginForm() {
         {serverError ? <p className="text-sm text-red-600">{serverError}</p> : null}
 
         <Button className="h-11 w-full" type="submit" disabled={form.formState.isSubmitting}>
-          {form.formState.isSubmitting ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
+          {form.formState.isSubmitting ? t("auth.login.submitting") : t("auth.login.submit")}
         </Button>
 
         <section className="space-y-2 rounded-xl border bg-slate-50 p-3">
           <div>
-            <p className="text-sm font-semibold text-slate-900">บัญชีสำหรับเข้าสู่ระบบ</p>
-            <p className="text-xs text-slate-600">กด Fill เพื่อกรอกอัตโนมัติ หรือกด Copy เพื่อคัดลอกอีเมลและรหัสผ่าน</p>
+            <p className="text-sm font-semibold text-slate-900">{t("auth.login.demo.title")}</p>
+            <p className="text-xs text-slate-600">{t("auth.login.demo.description")}</p>
           </div>
 
           <ul className="space-y-2">
@@ -276,7 +288,7 @@ export function LoginForm() {
                     className="h-8 px-2.5 text-xs"
                     onClick={() => fillDemoAccount(account)}
                   >
-                    Fill
+                    {t("auth.login.demo.fill")}
                   </Button>
                   <Button
                     type="button"
@@ -285,7 +297,9 @@ export function LoginForm() {
                     className="h-8 px-2.5 text-xs"
                     onClick={() => copyDemoAccount(account)}
                   >
-                    {copiedAccountId === account.id ? "Copied" : "Copy"}
+                    {copiedAccountId === account.id
+                      ? t("auth.login.demo.copied")
+                      : t("auth.login.demo.copy")}
                   </Button>
                 </div>
               </li>
@@ -297,19 +311,19 @@ export function LoginForm() {
       <SlideUpSheet
         isOpen={isForceChangeOpen}
         onClose={closeForceChangeModal}
-        title="ตั้งรหัสผ่านใหม่ก่อนใช้งาน"
+        title={t("auth.login.forceChange.title")}
         description={forceChangeEmail}
         panelMaxWidthClass="min-[1200px]:max-w-md"
         disabled={isForceChanging}
       >
         <div className="space-y-3">
           <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-            รหัสผ่านปัจจุบันเป็นรหัสชั่วคราว กรุณาตั้งรหัสใหม่เพื่อเข้าใช้งานระบบ
+            {t("auth.login.forceChange.description")}
           </p>
 
           <div className="space-y-1.5">
             <label className="text-xs text-slate-500" htmlFor="force-change-password">
-              รหัสผ่านใหม่
+              {t("auth.login.forceChange.password")}
             </label>
             <input
               id="force-change-password"
@@ -323,7 +337,7 @@ export function LoginForm() {
 
           <div className="space-y-1.5">
             <label className="text-xs text-slate-500" htmlFor="force-change-confirm-password">
-              ยืนยันรหัสผ่านใหม่
+              {t("auth.login.forceChange.confirmPassword")}
             </label>
             <input
               id="force-change-confirm-password"
@@ -349,7 +363,7 @@ export function LoginForm() {
               onClick={closeForceChangeModal}
               disabled={isForceChanging}
             >
-              ภายหลัง
+              {t("auth.login.forceChange.later")}
             </Button>
             <Button
               type="button"
@@ -360,10 +374,10 @@ export function LoginForm() {
               {isForceChanging ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  กำลังบันทึก...
+                  {t("auth.login.forceChange.saving")}
                 </>
               ) : (
-                "บันทึกรหัสใหม่"
+                t("auth.login.forceChange.save")
               )}
             </Button>
           </div>

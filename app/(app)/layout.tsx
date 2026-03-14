@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { AppTopNav } from "@/components/app/app-top-nav";
 import { BottomTabNav } from "@/components/app/bottom-tab-nav";
 import { getAppShellContext } from "@/lib/app-shell/context";
+import { getLocalizedShellModeNote, getLocalizedShellTitle } from "@/lib/i18n/storefront";
 import { getStorefrontLayoutPreset } from "@/lib/storefront/layout/registry";
 
 export default async function AppLayout({
@@ -16,6 +17,7 @@ export default async function AppLayout({
     activeStoreType,
     activeStoreName,
     canViewNotifications,
+    language,
   } = await getAppShellContext();
 
   if (!session) {
@@ -34,6 +36,8 @@ export default async function AppLayout({
   }
 
   const layoutPreset = getStorefrontLayoutPreset(activeStoreType);
+  const shellTitle = getLocalizedShellTitle(language, activeStoreType);
+  const modeNoteText = getLocalizedShellModeNote(language, activeStoreType);
 
   return (
     <div
@@ -46,19 +50,20 @@ export default async function AppLayout({
           activeStoreName={activeStoreName}
           activeStoreLogoUrl={activeStoreProfile?.logoUrl ?? null}
           activeBranchName={session.activeBranchName}
-          shellTitle={layoutPreset.shellTitle}
+          shellTitle={shellTitle}
           canViewNotifications={canViewNotifications}
+          language={language}
         />
-        {layoutPreset.modeNoteText ? (
+        {modeNoteText ? (
           <p className={`mt-2 text-xs ${layoutPreset.modeNoteClassName}`}>
-            {layoutPreset.modeNoteText}
+            {modeNoteText}
           </p>
         ) : null}
       </header>
       <main className="flex-1 px-4 pb-[calc(var(--bottom-tab-nav-height)+env(safe-area-inset-bottom)+1rem)] pt-4 md:px-6 min-[1200px]:px-8 min-[1200px]:pb-[calc(var(--bottom-tab-nav-height)+1.5rem)]">
         {children}
       </main>
-      <BottomTabNav permissionKeys={permissionKeys} storeType={activeStoreType} />
+      <BottomTabNav permissionKeys={permissionKeys} storeType={activeStoreType} language={language} />
     </div>
   );
 }

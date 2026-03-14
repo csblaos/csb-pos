@@ -3,6 +3,7 @@ import dynamic from "next/dynamic";
 import { redirect } from "next/navigation";
 
 import { getAppShellContext } from "@/lib/app-shell/context";
+import { createTranslator } from "@/lib/i18n/translate";
 import { startServerRenderTimer } from "@/lib/perf/server";
 import {
   isPermissionGranted,
@@ -13,9 +14,7 @@ const OrdersManagement = dynamic(
   () => import("@/components/app/orders-management").then((module) => module.OrdersManagement),
   {
     loading: () => (
-      <div className="rounded-xl border bg-white p-4 text-sm text-muted-foreground">
-        กำลังโหลดหน้าจัดการออเดอร์...
-      </div>
+      <div className="rounded-xl border bg-white p-4 text-sm text-muted-foreground" />
     ),
   },
 );
@@ -59,11 +58,13 @@ export default async function OrdersPage({
     const canSelfApproveCancel =
       session.activeRoleName === "Owner" || session.activeRoleName === "Manager";
 
+    const t = createTranslator(session.language);
+
     if (!canView) {
       return (
         <section className="space-y-2">
-          <h1 className="text-xl font-semibold">รายการขาย</h1>
-          <p className="text-sm text-red-600">คุณไม่มีสิทธิ์เข้าถึงโมดูลออเดอร์</p>
+          <h1 className="text-xl font-semibold">{t("orders.pageTitle")}</h1>
+          <p className="text-sm text-red-600">{t("orders.noPermission")}</p>
         </section>
       );
     }
@@ -76,18 +77,14 @@ export default async function OrdersPage({
     return (
       <section className="space-y-4">
         <header className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1">
-            <h1 className="text-xl font-semibold">รายการขาย</h1>
-            <p className="text-sm text-muted-foreground">
-              สร้างออเดอร์ จัดการสถานะ และติดตามยอดขาย
-            </p>
-          </div>
+          <h1 className="text-xl font-semibold">{t("orders.pageTitle")}</h1>
           {canMarkPaid ? (
             <Link
               href="/orders/cod-reconcile"
               className="inline-flex h-9 items-center rounded-md border border-blue-200 bg-blue-50 px-3 text-xs font-medium text-blue-700"
             >
-              ปิดยอด COD รายวัน
+              <span className="sm:hidden">{t("orders.codButtonShort")}</span>
+              <span className="hidden sm:inline">{t("orders.codButtonFull")}</span>
             </Link>
           ) : null}
         </header>
@@ -96,13 +93,14 @@ export default async function OrdersPage({
           ordersPage={ordersPage}
           activeTab={tab}
           catalog={catalog}
+          language={session.language}
           canCreate={canCreate}
           canRequestCancel={canRequestCancel}
           canSelfApproveCancel={canSelfApproveCancel}
         />
 
         <Link href="/dashboard" className="text-sm font-medium text-blue-700 hover:underline">
-          กลับไปแดชบอร์ด
+          {t("orders.backToDashboard")}
         </Link>
       </section>
     );

@@ -96,6 +96,27 @@ export async function getPendingPaymentCount(storeId: string) {
   return Number(row?.value ?? 0);
 }
 
+export async function getPendingCodReconcileCount(storeId: string) {
+  const row = await timeDb("dashboard.repo.pendingCodReconcileCount", async () =>
+    queryOne<{ value: number | string | null }>(
+      `
+        select count(*)::int as value
+        from orders
+        where
+          store_id = :storeId
+          and payment_method = 'COD'
+          and status = 'SHIPPED'
+          and payment_status = 'COD_PENDING_SETTLEMENT'
+      `,
+      {
+        replacements: { storeId },
+      },
+    ),
+  );
+
+  return Number(row?.value ?? 0);
+}
+
 export async function getLowStockItemsByStore(
   storeId: string,
   thresholds: StoreStockThresholds,

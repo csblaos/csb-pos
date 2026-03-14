@@ -17,6 +17,7 @@ import {
   UserRound,
   Users,
   WalletCards,
+  Languages,
   type LucideIcon,
 } from "lucide-react";
 
@@ -281,6 +282,14 @@ export default async function SettingsPage() {
       title: "การแจ้งเตือน",
       description: "ตั้งค่าช่องทางและประเภทการแจ้งเตือน",
       icon: Bell,
+      visible: true,
+    },
+    {
+      id: "account-language",
+      href: "/settings/language",
+      title: "ภาษา / Language",
+      description: "เลือกภาษาที่ใช้ในระบบ",
+      icon: Languages,
       visible: true,
     },
   ];

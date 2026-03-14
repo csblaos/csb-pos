@@ -9,6 +9,7 @@ import {
 import {
   getLowStockItemsByStore,
   getOrdersCountToday,
+  getPendingCodReconcileCount,
   getPendingPaymentCount,
   getTodaySales,
 } from "@/server/repositories/dashboard.repo";
@@ -23,6 +24,7 @@ export type DashboardSummary = {
   ordersCountToday: number;
   pendingPaymentCount: number;
   lowStockCount: number;
+  pendingCodReconcileCount: number;
 };
 
 export type DashboardViewData = {
@@ -72,12 +74,20 @@ export async function getDashboardViewData(params: {
         }
       }
 
-      const [todaySales, ordersCountToday, pendingPaymentCount, lowStockItems, purchaseApReminder] =
+      const [
+        todaySales,
+        ordersCountToday,
+        pendingPaymentCount,
+        pendingCodReconcileCount,
+        lowStockItems,
+        purchaseApReminder,
+      ] =
         await scope.step("repo.parallel", async () =>
           Promise.all([
             getTodaySales(params.storeId),
             getOrdersCountToday(params.storeId),
             getPendingPaymentCount(params.storeId),
+            getPendingCodReconcileCount(params.storeId),
             getLowStockItemsByStore(params.storeId, thresholds),
             getPurchaseApDueReminders({
               storeId: params.storeId,
@@ -92,6 +102,7 @@ export async function getDashboardViewData(params: {
           ordersCountToday,
           pendingPaymentCount,
           lowStockCount: lowStockItems.length,
+          pendingCodReconcileCount,
         },
         lowStockItems,
         purchaseApReminder,

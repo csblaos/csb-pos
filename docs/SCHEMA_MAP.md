@@ -9,8 +9,8 @@
 - PostgreSQL query-first baseline:
   - runner: `scripts/migrate-postgres.mjs`
   - migrations path: `postgres/migrations/`
-  - current baseline: `0001_orders_read_foundation.sql`, `0002_inventory_movements_foundation.sql`, `0003_purchase_orders_foundation.sql`, `0004_auth_rbac_foundation.sql`, `0005_settings_system_admin_foundation.sql`, `0006_products_units_onboarding_foundation.sql`, `0007_products_variant_write_foundation.sql`, `0008_notifications_foundation.sql`, `0009_shipping_providers_foundation.sql`
-  - scope ของ baseline นี้ขยายจาก `orders read` ไปถึง `inventory_movements`, purchase foundation tables, auth/RBAC foundation (`system_config`, `permissions`, `roles`, `store_members`, `store_branches`, `store_member_branches`, `role_permissions`), settings/system-admin foundation (`fb_connections`, `wa_connections`), products/units/onboarding foundation (`product_categories`, `product_models`, `product_units`), product CRUD + variant persistence foundation (`product_model_attributes`, `product_model_attribute_values`, `products_model_variant_options_unique`, `products_category_id_idx`, `products_model_id_idx`), notifications foundation (`notification_inbox`, `notification_rules`), และ shipping providers foundation (`shipping_providers`) แล้ว แต่ยังไม่ใช่ full cutover schema ทั้งระบบ
+  - current baseline: `0001_orders_read_foundation.sql`, `0002_inventory_movements_foundation.sql`, `0003_purchase_orders_foundation.sql`, `0004_auth_rbac_foundation.sql`, `0005_settings_system_admin_foundation.sql`, `0006_products_units_onboarding_foundation.sql`, `0007_products_variant_write_foundation.sql`, `0008_notifications_foundation.sql`, `0009_shipping_providers_foundation.sql`, `0010_user_language_preference.sql`
+  - scope ของ baseline นี้ขยายจาก `orders read` ไปถึง `inventory_movements`, purchase foundation tables, auth/RBAC foundation (`system_config`, `permissions`, `roles`, `store_members`, `store_branches`, `store_member_branches`, `role_permissions`), settings/system-admin foundation (`fb_connections`, `wa_connections`), products/units/onboarding foundation (`product_categories`, `product_models`, `product_units`), product CRUD + variant persistence foundation (`product_model_attributes`, `product_model_attribute_values`, `products_model_variant_options_unique`, `products_category_id_idx`, `products_model_id_idx`), notifications foundation (`notification_inbox`, `notification_rules`), shipping providers foundation (`shipping_providers`), และ user language preference (`users.preferred_language`) แล้ว แต่ยังไม่ใช่ full cutover schema ทั้งระบบ
 - latest focus:
   - โครงสร้างสินค้าแบบ Variant (Phase 1):
     - `product_models`
@@ -99,6 +99,7 @@
 - `store_members.role_id -> roles.id`
 - `store_branches.store_id -> stores.id`
 - `store_member_branches.(store_id,user_id,branch_id)` เชื่อมสมาชิกกับสาขา
+- `users.preferred_language` ใช้เก็บ language preference ระดับผู้ใช้ (`lo | th | en`) และถูก hydrate เข้า session/app shell ตอน login/refresh session
 
 ### Product and Stock
 

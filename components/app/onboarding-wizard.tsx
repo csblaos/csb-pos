@@ -14,7 +14,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -28,6 +28,8 @@ import {
   getDistrictsByProvinceId,
   laosProvinces,
 } from "@/lib/location/laos-address";
+import { createTranslator } from "@/lib/i18n/translate";
+import type { AppLanguage } from "@/lib/i18n/types";
 
 type ChannelStatus = "DISCONNECTED" | "CONNECTED" | "ERROR";
 
@@ -41,71 +43,12 @@ type OnboardingStoreType = "ONLINE_RETAIL" | "RESTAURANT" | "CAFE" | "OTHER";
 type WizardProps = {
   hasStoreMembership: boolean;
   activeStoreType: OnboardingStoreType | null;
+  language: AppLanguage;
 };
-
-const storeTypeOptions = [
-  {
-    value: "ONLINE_RETAIL",
-    title: "Online POS",
-    shortTitle: "ร้านออนไลน์",
-    description: "เหมาะกับร้านค้าที่เน้นการขายออนไลน์และโซเชียล",
-    icon: ShoppingBag,
-    iconColorClassName: "text-sky-700",
-    iconBgClassName: "bg-sky-100 ring-sky-200",
-    available: true,
-  },
-  {
-    value: "RESTAURANT",
-    title: "Restaurant POS",
-    shortTitle: "ร้านอาหาร",
-    description: "เหมาะกับร้านอาหารที่มีงานหน้าร้านและจัดการออเดอร์เร็ว",
-    icon: UtensilsCrossed,
-    iconColorClassName: "text-amber-700",
-    iconBgClassName: "bg-amber-100 ring-amber-200",
-    available: true,
-  },
-  {
-    value: "CAFE",
-    title: "Cafe POS",
-    shortTitle: "คาเฟ่",
-    description: "เหมาะกับคาเฟ่ที่ต้องการจัดการเมนูและหน้าร้านแบบคล่องตัว",
-    icon: Coffee,
-    iconColorClassName: "text-emerald-700",
-    iconBgClassName: "bg-emerald-100 ring-emerald-200",
-    available: true,
-  },
-  {
-    value: "OTHER",
-    title: "Other POS",
-    shortTitle: "ธุรกิจอื่นๆ",
-    description: "สำหรับธุรกิจอื่นๆ ที่ต้องการเริ่มใช้งานทันที",
-    icon: Grid3X3,
-    iconColorClassName: "text-violet-700",
-    iconBgClassName: "bg-violet-100 ring-violet-200",
-    available: true,
-  },
-] as const satisfies ReadonlyArray<{
-  value: OnboardingStoreType;
-  title: string;
-  shortTitle: string;
-  description: string;
-  icon: LucideIcon;
-  iconColorClassName: string;
-  iconBgClassName: string;
-  available: boolean;
-}>;
 
 const defaultChannelState: ChannelState = {
   facebook: "DISCONNECTED",
   whatsapp: "DISCONNECTED",
-};
-
-const nonOnlineChannelMessage = "เชื่อมช่องทางได้เฉพาะร้านประเภท Online POS";
-
-const statusLabel: Record<ChannelStatus, string> = {
-  DISCONNECTED: "ยังไม่เชื่อมต่อ",
-  CONNECTED: "เชื่อมต่อแล้ว",
-  ERROR: "พบข้อผิดพลาด",
 };
 
 function FacebookPageBrandIcon({ className }: { className?: string }) {
@@ -132,8 +75,9 @@ function WhatsAppBrandIcon({ className }: { className?: string }) {
   );
 }
 
-export function OnboardingWizard({ hasStoreMembership, activeStoreType }: WizardProps) {
+export function OnboardingWizard({ hasStoreMembership, activeStoreType, language }: WizardProps) {
   const router = useRouter();
+  const t = useMemo(() => createTranslator(language), [language]);
   const initialStoreType = activeStoreType ?? "ONLINE_RETAIL";
   const [step, setStep] = useState<1 | 2 | 3>(hasStoreMembership ? 3 : 1);
   const [storeType, setStoreType] = useState<OnboardingStoreType>(initialStoreType);
@@ -153,14 +97,79 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
     reason: string | null;
   }>({
     eligible: initialStoreType === "ONLINE_RETAIL",
-    reason: initialStoreType === "ONLINE_RETAIL" ? null : nonOnlineChannelMessage,
+    reason: initialStoreType === "ONLINE_RETAIL" ? null : t("auth.onboarding.channel.onlineOnly"),
   });
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const storeTypeOptions = useMemo(
+    () =>
+      [
+        {
+          value: "ONLINE_RETAIL",
+          title: t("auth.onboarding.storeType.online.short"),
+          shortTitle: t("auth.onboarding.storeType.online.short"),
+          description: t("auth.onboarding.storeType.online.description"),
+          icon: ShoppingBag,
+          iconColorClassName: "text-sky-700",
+          iconBgClassName: "bg-sky-100 ring-sky-200",
+          available: true,
+        },
+        {
+          value: "RESTAURANT",
+          title: t("auth.onboarding.storeType.restaurant.short"),
+          shortTitle: t("auth.onboarding.storeType.restaurant.short"),
+          description: t("auth.onboarding.storeType.restaurant.description"),
+          icon: UtensilsCrossed,
+          iconColorClassName: "text-amber-700",
+          iconBgClassName: "bg-amber-100 ring-amber-200",
+          available: true,
+        },
+        {
+          value: "CAFE",
+          title: t("auth.onboarding.storeType.cafe.short"),
+          shortTitle: t("auth.onboarding.storeType.cafe.short"),
+          description: t("auth.onboarding.storeType.cafe.description"),
+          icon: Coffee,
+          iconColorClassName: "text-emerald-700",
+          iconBgClassName: "bg-emerald-100 ring-emerald-200",
+          available: true,
+        },
+        {
+          value: "OTHER",
+          title: t("auth.onboarding.storeType.other.short"),
+          shortTitle: t("auth.onboarding.storeType.other.short"),
+          description: t("auth.onboarding.storeType.other.description"),
+          icon: Grid3X3,
+          iconColorClassName: "text-violet-700",
+          iconBgClassName: "bg-violet-100 ring-violet-200",
+          available: true,
+        },
+      ] as const satisfies ReadonlyArray<{
+        value: OnboardingStoreType;
+        title: string;
+        shortTitle: string;
+        description: string;
+        icon: LucideIcon;
+        iconColorClassName: string;
+        iconBgClassName: string;
+        available: boolean;
+      }>,
+    [t],
+  );
+  const nonOnlineChannelMessage = t("auth.onboarding.channel.onlineOnly");
+  const statusLabel: Record<ChannelStatus, string> = useMemo(
+    () => ({
+      DISCONNECTED: t("auth.onboarding.channel.disconnected"),
+      CONNECTED: t("auth.onboarding.channel.connected"),
+      ERROR: t("auth.onboarding.channel.error"),
+    }),
+    [t],
+  );
+
   const selectedStoreType = useMemo(
     () => storeTypeOptions.find((option) => option.value === storeType),
-    [storeType],
+    [storeType, storeTypeOptions],
   );
   const districtOptions = useMemo(() => getDistrictsByProvinceId(provinceId), [provinceId]);
   const formattedAddress = useMemo(
@@ -172,12 +181,6 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
       }),
     [provinceId, districtId, village],
   );
-
-  useEffect(() => {
-    if (step === 3) {
-      void loadChannelStatus();
-    }
-  }, [step]);
 
   useEffect(() => {
     if (!logoFile) {
@@ -193,7 +196,7 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
     };
   }, [logoFile]);
 
-  const loadChannelStatus = async () => {
+  const loadChannelStatus = useCallback(async () => {
     const response = await authFetch("/api/onboarding/channels", {
       method: "GET",
       cache: "no-store",
@@ -209,7 +212,7 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
       | null;
 
     if (!response.ok) {
-      setErrorMessage(data?.message ?? "ไม่สามารถโหลดสถานะช่องทางได้");
+      setErrorMessage(data?.message ?? t("auth.onboarding.channel.loadFailed"));
       return;
     }
 
@@ -226,7 +229,13 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
         reason: data.eligible ? null : data.reason ?? nonOnlineChannelMessage,
       });
     }
-  };
+  }, [nonOnlineChannelMessage, t]);
+
+  useEffect(() => {
+    if (step === 3) {
+      void loadChannelStatus();
+    }
+  }, [step, loadChannelStatus]);
 
   const goToStep2 = () => {
     if (!selectedStoreType?.available) {
@@ -240,37 +249,37 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
 
   const submitStore = async () => {
     if (!storeName.trim()) {
-      setErrorMessage("กรุณากรอกชื่อร้าน");
+      setErrorMessage(t("auth.onboarding.validation.storeName"));
       return;
     }
     if (!provinceId) {
-      setErrorMessage("กรุณาเลือก Province");
+      setErrorMessage(t("auth.onboarding.validation.province"));
       return;
     }
     if (!districtId) {
-      setErrorMessage("กรุณาเลือก District");
+      setErrorMessage(t("auth.onboarding.validation.district"));
       return;
     }
     if (!village.trim()) {
-      setErrorMessage("กรุณากรอก Village");
+      setErrorMessage(t("auth.onboarding.validation.village"));
       return;
     }
     if (!storePhoneNumber.trim()) {
-      setErrorMessage("กรุณากรอกเบอร์โทรร้าน");
+      setErrorMessage(t("auth.onboarding.validation.phone"));
       return;
     }
     if (!/^[0-9+\-\s()]{6,20}$/.test(storePhoneNumber.trim())) {
-      setErrorMessage("รูปแบบเบอร์โทรไม่ถูกต้อง");
+      setErrorMessage(t("auth.onboarding.validation.phoneInvalid"));
       return;
     }
     if (!formattedAddress) {
-      setErrorMessage("ข้อมูลที่อยู่ร้านไม่ครบ");
+      setErrorMessage(t("auth.onboarding.validation.address"));
       return;
     }
 
     const finalAddress = formattedAddress;
     if (finalAddress.length > 300) {
-      setErrorMessage("ข้อมูลที่อยู่ร้านยาวเกินกำหนด");
+      setErrorMessage(t("auth.onboarding.validation.addressTooLong"));
       return;
     }
 
@@ -304,7 +313,7 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
 
     if (!response.ok) {
       setNoticeMessage(null);
-      setErrorMessage(data?.message ?? "สร้างร้านไม่สำเร็จ");
+      setErrorMessage(data?.message ?? t("auth.onboarding.createFailed"));
       setIsSubmitting(false);
       return;
     }
@@ -344,7 +353,7 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
       | null;
 
     if (!response.ok) {
-      setErrorMessage(data?.message ?? "เชื่อมต่อช่องทางไม่สำเร็จ");
+      setErrorMessage(data?.message ?? t("auth.onboarding.channel.connectFailed"));
       setIsSubmitting(false);
       return;
     }
@@ -390,13 +399,17 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
   return (
     <section className="space-y-5">
       <header className="space-y-2 text-center">
-        <p className="text-sm font-medium text-blue-600">ตั้งค่าร้านค้าเริ่มต้น</p>
-        <h1 className="text-2xl font-semibold tracking-tight">เริ่มใช้งานระบบขาย</h1>
+        <p className="text-sm font-medium text-blue-600">{t("auth.onboarding.eyebrow")}</p>
+        <h1 className="text-2xl font-semibold tracking-tight">{t("auth.onboarding.title")}</h1>
       </header>
 
       <div className="rounded-xl border bg-slate-50 p-3">
         <ol className="grid grid-cols-3 gap-2 text-xs">
-          {["ประเภทร้าน", "ตั้งค่าร้าน", "เชื่อมช่องทาง"].map((title, index) => {
+          {[
+            t("auth.onboarding.steps.storeType"),
+            t("auth.onboarding.steps.storeSetup"),
+            t("auth.onboarding.steps.channels"),
+          ].map((title, index) => {
             const current = index + 1;
             const done = step > current;
             const active = step === current;
@@ -427,14 +440,14 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
         onClick={openCancelConfirm}
         disabled={isSubmitting || isCancelling}
       >
-        {isCancelling ? "กำลังออกจากระบบ..." : "ยกเลิกการตั้งค่า"}
+        {isCancelling ? t("auth.onboarding.cancelling") : t("auth.onboarding.cancel")}
       </Button>
 
       {step === 1 ? (
         <div className="space-y-3">
           {selectedStoreType ? (
             <article className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 p-4 text-white">
-              <p className="text-xs text-slate-200">ประเภทร้านที่เลือก</p>
+              <p className="text-xs text-slate-200">{t("auth.onboarding.selectedStoreType")}</p>
               <div className="mt-2 flex items-start justify-between gap-3">
                 <div>
                   <p className="text-lg font-semibold">{selectedStoreType.shortTitle}</p>
@@ -494,7 +507,7 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
             onClick={goToStep2}
             disabled={!selectedStoreType?.available}
           >
-            ดำเนินการต่อ
+            {t("auth.onboarding.continue")}
           </Button>
         </div>
       ) : null}
@@ -503,7 +516,7 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
         <div className="space-y-4">
           {selectedStoreType ? (
             <article className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 p-4">
-              <p className="text-xs text-muted-foreground">โหมดร้านที่กำลังตั้งค่า</p>
+              <p className="text-xs text-muted-foreground">{t("auth.onboarding.currentMode")}</p>
               <div className="mt-2 flex items-center gap-3">
                 <div
                   className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 ${selectedStoreType.iconBgClassName}`}
@@ -524,21 +537,21 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
             <label className="rounded-xl border bg-white p-3">
               <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
                 <Store className="h-4 w-4" />
-                ชื่อร้าน
+                {t("auth.onboarding.fields.storeName")}
               </div>
               <input
                 id="storeName"
                 value={storeName}
                 onChange={(event) => setStoreName(event.target.value)}
                 className="h-10 w-full rounded-md border bg-white px-3 text-sm outline-none ring-primary focus:ring-2"
-                placeholder="เช่น Cafe Riverside"
+                placeholder={t("auth.onboarding.placeholders.storeName")}
               />
             </label>
 
             <label className="rounded-xl border bg-white p-3">
               <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
                 <MapPin className="h-4 w-4" />
-                Province
+                {t("auth.onboarding.fields.province")}
               </div>
               <select
                 value={provinceId ?? ""}
@@ -549,7 +562,7 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
                 }}
                 className="h-10 w-full rounded-md border bg-white px-3 text-sm outline-none ring-primary focus:ring-2"
               >
-                <option value="">เลือก Province</option>
+                <option value="">{t("auth.onboarding.selectProvince")}</option>
                 {laosProvinces.map((province) => (
                   <option key={province.id} value={province.id}>
                     {province.nameEn}
@@ -561,7 +574,7 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
             <label className="rounded-xl border bg-white p-3">
               <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
                 <MapPin className="h-4 w-4" />
-                District
+                {t("auth.onboarding.fields.district")}
               </div>
               <select
                 value={districtId ?? ""}
@@ -569,7 +582,7 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
                 disabled={!provinceId}
                 className="h-10 w-full rounded-md border bg-white px-3 text-sm outline-none ring-primary focus:ring-2 disabled:bg-slate-100"
               >
-                <option value="">เลือก District</option>
+                <option value="">{t("auth.onboarding.selectDistrict")}</option>
                 {districtOptions.map((district) => (
                   <option key={district.id} value={district.id}>
                     {district.nameEn}
@@ -581,33 +594,33 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
             <label className="rounded-xl border bg-white p-3">
               <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
                 <MapPin className="h-4 w-4" />
-                Village
+                {t("auth.onboarding.fields.village")}
               </div>
               <input
                 value={village}
                 onChange={(event) => setVillage(event.target.value)}
                 className="h-10 w-full rounded-md border bg-white px-3 text-sm outline-none ring-primary focus:ring-2"
-                placeholder="เช่น Ban Phonxay"
+                placeholder={t("auth.onboarding.placeholders.village")}
               />
             </label>
 
             <label className="rounded-xl border bg-white p-3">
               <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
                 <Phone className="h-4 w-4" />
-                เบอร์โทรร้าน
+                {t("auth.onboarding.fields.phone")}
               </div>
               <input
                 value={storePhoneNumber}
                 onChange={(event) => setStorePhoneNumber(event.target.value)}
                 className="h-10 w-full rounded-md border bg-white px-3 text-sm outline-none ring-primary focus:ring-2"
-                placeholder="เช่น +856 20 9999 9999"
+                placeholder={t("auth.onboarding.placeholders.phone")}
               />
             </label>
 
             <label className="rounded-xl border border-dashed bg-slate-50 p-3">
               <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
                 <ImagePlus className="h-4 w-4" />
-                ไฟล์โลโก้ร้าน (ไม่บังคับ)
+                {t("auth.onboarding.fields.logo")}
               </div>
               <input
                 type="file"
@@ -619,11 +632,11 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
                 className="block w-full text-xs text-slate-500 file:mr-3 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-xs file:font-medium file:text-white hover:file:bg-slate-700"
               />
               <p className="mt-2 text-xs text-muted-foreground">
-                รองรับ JPG, PNG, WEBP, SVG (ขนาดสูงสุดตามที่ระบบกำหนด)
+                {t("auth.onboarding.logoHelp")}
               </p>
               {logoFile ? (
                 <p className="mt-1 flex items-center gap-1 text-xs text-emerald-700">
-                  <span className="shrink-0">ไฟล์ที่เลือก:</span>
+                    <span className="shrink-0">{t("auth.onboarding.selectedFile")}</span>
                   <span className="max-w-[220px] truncate" title={logoFile.name}>
                     {logoFile.name}
                   </span>
@@ -635,7 +648,7 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={logoPreviewUrl}
-                      alt="ตัวอย่างโลโก้ร้าน"
+                      alt={t("auth.onboarding.logoPreviewAlt")}
                       className="h-full w-full object-cover"
                     />
                   ) : (
@@ -647,7 +660,7 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
           </div>
 
           <p className="rounded-xl border bg-amber-50 p-3 text-xs text-amber-800">
-            หมายเหตุ: Currency และ VAT จะไปตั้งค่าใน Setting ของร้าน ภายหลังได้
+            {t("auth.onboarding.note")}
           </p>
 
           <div className="grid grid-cols-2 gap-2">
@@ -657,10 +670,10 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
               onClick={() => setStep(1)}
               disabled={isSubmitting}
             >
-              ย้อนกลับ
+              {t("common.back")}
             </Button>
             <Button className="h-11" onClick={submitStore} disabled={isSubmitting}>
-              {isSubmitting ? "กำลังสร้างร้าน..." : "สร้างร้านและดำเนินการต่อ"}
+              {isSubmitting ? t("auth.onboarding.creatingStore") : t("auth.onboarding.createStore")}
             </Button>
           </div>
         </div>
@@ -675,7 +688,7 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
                 : "border-amber-200 bg-gradient-to-br from-amber-50 via-white to-orange-50"
             }`}
           >
-            <p className="text-xs text-muted-foreground">เชื่อมช่องทางการขาย</p>
+            <p className="text-xs text-muted-foreground">{t("auth.onboarding.channel.title")}</p>
             <div className="mt-2 flex items-start gap-3">
               <div
                 className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
@@ -691,12 +704,12 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
               <div>
                 <p className="text-sm font-semibold">
                   {channelEligibility.eligible
-                    ? "ร้านนี้รองรับการเชื่อม Facebook Page และ WhatsApp"
-                    : "ฟีเจอร์นี้เปิดเฉพาะ Online POS"}
+                    ? t("auth.onboarding.channel.available")
+                    : t("auth.onboarding.channel.unavailable")}
                 </p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {channelEligibility.eligible
-                    ? "เชื่อมต่อช่องทางเพื่อเริ่มรับออเดอร์จากโซเชียลได้ทันที"
+                    ? t("auth.onboarding.channel.availableDescription")
                     : channelEligibility.reason ?? nonOnlineChannelMessage}
                 </p>
               </div>
@@ -714,7 +727,7 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
                 <p className="font-medium">Facebook Page</p>
               </div>
               <p className="mt-2 text-sm text-muted-foreground">
-                สถานะ: {statusLabel[channelStatus.facebook]}
+                {t("auth.onboarding.channel.status")}: {statusLabel[channelStatus.facebook]}
               </p>
               <Button
                 variant={channelStatus.facebook === "CONNECTED" ? "outline" : "default"}
@@ -723,10 +736,10 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
                 disabled={isSubmitting || !channelEligibility.eligible}
               >
                 {!channelEligibility.eligible
-                  ? "ใช้ได้เฉพาะ Online POS"
+                  ? t("auth.onboarding.channel.onlineOnlyShort")
                   : channelStatus.facebook === "CONNECTED"
-                    ? "เชื่อมต่อแล้ว"
-                    : "เชื่อมต่อ Facebook Page"}
+                    ? t("auth.onboarding.channel.connectedAction")
+                    : t("auth.onboarding.channel.connectFacebook")}
               </Button>
             </article>
 
@@ -740,7 +753,7 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
                 <p className="font-medium">WhatsApp</p>
               </div>
               <p className="mt-2 text-sm text-muted-foreground">
-                สถานะ: {statusLabel[channelStatus.whatsapp]}
+                {t("auth.onboarding.channel.status")}: {statusLabel[channelStatus.whatsapp]}
               </p>
               <Button
                 variant={channelStatus.whatsapp === "CONNECTED" ? "outline" : "default"}
@@ -749,18 +762,18 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
                 disabled={isSubmitting || !channelEligibility.eligible}
               >
                 {!channelEligibility.eligible
-                  ? "ใช้ได้เฉพาะ Online POS"
+                  ? t("auth.onboarding.channel.onlineOnlyShort")
                   : channelStatus.whatsapp === "CONNECTED"
-                    ? "เชื่อมต่อแล้ว"
-                    : "เชื่อมต่อ WhatsApp"}
+                    ? t("auth.onboarding.channel.connectedAction")
+                    : t("auth.onboarding.channel.connectWhatsapp")}
               </Button>
             </article>
           </div>
 
           <Button className="h-11 w-full" onClick={completeOnboarding}>
             {channelEligibility.eligible
-              ? "เข้าสู่หน้าแดชบอร์ด"
-              : "ข้ามการเชื่อมช่องทางและเข้าสู่แดชบอร์ด"}
+              ? t("auth.onboarding.goDashboard")
+              : t("auth.onboarding.skipChannels")}
           </Button>
         </div>
       ) : null}
@@ -771,9 +784,9 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
       {isCancelConfirmOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
           <div className="w-full max-w-sm rounded-2xl border bg-white p-4 shadow-xl">
-            <h2 className="text-base font-semibold">ยกเลิกการตั้งค่า?</h2>
+            <h2 className="text-base font-semibold">{t("auth.onboarding.cancelConfirmTitle")}</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              หากยืนยัน ระบบจะออกจากบัญชีนี้ทันที และข้อมูลที่ยังไม่บันทึกจะไม่ถูกเก็บ
+              {t("auth.onboarding.cancelConfirmDescription")}
             </p>
             <div className="mt-4 grid grid-cols-2 gap-2">
               <Button
@@ -783,7 +796,7 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
                 onClick={() => setIsCancelConfirmOpen(false)}
                 disabled={isCancelling}
               >
-                กลับไปต่อ
+                {t("auth.onboarding.cancelKeepEditing")}
               </Button>
               <Button
                 type="button"
@@ -791,7 +804,7 @@ export function OnboardingWizard({ hasStoreMembership, activeStoreType }: Wizard
                 onClick={confirmCancelOnboarding}
                 disabled={isCancelling}
               >
-                {isCancelling ? "กำลังออก..." : "ยืนยันยกเลิก"}
+                {isCancelling ? t("auth.onboarding.cancelConfirmLoading") : t("auth.onboarding.cancelConfirm")}
               </Button>
             </div>
           </div>

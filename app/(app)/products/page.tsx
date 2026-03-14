@@ -2,6 +2,7 @@ import dynamic from "next/dynamic";
 import { redirect } from "next/navigation";
 
 import { getSession } from "@/lib/auth/session";
+import { createTranslator } from "@/lib/i18n/translate";
 import { getUserPermissionsForCurrentSession, isPermissionGranted } from "@/lib/rbac/access";
 import {
   getStoreProductThresholds,
@@ -31,7 +32,7 @@ const ProductsManagement = dynamic(
   {
     loading: () => (
       <div className="rounded-xl border bg-white p-4 text-sm text-muted-foreground">
-        กำลังโหลดหน้าจัดการสินค้า...
+        Loading products workspace...
       </div>
     ),
   },
@@ -57,6 +58,8 @@ export default async function ProductsPage({
     redirect("/onboarding");
   }
 
+  const t = createTranslator(session.language);
+
   const canView = isPermissionGranted(permissionKeys, "products.view");
   const canCreate = isPermissionGranted(permissionKeys, "products.create");
   const canUpdate = isPermissionGranted(permissionKeys, "products.update");
@@ -69,8 +72,8 @@ export default async function ProductsPage({
   if (!canView) {
     return (
       <section className="space-y-2">
-        <h1 className="text-xl font-semibold">สินค้า</h1>
-        <p className="text-sm text-red-600">คุณไม่มีสิทธิ์เข้าถึงโมดูลสินค้า</p>
+        <h1 className="text-xl font-semibold">{t("products.pageTitle")}</h1>
+        <p className="text-sm text-red-600">{t("products.noPermission")}</p>
       </section>
     );
   }
@@ -95,13 +98,14 @@ export default async function ProductsPage({
     <section className="space-y-4">
       <header className="space-y-1">
         <div className="flex items-center justify-between gap-3">
-          <h1 className="text-xl font-semibold">สินค้า</h1>
+          <h1 className="text-xl font-semibold">{t("products.pageTitle")}</h1>
           <ProductsHeaderRefreshButton />
         </div>
-        <p className="text-sm text-muted-foreground">ค้นหา สร้าง แก้ไข และปิดใช้งานสินค้า</p>
+        <p className="text-sm text-muted-foreground">{t("products.pageDescription")}</p>
       </header>
 
       <ProductsManagement
+        language={session.language}
         products={productPage.items}
         initialTotalCount={productPage.total}
         initialSummaryCounts={summaryCounts}
