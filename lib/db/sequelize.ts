@@ -1,9 +1,5 @@
 import "server-only";
 
-// Ensure Vercel/Next output tracing includes Postgres driver packages.
-import "pg";
-import "pg-hstore";
-
 import { Sequelize, type Options, type QueryOptions, type Transaction } from "sequelize";
 
 const DEFAULT_POSTGRES_POOL_MAX = 10;
