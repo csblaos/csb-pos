@@ -8,6 +8,8 @@ import { execute, queryOne } from "@/lib/db/query";
 import { getUserPermissions } from "@/lib/rbac/access";
 import { getStorefrontEntryRoute } from "@/lib/storefront/routing";
 
+export const runtime = "nodejs";
+
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),

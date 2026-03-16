@@ -1219,7 +1219,7 @@ npm run smoke:postgres:submit-payment-slip
   - เพิ่ม `scripts/smoke-postgres-cutover-gate.mjs`, `docs/postgres-cutover-plan.md`, และ ADR-021 เพื่อยืนยันว่าการ cutover inventory/reporting ต้องใช้ `shadow-compare + canary` ก่อนลดบทบาท Turso
   - `.env.local` ของเครื่องนี้ยังคง `POSTGRES_PURCHASE_READ_ENABLED=0` ไว้ก่อน เพราะถ้าเปิด read ก่อนเปิด purchase write flags พร้อมกัน หน้า PO จะเสี่ยง stale หลังมีการสร้าง/รับสินค้าใหม่บน Turso
   - `.env.local` ของเครื่องนี้ยังคง `POSTGRES_PURCHASE_WRITE_CREATE_RECEIVED_ENABLED=0` และ `POSTGRES_PURCHASE_WRITE_RECEIVE_STATUS_ENABLED=0` ไว้ก่อน เพราะ purchase list/detail/read parity ยังวิ่งผ่าน Turso อยู่ ถ้าเปิด write ตอนนี้ UI ของ PO จะเสี่ยงเห็นข้อมูลคนละฐาน
-  - `next.config.ts` externalize `sequelize`, `pg`, `pg-hstore` ใน `serverExternalPackages` เพื่อให้ Next build ไม่พยายาม bundle dependency ฝั่ง server ของ PostgreSQL migration
+  - `next.config.ts` externalize `sequelize`, `pg`, `pg-hstore` ใน `serverExternalPackages` เพื่อให้ Next build ไม่พยายาม bundle dependency ฝั่ง server ของ PostgreSQL migration; และ `lib/db/sequelize.ts` import `pg`/`pg-hstore` แบบ side-effect เพื่อกันปัญหา deploy บน Vercel บางเคสที่ output tracing ไม่ include driver ทำให้ runtime error `Please install pg package manually`
   - แนวทาง migration ที่รับแล้วคือ `Sequelize query-first`: ใช้ `sequelize.query(...)` + transaction และหลีกเลี่ยง Sequelize ORM model ในโดเมนหลัก เพื่อให้ย้ายไป Express ง่าย
 
 ทุกงานที่เปลี่ยนพฤติกรรมระบบต้องมีหัวข้อต่อไปนี้ใน `docs/HANDOFF.md`:
