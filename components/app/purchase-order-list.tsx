@@ -156,35 +156,66 @@ function isPurchaseApSort(value: string | null): value is PurchaseApSort {
   return value === "DUE_ASC" || value === "OUTSTANDING_DESC";
 }
 
-function kpiShortcutDefaultLabel(shortcut: KpiShortcut): string {
-  if (shortcut === "OPEN_PO") return "Open PO";
-  if (shortcut === "PENDING_RATE") return "Month-End";
-  if (shortcut === "OVERDUE_AP") return "Overdue AP";
-  return "Outstanding AP";
-}
-
-function getShortcutDescription(language: AppLanguage, shortcut: KpiShortcut): string {
-  const labels = {
-    lo: {
+const purchaseShortcutTextByLanguage = {
+  lo: {
+    defaults: {
+      OPEN_PO: "Open PO",
+      PENDING_RATE: "Month-End",
+      OVERDUE_AP: "Overdue AP",
+      OUTSTANDING_AP: "Outstanding AP",
+    },
+    descriptions: {
       OPEN_PO: "Open PO: ກອງວຽກທີ່ຍັງເປີດຢູ່",
       PENDING_RATE: "Pending Rate: ໂຟກັດວຽກປິດເຣດປາຍເດືອນ",
       OVERDUE_AP: "Overdue AP: ລາຍການເກີນກຳນົດຈ່າຍ",
       OUTSTANDING_AP: "Outstanding: AP by Supplier + ຮຽງຕາມຍອດຄ້າງສູງສຸດ",
     },
-    th: {
+  },
+  th: {
+    defaults: {
+      OPEN_PO: "Open PO",
+      PENDING_RATE: "Month-End",
+      OVERDUE_AP: "Overdue AP",
+      OUTSTANDING_AP: "Outstanding AP",
+    },
+    descriptions: {
       OPEN_PO: "Open PO: กรองเฉพาะงานที่ยังเปิด",
       PENDING_RATE: "Pending Rate: โฟกัสงานปิดเรทปลายเดือน",
       OVERDUE_AP: "Overdue AP: รายการเจ้าหนี้เลยกำหนด",
       OUTSTANDING_AP: "Outstanding: AP by Supplier + เรียงยอดค้างมากสุด",
     },
-    en: {
+  },
+  en: {
+    defaults: {
+      OPEN_PO: "Open PO",
+      PENDING_RATE: "Month-End",
+      OVERDUE_AP: "Overdue AP",
+      OUTSTANDING_AP: "Outstanding AP",
+    },
+    descriptions: {
       OPEN_PO: "Open PO: filter only active purchasing work",
       PENDING_RATE: "Pending Rate: focus on month-end rate finalization",
       OVERDUE_AP: "Overdue AP: suppliers past due",
       OUTSTANDING_AP: "Outstanding: AP by supplier sorted by highest balance",
     },
-  } as const;
-  return labels[language][shortcut];
+  },
+} satisfies Record<
+  AppLanguage,
+  {
+    defaults: Record<KpiShortcut, string>;
+    descriptions: Record<KpiShortcut, string>;
+  }
+>;
+
+function kpiShortcutDefaultLabel(
+  language: AppLanguage,
+  shortcut: KpiShortcut,
+): string {
+  return purchaseShortcutTextByLanguage[language].defaults[shortcut];
+}
+
+function getShortcutDescription(language: AppLanguage, shortcut: KpiShortcut): string {
+  return purchaseShortcutTextByLanguage[language].descriptions[shortcut];
 }
 
 type PurchaseOrderDetail = {
@@ -381,12 +412,18 @@ const purchaseTextByLanguage = {
       clear: "ລ້າງ",
     },
     errors: {
+      atLeastOneItem: "ກະລຸນາເພີ່ມສິນຄ້າຢ່າງນ້ອຍ 1 ລາຍການ",
       loadPoDetailFailed: "ໂຫຼດລາຍລະອຽດໃບສັ່ງຊື້ບໍ່ສຳເລັດ",
       poNotFound: "ບໍ່ພົບຂໍ້ມູນໃບສັ່ງຊື້",
       connectionRetry: "ເຊື່ອມຕໍ່ບໍ່ສຳເລັດ ກະລຸນາລອງໃໝ່",
       loadPoListFailed: "ໂຫຼດລາຍການໃບສັ່ງຊື້ບໍ່ສຳເລັດ",
       invalidPoList: "ຮູບແບບຂໍ້ມູນໃບສັ່ງຊື້ບໍ່ຖືກຕ້ອງ",
       loadPendingRateFailed: "ໂຫຼດຄິວລໍຖ້າປິດເຣດບໍ່ສຳເລັດ",
+    },
+    pendingQueue: {
+      emptyHint: "ລອງກັບໄປ `PO Operations` ເພື່ອເຊັກວຽກຮັບເຂົ້າ ຫຼືສ້າງ PO ເພີ່ມ",
+      goOperations: "ໄປ PO Operations",
+      selectedCount: "ເລືອກແລ້ວ {selected}/{total} ລາຍການ",
     },
     bulk: {
       selectAtLeastOne: "ກະລຸນາເລືອກ PO ຢ່າງນ້ອຍ 1 ລາຍການ",
@@ -397,6 +434,25 @@ const purchaseTextByLanguage = {
       starting: "ເລີ່ມປະມວນຜົນ...",
       processing: "ກຳລັງປະມວນຜົນ {current}/{total} ({poNumber})",
       paymentRoundNote: "ຮອບຊຳລະ {reference}",
+      autoMatchHint:
+        "ລະບົບຈະຈັບຄູ່ຍອດຊຳລະອັດຕະໂນມັດແບບຄົບກຳນົດເກົ່າສຸດກ່ອນ (oldest due first)",
+      exchangeRateLabel: "ອັດຕາແລກປ່ຽນຈິງ (1 {purchase} = ? {store})",
+      paidAtLabel: "ວັນທີຊຳລະ (top-up date)",
+      statementTotalLabel: "ຍອດຊຳລະລວມຕາມ statement (ບໍ່ບັງຄັບ)",
+      statementTotalHelp: "ຖ້າເວັ້ນວ່າງ ລະບົບຈະຊຳລະເຕັມຍອດຄ້າງທຸກ PO ທີ່ເລືອກ",
+      referenceLabel: "ເລກອ້າງອີງຮອບບັດ/ຮອບຊຳລະ (ບັງຄັບ)",
+      referencePlaceholder: "ເຊັ່ນ BCEL-VISA-2026-02",
+      noteLabel: "ໝາຍເຫດ (ບໍ່ບັງຄັບ)",
+      notePlaceholder: "ເຊັ່ນ top-up ຮອບປາຍເດືອນ",
+      reconcilePlanTitle: "ແຜນກະທົບຍອດອັດຕະໂນມັດ (ກ່ອນກົດຢືນຢັນ)",
+      reconcilePlanSummary:
+        "ຍອດຄ້າງທີ່ເລືອກ {outstanding} · ຈະລົງຊຳລະ {planned} · ຄ້າງຫຼັງຮອບນີ້ {after}",
+      statementTotalMustBePositive: "ຍອດຊຳລະລວມຕ້ອງຫຼາຍກວ່າ 0",
+      dueShort: "due",
+      reconcileRowMatched: "ຈັບຄູ່",
+      reconcileRowOutstanding: "ຄ້າງ",
+      failedListTitle: "ລາຍການບໍ່ສຳເລັດ ({count})",
+      startFinalizeAndSettle: "ເລີ່ມປິດເຣດ + ຊຳລະ",
       finalizeFailed: "{poNumber}: ປິດເຣດບໍ່ສຳເລັດ ({message})",
       detailReloadFailed: "{poNumber}: ໂຫຼດຍອດຄ້າງຫຼັງປິດເຣດບໍ່ສຳເລັດ ({message})",
       settleFailed: "{poNumber}: ບັນທຶກຊຳລະບໍ່ສຳເລັດ ({message})",
@@ -406,6 +462,161 @@ const purchaseTextByLanguage = {
       failedCount: "ມີລາຍການບໍ່ສຳເລັດ {count} ລາຍການ",
       processingConnectionFailed: "ເຊື່ອມຕໍ່ບໍ່ສຳເລັດລະຫວ່າງປະມວນຜົນແບບກຸ່ມ",
       unknown: "unknown",
+    },
+    create: {
+      title: "ສ້າງໃບສັ່ງຊື້",
+      stepLabel: "ຂັ້ນຕອນ",
+      supplierNameOptional: "ຊື່ຊັບພລາຍເອີ (ບໍ່ບັງຄັບ)",
+      hideSuppliers: "ຊ່ອນລາຍການຊັບພລາຍເອີ",
+      allSuppliers: "ເບິ່ງຊັບພລາຍເອີທັງໝົດ",
+      supplierPlaceholder: "ເຊັ່ນ ຮ້ານສົມໄຊ, ຕະຫຼາດເຊົ້າ",
+      supplierSearchHint:
+        "ພິມເພື່ອຄົ້ນຫາ ແລະເລືອກຈາກລາຍຊື່ເກົ່າ ຫຼືພິມຊື່ໃໝ່ໄດ້",
+      supplierSearchEmpty:
+        "ບໍ່ພົບຊື່ຊັບພລາຍເອີຕາມຄຳຄົ້ນຫາ ສາມາດໃຊ້ຊື່ທີ່ພິມໄດ້ເລີຍ",
+      contactOptional: "ເບີຕິດຕໍ່ (ບໍ່ບັງຄັບ)",
+      purchaseCurrency: "ສະກຸນເງິນທີ່ຊື້",
+      actualExchangeRateOptional: "ອັດຕາແລກປ່ຽນຈິງ (ຖ້າຮູ້)",
+      exchangeRatePlaceholder: "ເຊັ່ນ 600 (1 {purchase} = ? {store})",
+      exchangeRateHelp:
+        "ຖ້າຍັງບໍ່ຮູ້ເຣດຈິງ ສາມາດປ່ອຍວ່າງໄວ້ ແລະໄປປິດເຣດຫຼັງຮັບສິນຄ້າ/ຕອນຊຳລະ",
+      next: "ຖັດໄປ →",
+      addProducts: "ເພີ່ມສິນຄ້າ",
+      hideProducts: "ຊ່ອນລາຍການສິນຄ້າ",
+      allProducts: "ເບິ່ງສິນຄ້າທັງໝົດ",
+      searchProductsPlaceholder: "ຄົ້ນຫາສິນຄ້າ...",
+      searchProductsHint: "ຄົ້ນຫາດ້ວຍຊື່ ຫຼື SKU ຫຼືກົດເພື່ອເລືອກຈາກລາຍການ",
+      noMatchingProducts: "ບໍ່ພົບສິນຄ້າຕາມຄຳຄົ້ນຫາ",
+      noProductsAvailable: "ບໍ່ມີສິນຄ້າໃຫ້ເລືອກ",
+      noProductsAdded: "ຍັງບໍ່ໄດ້ເພີ່ມສິນຄ້າ",
+      quantity: "ຈຳນວນ",
+      costPerCurrency: "ລາຄາ / {currency}",
+      back: "← ກັບ",
+      shippingCostLabel: "ຄ່າຂົນສົ່ງ ({currency})",
+      otherCostLabel: "ຄ່າອື່ນໆ ({currency})",
+      otherCostNoteLabel: "ໝາຍເຫດຄ່າອື່ນໆ",
+      otherCostNotePlaceholder: "ເຊັ່ນ ຄ່າພາສີ, ຄ່າດຳເນີນການ",
+      expectedReceiveDateOptional: "ຄາດວ່າຈະໄດ້ຮັບ (ບໍ່ບັງຄັບ)",
+      expectedReceiveAria: "ເລືອກວັນທີຄາດວ່າຈະໄດ້ຮັບ",
+      expectedReceiveHelp: "ຍັງບໍ່ຈຳເປັນຕ້ອງລະບຸ ເລືອກພາຍຫຼັງໄດ້",
+      dueDateLabel: "ຄົບກຳນົດຊຳລະ",
+      dueDateAria: "ເລືອກວັນທີຄົບກຳນົດຊຳລະ",
+      dueDateHelp: "ຖ້າຍັງບໍ່ຮູ້ກຳນົດຈິງ ສາມາດປ່ອຍວ່າງໄວ້ກ່ອນ",
+      noteOptional: "ໝາຍເຫດ (ບໍ່ບັງຄັບ)",
+      notePlaceholder: "ໝາຍເຫດເພີ່ມເຕີມ",
+      summary: "ສະຫຼຸບ",
+      pendingRateSummary:
+        "ຍັງບໍ່ໄດ້ປິດເຣດຈິງ: ລະບົບຈະໃຊ້ເຣດຊົ່ວຄາວ 1 ເພື່ອບັນທຶກ PO ແລະໃຫ້ໄປປິດເຣດພາຍຫຼັງ",
+      productsCount: "ສິນຄ້າ ({count} ລາຍການ)",
+      shipping: "ຄ່າຂົນສົ່ງ",
+      otherCosts: "ຄ່າອື່ນໆ",
+      grandTotal: "ລວມທັງໝົດ",
+      saveDraft: "ບັນທຶກຮ່າງ",
+      receiveNow: "ຮັບສິນຄ້າທັນທີ",
+      createFailed: "ສ້າງໃບສັ່ງຊື້ບໍ່ສຳເລັດ",
+      createSuccess: "ສ້າງໃບສັ່ງຊື້ແລ້ວ",
+      createAndReceivedSuccess: "ສ້າງໃບສັ່ງຊື້ແລະຮັບສິນຄ້າແລ້ວ",
+      pendingRateToast: "PO ນີ້ຍັງຕ້ອງປິດເຣດຈິງໃນພາຍຫຼັງ",
+      createAndConfirmSuccess: "ສ້າງໃບສັ່ງຊື້ແລະຢືນຢັນແລ້ວ",
+      confirmOrder: "ຢືນຢັນການສັ່ງຊື້",
+      closeConfirmBackdropAria: "ປິດກ່ອງຢືນຢັນການປິດແບບຟອມ",
+      closeConfirmDialogAria: "ຢືນຢັນການປິດຟອມສ້າງໃບສັ່ງຊື້",
+      closeConfirmTitle: "ຢືນຢັນປິດຟອມສ້າງໃບສັ່ງຊື້",
+      closeConfirmBody: "ຍັງມີຂໍ້ມູນບໍ່ໄດ້ບັນທຶກ ຕ້ອງການປິດແລະຖິ້ມຂໍ້ມູນທີ່ກອກໄວ້ຫຼືບໍ່",
+      closeConfirmBack: "ກັບໄປແກ້ໄຂ",
+      closeConfirmDiscard: "ປິດແລະຖິ້ມຂໍ້ມູນ",
+    },
+    detail: {
+      finalRateInvalid: "ກະລຸນາກອກອັດຕາແລກປ່ຽນຈິງໃຫ້ຖືກຕ້ອງ",
+      finalizeRateFailed: "ປິດເຣດບໍ່ສຳເລັດ",
+      finalizeRateSuccess: "ປິດເຣດຮຽບຮ້ອຍແລ້ວ",
+      paymentAmountInvalid: "ກະລຸນາກອກຍອດຊຳລະໃຫ້ຖືກຕ້ອງ",
+      paymentExceedsOutstanding: "ຍອດຊຳລະເກີນຍອດຄ້າງ",
+      settleFailed: "ບັນທຶກການຊຳລະບໍ່ສຳເລັດ",
+      settleSuccess: "ບັນທຶກການຊຳລະຮຽບຮ້ອຍ",
+      shippingCostInvalid: "ກະລຸນາກອກຄ່າຂົນສົ່ງໃຫ້ຖືກຕ້ອງ",
+      otherCostInvalid: "ກະລຸນາກອກຄ່າໃຊ້ຈ່າຍອື່ນໃຫ້ຖືກຕ້ອງ",
+      updateCostsFailed: "ອັບເດດຄ່າໃຊ້ຈ່າຍບໍ່ສຳເລັດ",
+      updateCostsSuccess: "ອັບເດດຄ່າໃຊ້ຈ່າຍຮຽບຮ້ອຍ",
+      reversePaymentFailed: "ຍ້ອນລາຍການຊຳລະບໍ່ສຳເລັດ",
+      reversePaymentSuccess: "ຍ້ອນລາຍການຊຳລະຮຽບຮ້ອຍ",
+      editRequiresItem: "ຕ້ອງມີສິນຄ້າຢ່າງໜ້ອຍ 1 ລາຍການ",
+      updatePoFailed: "ອັບເດດໃບສັ່ງຊື້ບໍ່ສຳເລັດ",
+      updatePoSuccess: "ບັນທຶກການແກ້ໄຂໃບສັ່ງຊື້ຮຽບຮ້ອຍ",
+      pdfDownloaded: "ດາວໂຫລດ PDF ຮຽບຮ້ອຍ",
+      pdfGenerateFailed: "ສ້າງ PDF ບໍ່ສຳເລັດ",
+      pdfShareFailed: "ແບ່ງປັນ PDF ບໍ່ສຳເລັດ",
+      titleFallback: "ລາຍລະອຽດ",
+      mustFinalizeRateBeforePayment: "ຕ້ອງປິດເຣດກ່ອນບັນທຶກການຊຳລະ",
+      pdfDocTitle: "ໃບສັ່ງຊື້",
+      referenceRate: "ເຣດອ້າງອີງ",
+      initialRate: "ເຣດຕັ້ງຕົ້ນຕອນສ້າງ PO",
+      rateStatusPending: "ສະຖານະ: ລໍຖ້າປິດເຣດຈິງ (ແນະນຳຕອນຊຳລະຈິງ)",
+      rateStatusLocked: "ສະຖານະ: ປິດເຣດແລ້ວ",
+      when: "ເມື່ອ",
+      rateDifference: "ສ່ວນຕ່າງເຣດ",
+      paymentStatus: "ສະຖານະການຊຳລະ",
+      paid: "ຊຳລະແລ້ວ",
+      partialPaid: "ຊຳລະບາງສ່ວນ",
+      unpaid: "ຍັງບໍ່ຊຳລະ",
+      paidAmount: "ຈ່າຍແລ້ວ",
+      outstanding: "ຄ້າງ",
+      paidAt: "ຊຳລະເມື່ອ",
+      paymentRecorded: "ບັນທຶກການຊຳລະແລ້ວ",
+      by: "ໂດຍ",
+      reference: "ອ້າງອີງ",
+      readyToSettle: "ພ້ອມບັນທຶກການຊຳລະເມື່ອຈ່າຍຈິງ",
+      finalizeRateTitle: "ປິດເຣດແລກປ່ຽນຈິງ",
+      finalRateLabel: "ອັດຕາແລກປ່ຽນຈິງ (1 {purchase} = ? {store})",
+      finalRatePlaceholder: "ເຊັ່ນ 670",
+      finalizeRateNoteLabel: "ໝາຍເຫດການປິດເຣດ (ບໍ່ບັງຄັບ)",
+      finalizeRateNotePlaceholder: "ເຊັ່ນ ຊຳລະປາຍເດືອນ / ອ້າງອີງໃບແຈ້ງໜີ້",
+      finalizeRateHelp:
+        "ການປິດເຣດຈະອັບເດດມູນຄ່າຖານສຳລັບອ້າງອີງບັນຊີໃນ PO ນີ້ເທົ່ານັ້ນ ແລະບໍ່ຍ້ອນແກ້ເອກະສານທີ່ປິດແລ້ວ",
+      confirmFinalizeRate: "ຢືນຢັນປິດເຣດ",
+      settlePaymentTitle: "ບັນທຶກການຊຳລະ PO",
+      paymentAmountLabel: "ຍອດຊຳລະ ({currency})",
+      currentOutstanding: "ຍອດຄ້າງປັດຈຸບັນ",
+      paymentDate: "ວັນທີຊຳລະ",
+      paymentReferenceLabel: "ເລກອ້າງອີງການຊຳລະ (ບໍ່ບັງຄັບ)",
+      paymentReferencePlaceholder: "ເຊັ່ນ statement ປາຍເດືອນ / ເລກໃບແຈ້ງໜີ້",
+      optionalNote: "ໝາຍເຫດ (ບໍ່ບັງຄັບ)",
+      confirmSettlePayment: "ຢືນຢັນບັນທຶກການຊຳລະ",
+      updateCostsTitle: "ອັບເດດຄ່າຂົນສົ່ງ/ຄ່າອື່ນຫຼັງຮັບສິນຄ້າ",
+      shippingCostLabel: "ຄ່າຂົນສົ່ງ ({currency})",
+      otherCostLabel: "ຄ່າອື່ນໆ ({currency})",
+      otherCostNoteLabel: "ໝາຍເຫດຄ່າອື່ນໆ (ບໍ່ບັງຄັບ)",
+      otherCostNotePlaceholder: "ເຊັ່ນ ຄ່າຂົນສົ່ງປາຍເດືອນ / ຄ່າບໍລິການເພີ່ມ",
+      newGrandTotal: "ຍອດລວມໃໝ່",
+      newOutstanding: "ຍອດຄ້າງໃໝ່",
+      updateCostsHelp:
+        "ລະບົບຈະອັບເດດ AP/statement ທັນທີ ແຕ່ບໍ່ຍ້ອນປັບຕົ້ນທຶນສິນຄ້າ",
+      confirmUpdate: "ຢືນຢັນອັບເດດ",
+      paymentHistory: "ປະຫວັດການຊຳລະ",
+      paymentEntry: "ຊຳລະ",
+      reversalEntry: "ຍ້ອນລາຍການ",
+      systemUser: "ລະບົບ",
+      reverseEntry: "ຍ້ອນລາຍການ",
+      reversed: "ຖືກຍ້ອນແລ້ວ",
+      editPo: "ແກ້ໄຂໃບສັ່ງຊື້",
+      exchangeRateHint:
+        "ປ່ອຍວ່າງໄວ້ໄດ້ຖ້າຍັງບໍ່ຮູ້ເຣດຈິງ (ລະບົບຈະຕັ້ງເປັນລໍຖ້າປິດເຣດ)",
+      itemLines: "ລາຍການສິນຄ້າ",
+      expectedDateAria: "ເລືອກວັນທີຄາດຮັບໃນຟອມແກ້ໄຂ PO",
+      dueDateAria: "ເລືອກວັນທີຄົບກຳນົດຊຳລະໃນຟອມແກ້ໄຂ PO",
+      saveEdit: "ບັນທຶກການແກ້ໄຂ",
+      created: "ສ້າງ",
+      confirmedOrder: "ຢືນຢັນສັ່ງຊື້",
+      shipped: "ຈັດສົ່ງ",
+      received: "ຮັບສິນຄ້າແລ້ວ",
+      expectedOn: "ຄາດວ່າ",
+      dueOn: "ຄົບກຳນົດຊຳລະ",
+      receivedQty: "ຮັບແລ້ວ",
+      goods: "ສິນຄ້າ",
+      confirmOrder: "ຢືນຢັນສັ່ງຊື້",
+      supplierShipped: "ຜູ້ສະໜອງຈັດສົ່ງແລ້ວ",
+      receiveGoods: "ຮັບສິນຄ້າ",
+      emptyData: "ບໍ່ພົບຂໍ້ມູນ",
     },
   },
   th: {
@@ -432,12 +643,18 @@ const purchaseTextByLanguage = {
       clear: "ล้างค่า",
     },
     errors: {
+      atLeastOneItem: "กรุณาเพิ่มรายการสินค้าอย่างน้อย 1 รายการ",
       loadPoDetailFailed: "โหลดรายละเอียดใบสั่งซื้อไม่สำเร็จ",
       poNotFound: "ไม่พบข้อมูลใบสั่งซื้อ",
       connectionRetry: "เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่",
       loadPoListFailed: "โหลดรายการใบสั่งซื้อไม่สำเร็จ",
       invalidPoList: "รูปแบบข้อมูลใบสั่งซื้อไม่ถูกต้อง",
       loadPendingRateFailed: "โหลดคิวรอปิดเรทไม่สำเร็จ",
+    },
+    pendingQueue: {
+      emptyHint: "ลองกลับไป `PO Operations` เพื่อเช็กงานรับเข้าสินค้าหรือสร้าง PO เพิ่ม",
+      goOperations: "ไป PO Operations",
+      selectedCount: "เลือกแล้ว {selected}/{total} รายการ",
     },
     bulk: {
       selectAtLeastOne: "กรุณาเลือก PO อย่างน้อย 1 รายการ",
@@ -448,6 +665,24 @@ const purchaseTextByLanguage = {
       starting: "เริ่มประมวลผล...",
       processing: "กำลังประมวลผล {current}/{total} ({poNumber})",
       paymentRoundNote: "รอบชำระ {reference}",
+      autoMatchHint: "ระบบจะจับคู่ยอดชำระอัตโนมัติแบบครบกำหนดเก่าสุดก่อน (oldest due first)",
+      exchangeRateLabel: "อัตราแลกเปลี่ยนจริง (1 {purchase} = ? {store})",
+      paidAtLabel: "วันที่ชำระ (top-up date)",
+      statementTotalLabel: "ยอดชำระรวมตาม statement (ไม่บังคับ)",
+      statementTotalHelp: "ถ้าเว้นว่าง ระบบจะชำระเต็มยอดค้างทุก PO ที่เลือก",
+      referenceLabel: "เลขอ้างอิงรอบบัตร/รอบชำระ (บังคับ)",
+      referencePlaceholder: "เช่น BCEL-VISA-2026-02",
+      noteLabel: "หมายเหตุ (ไม่บังคับ)",
+      notePlaceholder: "เช่น top-up รอบปลายเดือน",
+      reconcilePlanTitle: "แผนกระทบยอดอัตโนมัติ (ก่อนกดยืนยัน)",
+      reconcilePlanSummary:
+        "ยอดค้างที่เลือก {outstanding} · จะลงชำระ {planned} · ค้างหลังรอบนี้ {after}",
+      statementTotalMustBePositive: "ยอดชำระรวมต้องมากกว่า 0",
+      dueShort: "due",
+      reconcileRowMatched: "จับคู่",
+      reconcileRowOutstanding: "ค้าง",
+      failedListTitle: "รายการที่ไม่สำเร็จ ({count})",
+      startFinalizeAndSettle: "เริ่มปิดเรท + ชำระ",
       finalizeFailed: "{poNumber}: ปิดเรทไม่สำเร็จ ({message})",
       detailReloadFailed: "{poNumber}: โหลดยอดค้างหลังปิดเรทไม่สำเร็จ ({message})",
       settleFailed: "{poNumber}: บันทึกชำระไม่สำเร็จ ({message})",
@@ -457,6 +692,158 @@ const purchaseTextByLanguage = {
       failedCount: "มีรายการไม่สำเร็จ {count} รายการ",
       processingConnectionFailed: "เชื่อมต่อไม่สำเร็จระหว่างประมวลผลแบบกลุ่ม",
       unknown: "unknown",
+    },
+    create: {
+      title: "สร้างใบสั่งซื้อ",
+      stepLabel: "ขั้นตอน",
+      supplierNameOptional: "ชื่อซัพพลายเออร์ (ไม่บังคับ)",
+      hideSuppliers: "ซ่อนรายการซัพพลายเออร์",
+      allSuppliers: "ดูซัพพลายเออร์ทั้งหมด",
+      supplierPlaceholder: "เช่น ร้านสมชาย, ตลาดเช้า",
+      supplierSearchHint: "พิมพ์เพื่อค้นหาและแตะเลือกจากรายการเดิม หรือพิมพ์ชื่อใหม่เองได้",
+      supplierSearchEmpty: "ไม่พบชื่อซัพพลายเออร์ที่ตรงกับคำค้นหา (ใช้ชื่อที่พิมพ์ได้เลย)",
+      contactOptional: "เบอร์ติดต่อ (ไม่บังคับ)",
+      purchaseCurrency: "สกุลเงินที่ซื้อ",
+      actualExchangeRateOptional: "อัตราแลกเปลี่ยนจริง (ถ้าทราบ)",
+      exchangeRatePlaceholder: "เช่น 600 (1 {purchase} = ? {store})",
+      exchangeRateHelp:
+        "ถ้ายังไม่ทราบเรทตอนนี้ สามารถเว้นว่างได้ แล้วไปปิดเรทหลังรับสินค้า/ตอนชำระจริง",
+      next: "ถัดไป →",
+      addProducts: "เพิ่มสินค้า",
+      hideProducts: "ซ่อนรายการสินค้า",
+      allProducts: "ดูสินค้าทั้งหมด",
+      searchProductsPlaceholder: "🔍 ค้นหาสินค้า...",
+      searchProductsHint: "ค้นหาด้วยชื่อหรือ SKU หรือกดปุ่มเพื่อเลือกจากรายการ",
+      noMatchingProducts: "ไม่พบสินค้าที่ค้นหา",
+      noProductsAvailable: "ไม่มีสินค้าให้เลือก",
+      noProductsAdded: "ยังไม่ได้เพิ่มสินค้า",
+      quantity: "จำนวน",
+      costPerCurrency: "ราคา/{currency}",
+      back: "← ย้อนกลับ",
+      shippingCostLabel: "ค่าขนส่ง ({currency})",
+      otherCostLabel: "ค่าอื่นๆ ({currency})",
+      otherCostNoteLabel: "หมายเหตุค่าอื่นๆ",
+      otherCostNotePlaceholder: "เช่น ค่าภาษี, ค่าดำเนินการ",
+      expectedReceiveDateOptional: "คาดว่าจะได้รับ (ไม่บังคับ)",
+      expectedReceiveAria: "เลือกวันที่คาดว่าจะได้รับ",
+      expectedReceiveHelp: "ยังไม่ระบุได้ เลือกภายหลังได้",
+      dueDateLabel: "ครบกำหนดชำระ (due date)",
+      dueDateAria: "เลือกวันที่ครบกำหนดชำระ",
+      dueDateHelp: "ถ้ายังไม่รู้กำหนดจริง ให้เว้นว่างไว้ก่อนได้",
+      noteOptional: "หมายเหตุ (ไม่บังคับ)",
+      notePlaceholder: "หมายเหตุเพิ่มเติม",
+      summary: "สรุป",
+      pendingRateSummary:
+        "ยังไม่ปิดเรทจริง: ระบบจะใช้เรทชั่วคราว 1 เพื่อบันทึก PO และให้ไปปิดเรทภายหลัง",
+      productsCount: "สินค้า ({count} รายการ)",
+      shipping: "ค่าขนส่ง",
+      otherCosts: "ค่าอื่นๆ",
+      grandTotal: "รวมทั้งหมด",
+      saveDraft: "บันทึกร่าง",
+      receiveNow: "รับสินค้าทันที",
+      createFailed: "สร้างใบสั่งซื้อไม่สำเร็จ",
+      createSuccess: "สร้างใบสั่งซื้อเรียบร้อย",
+      createAndReceivedSuccess: "สร้างใบสั่งซื้อ + รับสินค้าเรียบร้อย",
+      pendingRateToast: "PO นี้อยู่สถานะรอปิดเรท สามารถปิดเรทจริงได้ภายหลัง",
+      createAndConfirmSuccess: "สร้างใบสั่งซื้อ + ยืนยันสั่งแล้ว",
+      confirmOrder: "ยืนยันสั่งซื้อ",
+      closeConfirmBackdropAria: "ปิดกล่องยืนยันปิดฟอร์ม",
+      closeConfirmDialogAria: "ยืนยันปิดฟอร์มสร้างใบสั่งซื้อ",
+      closeConfirmTitle: "ยืนยันปิดฟอร์มสร้างใบสั่งซื้อ",
+      closeConfirmBody: "มีข้อมูลที่ยังไม่บันทึก ต้องการปิดและทิ้งข้อมูลที่กรอกไว้หรือไม่",
+      closeConfirmBack: "กลับไปแก้ไข",
+      closeConfirmDiscard: "ปิดและทิ้งข้อมูล",
+    },
+    detail: {
+      finalRateInvalid: "กรุณากรอกอัตราแลกเปลี่ยนจริงให้ถูกต้อง",
+      finalizeRateFailed: "ปิดเรทไม่สำเร็จ",
+      finalizeRateSuccess: "ปิดเรทเรียบร้อย",
+      paymentAmountInvalid: "กรุณากรอกยอดชำระให้ถูกต้อง",
+      paymentExceedsOutstanding: "ยอดชำระเกินยอดค้าง",
+      settleFailed: "บันทึกชำระไม่สำเร็จ",
+      settleSuccess: "บันทึกชำระเรียบร้อย",
+      shippingCostInvalid: "กรุณากรอกค่าขนส่งให้ถูกต้อง",
+      otherCostInvalid: "กรุณากรอกค่าอื่นๆ ให้ถูกต้อง",
+      updateCostsFailed: "อัปเดตค่าขนส่ง/ค่าอื่นไม่สำเร็จ",
+      updateCostsSuccess: "อัปเดตค่าขนส่ง/ค่าอื่นเรียบร้อย",
+      reversePaymentFailed: "ย้อนรายการชำระไม่สำเร็จ",
+      reversePaymentSuccess: "ย้อนรายการชำระเรียบร้อย",
+      editRequiresItem: "ต้องมีอย่างน้อย 1 รายการสินค้า",
+      updatePoFailed: "อัปเดต PO ไม่สำเร็จ",
+      updatePoSuccess: "บันทึกการแก้ไข PO เรียบร้อย",
+      pdfDownloaded: "ดาวน์โหลด PDF เรียบร้อย",
+      pdfGenerateFailed: "สร้าง PDF ไม่สำเร็จ",
+      pdfShareFailed: "แชร์ PDF ไม่สำเร็จ",
+      titleFallback: "รายละเอียด",
+      mustFinalizeRateBeforePayment: "ต้องปิดเรทก่อนบันทึกชำระ",
+      pdfDocTitle: "ใบสั่งซื้อ",
+      referenceRate: "เรทอ้างอิง",
+      initialRate: "เรทตั้งต้นตอนสร้าง PO",
+      rateStatusPending: "สถานะ: รอปิดเรทจริง (แนะนำปิดเรทตอนชำระจริงปลายงวด)",
+      rateStatusLocked: "สถานะ: ปิดเรทแล้ว",
+      when: "เมื่อ",
+      rateDifference: "ส่วนต่างเรท",
+      paymentStatus: "สถานะชำระ",
+      paid: "ชำระแล้ว",
+      partialPaid: "ชำระบางส่วน",
+      unpaid: "ยังไม่ชำระ",
+      paidAmount: "จ่ายแล้ว",
+      outstanding: "ค้าง",
+      paidAt: "ชำระเมื่อ",
+      paymentRecorded: "บันทึกชำระแล้ว",
+      by: "โดย",
+      reference: "อ้างอิง",
+      readyToSettle: "พร้อมบันทึกชำระเมื่อจ่ายจริง",
+      finalizeRateTitle: "ปิดเรทแลกเปลี่ยนจริง",
+      finalRateLabel: "อัตราแลกเปลี่ยนจริง (1 {purchase} = ? {store})",
+      finalRatePlaceholder: "เช่น 670",
+      finalizeRateNoteLabel: "หมายเหตุการปิดเรท (ไม่บังคับ)",
+      finalizeRateNotePlaceholder: "เช่น ชำระปลายเดือน/อ้างอิงใบแจ้งหนี้",
+      finalizeRateHelp:
+        "หมายเหตุ: การปิดเรทจะอัปเดตราคาฐานใน PO นี้สำหรับการอ้างอิงบัญชี ไม่ย้อนแก้เอกสารที่ปิดไปแล้ว",
+      confirmFinalizeRate: "ยืนยันปิดเรท",
+      settlePaymentTitle: "บันทึกชำระ PO",
+      paymentAmountLabel: "ยอดชำระ ({currency})",
+      currentOutstanding: "ยอดค้างปัจจุบัน",
+      paymentDate: "วันที่ชำระ",
+      paymentReferenceLabel: "เลขอ้างอิงชำระ (ไม่บังคับ)",
+      paymentReferencePlaceholder: "เช่น Statement ปลายเดือน / เลขใบแจ้งหนี้",
+      optionalNote: "หมายเหตุ (ไม่บังคับ)",
+      confirmSettlePayment: "ยืนยันบันทึกชำระ",
+      updateCostsTitle: "อัปเดตค่าขนส่ง/ค่าอื่นหลังรับสินค้า",
+      shippingCostLabel: "ค่าขนส่ง ({currency})",
+      otherCostLabel: "ค่าอื่นๆ ({currency})",
+      otherCostNoteLabel: "หมายเหตุค่าอื่นๆ (ไม่บังคับ)",
+      otherCostNotePlaceholder: "เช่น ค่าขนส่งปลายเดือน / ค่าบริการเพิ่มเติม",
+      newGrandTotal: "ยอดรวมใหม่",
+      newOutstanding: "คงค้างใหม่",
+      updateCostsHelp:
+        "หมายเหตุ: อัปเดตยอด AP/statement ทันที แต่ไม่ปรับต้นทุนสินค้าแบบย้อนย้อนหลัง",
+      confirmUpdate: "ยืนยันอัปเดต",
+      paymentHistory: "ประวัติการชำระ",
+      paymentEntry: "ชำระ",
+      reversalEntry: "ย้อนรายการ",
+      systemUser: "โดยระบบ",
+      reverseEntry: "ย้อนรายการ",
+      reversed: "ถูกย้อนแล้ว",
+      editPo: "แก้ไข PO",
+      exchangeRateHint: "เว้นว่างได้ถ้ายังไม่ทราบเรทจริง (ระบบจะตั้งเป็นรอปิดเรท)",
+      itemLines: "รายการสินค้า",
+      expectedDateAria: "เลือกวันที่คาดรับในฟอร์มแก้ไข PO",
+      dueDateAria: "เลือกวันที่ครบกำหนดชำระในฟอร์มแก้ไข PO",
+      saveEdit: "บันทึกการแก้ไข",
+      created: "สร้าง",
+      confirmedOrder: "ยืนยันสั่งซื้อ",
+      shipped: "จัดส่ง",
+      received: "รับสินค้าแล้ว",
+      expectedOn: "คาดว่า",
+      dueOn: "ครบกำหนดชำระ",
+      receivedQty: "ได้รับ",
+      goods: "สินค้า",
+      confirmOrder: "ยืนยันสั่งซื้อ",
+      supplierShipped: "ซัพพลายเออร์ส่งแล้ว",
+      receiveGoods: "รับสินค้า",
+      emptyData: "ไม่พบข้อมูล",
     },
   },
   en: {
@@ -483,12 +870,18 @@ const purchaseTextByLanguage = {
       clear: "Clear",
     },
     errors: {
+      atLeastOneItem: "Please add at least one product",
       loadPoDetailFailed: "Unable to load purchase order details",
       poNotFound: "Purchase order not found",
       connectionRetry: "Unable to connect. Please try again.",
       loadPoListFailed: "Unable to load purchase orders",
       invalidPoList: "Invalid purchase order payload",
       loadPendingRateFailed: "Unable to load the pending-rate queue",
+    },
+    pendingQueue: {
+      emptyHint: "Try going back to `PO Operations` to check receiving work or create a new PO.",
+      goOperations: "Go to PO Operations",
+      selectedCount: "Selected {selected}/{total} items",
     },
     bulk: {
       selectAtLeastOne: "Please select at least one PO",
@@ -499,6 +892,24 @@ const purchaseTextByLanguage = {
       starting: "Starting bulk processing...",
       processing: "Processing {current}/{total} ({poNumber})",
       paymentRoundNote: "Payment cycle {reference}",
+      autoMatchHint: "Auto matching uses oldest due first.",
+      exchangeRateLabel: "Final exchange rate (1 {purchase} = ? {store})",
+      paidAtLabel: "Paid date (top-up date)",
+      statementTotalLabel: "Statement total (optional)",
+      statementTotalHelp: "If empty, the system settles the full outstanding amount for all selected POs.",
+      referenceLabel: "Card-cycle/payment reference (required)",
+      referencePlaceholder: "e.g. BCEL-VISA-2026-02",
+      noteLabel: "Note (optional)",
+      notePlaceholder: "e.g. month-end top-up",
+      reconcilePlanTitle: "Auto reconciliation plan (before confirming)",
+      reconcilePlanSummary:
+        "Selected outstanding {outstanding} · will settle {planned} · remaining after this cycle {after}",
+      statementTotalMustBePositive: "Statement total must be greater than 0",
+      dueShort: "due",
+      reconcileRowMatched: "Matched",
+      reconcileRowOutstanding: "Outstanding",
+      failedListTitle: "Failed items ({count})",
+      startFinalizeAndSettle: "Start finalize + settle",
       finalizeFailed: "{poNumber}: finalize rate failed ({message})",
       detailReloadFailed: "{poNumber}: failed to reload outstanding balance ({message})",
       settleFailed: "{poNumber}: payment recording failed ({message})",
@@ -508,6 +919,161 @@ const purchaseTextByLanguage = {
       failedCount: "{count} items failed",
       processingConnectionFailed: "Connection failed during bulk processing",
       unknown: "unknown",
+    },
+    create: {
+      title: "Create purchase order",
+      stepLabel: "Step",
+      supplierNameOptional: "Supplier name (optional)",
+      hideSuppliers: "Hide suppliers",
+      allSuppliers: "All suppliers",
+      supplierPlaceholder: "e.g. Somchai Supply, Morning Market",
+      supplierSearchHint: "Type to search and pick from existing suppliers, or enter a new name.",
+      supplierSearchEmpty:
+        "No supplier matches this search. You can use the typed name.",
+      contactOptional: "Contact number (optional)",
+      purchaseCurrency: "Purchase currency",
+      actualExchangeRateOptional: "Actual exchange rate (if known)",
+      exchangeRatePlaceholder: "e.g. 600 (1 {purchase} = ? {store})",
+      exchangeRateHelp:
+        "Leave this blank if the final rate is not known yet. You can finalize it after receiving goods or at payment time.",
+      next: "Next →",
+      addProducts: "Add products",
+      hideProducts: "Hide products",
+      allProducts: "All products",
+      searchProductsPlaceholder: "Search products...",
+      searchProductsHint: "Search by name or SKU, or open the full product list.",
+      noMatchingProducts: "No matching products",
+      noProductsAvailable: "No products available",
+      noProductsAdded: "No products added yet",
+      quantity: "Quantity",
+      costPerCurrency: "Cost / {currency}",
+      back: "← Back",
+      shippingCostLabel: "Shipping ({currency})",
+      otherCostLabel: "Other costs ({currency})",
+      otherCostNoteLabel: "Other cost note",
+      otherCostNotePlaceholder: "e.g. tax, handling fee",
+      expectedReceiveDateOptional: "Expected receive date (optional)",
+      expectedReceiveAria: "Select expected receive date",
+      expectedReceiveHelp: "You can leave this blank and set it later.",
+      dueDateLabel: "Due date",
+      dueDateAria: "Select due date",
+      dueDateHelp: "Leave blank if the actual due date is not known yet.",
+      noteOptional: "Note (optional)",
+      notePlaceholder: "Additional note",
+      summary: "Summary",
+      pendingRateSummary:
+        "Final exchange rate is still pending: the system will temporarily use rate 1 and let you finalize it later.",
+      productsCount: "Products ({count})",
+      shipping: "Shipping",
+      otherCosts: "Other costs",
+      grandTotal: "Grand total",
+      saveDraft: "Save draft",
+      receiveNow: "Receive now",
+      createFailed: "Failed to create purchase order",
+      createSuccess: "Purchase order created",
+      createAndReceivedSuccess: "Purchase order created and received",
+      pendingRateToast: "This PO still needs final exchange rate confirmation later",
+      createAndConfirmSuccess: "Purchase order created and confirmed",
+      confirmOrder: "Confirm order",
+      closeConfirmBackdropAria: "Close create form confirmation dialog",
+      closeConfirmDialogAria: "Confirm closing purchase order creation form",
+      closeConfirmTitle: "Confirm closing the create purchase order form",
+      closeConfirmBody:
+        "There is unsaved information. Do you want to close the form and discard the entered data?",
+      closeConfirmBack: "Back to edit",
+      closeConfirmDiscard: "Discard and close",
+    },
+    detail: {
+      finalRateInvalid: "Please enter a valid final exchange rate",
+      finalizeRateFailed: "Failed to finalize exchange rate",
+      finalizeRateSuccess: "Exchange rate finalized",
+      paymentAmountInvalid: "Please enter a valid payment amount",
+      paymentExceedsOutstanding: "Payment amount exceeds outstanding balance",
+      settleFailed: "Failed to record payment",
+      settleSuccess: "Payment recorded",
+      shippingCostInvalid: "Please enter a valid shipping cost",
+      otherCostInvalid: "Please enter a valid additional cost",
+      updateCostsFailed: "Failed to update extra costs",
+      updateCostsSuccess: "Extra costs updated",
+      reversePaymentFailed: "Failed to reverse payment entry",
+      reversePaymentSuccess: "Payment entry reversed",
+      editRequiresItem: "At least one line item is required",
+      updatePoFailed: "Failed to update purchase order",
+      updatePoSuccess: "Purchase order updated",
+      pdfDownloaded: "PDF downloaded",
+      pdfGenerateFailed: "Failed to generate PDF",
+      pdfShareFailed: "Failed to share PDF",
+      titleFallback: "Detail",
+      mustFinalizeRateBeforePayment: "Finalize the exchange rate before recording payment",
+      pdfDocTitle: "Purchase order",
+      referenceRate: "Reference rate",
+      initialRate: "Initial rate at PO creation",
+      rateStatusPending: "Status: waiting for final exchange rate (recommended at actual settlement)",
+      rateStatusLocked: "Status: finalized",
+      when: "on",
+      rateDifference: "rate diff",
+      paymentStatus: "Payment status",
+      paid: "Paid",
+      partialPaid: "Partially paid",
+      unpaid: "Unpaid",
+      paidAmount: "Paid",
+      outstanding: "Outstanding",
+      paidAt: "Paid on",
+      paymentRecorded: "Payment recorded",
+      by: "by",
+      reference: "ref",
+      readyToSettle: "Ready to record payment when settlement happens",
+      finalizeRateTitle: "Finalize exchange rate",
+      finalRateLabel: "Final exchange rate (1 {purchase} = ? {store})",
+      finalRatePlaceholder: "e.g. 670",
+      finalizeRateNoteLabel: "Finalize rate note (optional)",
+      finalizeRateNotePlaceholder: "e.g. month-end settlement / invoice ref",
+      finalizeRateHelp:
+        "Finalizing the rate updates the base values for accounting reference on this PO only and does not retroactively change closed documents.",
+      confirmFinalizeRate: "Confirm finalize rate",
+      settlePaymentTitle: "Record PO payment",
+      paymentAmountLabel: "Payment amount ({currency})",
+      currentOutstanding: "Current outstanding",
+      paymentDate: "Payment date",
+      paymentReferenceLabel: "Payment reference (optional)",
+      paymentReferencePlaceholder: "e.g. month-end statement / invoice number",
+      optionalNote: "Note (optional)",
+      confirmSettlePayment: "Confirm payment",
+      updateCostsTitle: "Update shipping and extra costs after receiving",
+      shippingCostLabel: "Shipping cost ({currency})",
+      otherCostLabel: "Other cost ({currency})",
+      otherCostNoteLabel: "Other cost note (optional)",
+      otherCostNotePlaceholder: "e.g. month-end freight / extra service fee",
+      newGrandTotal: "New grand total",
+      newOutstanding: "New outstanding",
+      updateCostsHelp:
+        "This updates AP and statement balances immediately, but does not retroactively change product costs.",
+      confirmUpdate: "Confirm update",
+      paymentHistory: "Payment history",
+      paymentEntry: "Payment",
+      reversalEntry: "Reversal",
+      systemUser: "system",
+      reverseEntry: "Reverse entry",
+      reversed: "Reversed",
+      editPo: "Edit purchase order",
+      exchangeRateHint:
+        "Leave blank if the final exchange rate is not known yet. The PO will remain pending final rate.",
+      itemLines: "Line items",
+      expectedDateAria: "Select expected receive date in edit form",
+      dueDateAria: "Select due date in edit form",
+      saveEdit: "Save changes",
+      created: "Created",
+      confirmedOrder: "Confirmed",
+      shipped: "Shipped",
+      received: "Received",
+      expectedOn: "Expected on",
+      dueOn: "Due on",
+      receivedQty: "received",
+      goods: "Goods",
+      confirmOrder: "Confirm order",
+      supplierShipped: "Supplier shipped",
+      receiveGoods: "Receive goods",
+      emptyData: "No data found",
     },
   },
 } satisfies Record<
@@ -536,12 +1102,18 @@ const purchaseTextByLanguage = {
       clear: string;
     };
     errors: {
+      atLeastOneItem: string;
       loadPoDetailFailed: string;
       poNotFound: string;
       connectionRetry: string;
       loadPoListFailed: string;
       invalidPoList: string;
       loadPendingRateFailed: string;
+    };
+    pendingQueue: {
+      emptyHint: string;
+      goOperations: string;
+      selectedCount: string;
     };
     bulk: {
       selectAtLeastOne: string;
@@ -552,6 +1124,23 @@ const purchaseTextByLanguage = {
       starting: string;
       processing: string;
       paymentRoundNote: string;
+      autoMatchHint: string;
+      exchangeRateLabel: string;
+      paidAtLabel: string;
+      statementTotalLabel: string;
+      statementTotalHelp: string;
+      referenceLabel: string;
+      referencePlaceholder: string;
+      noteLabel: string;
+      notePlaceholder: string;
+      reconcilePlanTitle: string;
+      reconcilePlanSummary: string;
+      statementTotalMustBePositive: string;
+      dueShort: string;
+      reconcileRowMatched: string;
+      reconcileRowOutstanding: string;
+      failedListTitle: string;
+      startFinalizeAndSettle: string;
       finalizeFailed: string;
       detailReloadFailed: string;
       settleFailed: string;
@@ -562,6 +1151,419 @@ const purchaseTextByLanguage = {
       processingConnectionFailed: string;
       unknown: string;
     };
+    create: {
+      title: string;
+      stepLabel: string;
+      supplierNameOptional: string;
+      hideSuppliers: string;
+      allSuppliers: string;
+      supplierPlaceholder: string;
+      supplierSearchHint: string;
+      supplierSearchEmpty: string;
+      contactOptional: string;
+      purchaseCurrency: string;
+      actualExchangeRateOptional: string;
+      exchangeRatePlaceholder: string;
+      exchangeRateHelp: string;
+      next: string;
+      addProducts: string;
+      hideProducts: string;
+      allProducts: string;
+      searchProductsPlaceholder: string;
+      searchProductsHint: string;
+      noMatchingProducts: string;
+      noProductsAvailable: string;
+      noProductsAdded: string;
+      quantity: string;
+      costPerCurrency: string;
+      back: string;
+      shippingCostLabel: string;
+      otherCostLabel: string;
+      otherCostNoteLabel: string;
+      otherCostNotePlaceholder: string;
+      expectedReceiveDateOptional: string;
+      expectedReceiveAria: string;
+      expectedReceiveHelp: string;
+      dueDateLabel: string;
+      dueDateAria: string;
+      dueDateHelp: string;
+      noteOptional: string;
+      notePlaceholder: string;
+      summary: string;
+      pendingRateSummary: string;
+      productsCount: string;
+      shipping: string;
+      otherCosts: string;
+      grandTotal: string;
+      saveDraft: string;
+      receiveNow: string;
+      createFailed: string;
+      createSuccess: string;
+      createAndReceivedSuccess: string;
+      pendingRateToast: string;
+      createAndConfirmSuccess: string;
+      confirmOrder: string;
+      closeConfirmBackdropAria: string;
+      closeConfirmDialogAria: string;
+      closeConfirmTitle: string;
+      closeConfirmBody: string;
+      closeConfirmBack: string;
+      closeConfirmDiscard: string;
+    };
+    detail: {
+      finalRateInvalid: string;
+      finalizeRateFailed: string;
+      finalizeRateSuccess: string;
+      paymentAmountInvalid: string;
+      paymentExceedsOutstanding: string;
+      settleFailed: string;
+      settleSuccess: string;
+      shippingCostInvalid: string;
+      otherCostInvalid: string;
+      updateCostsFailed: string;
+      updateCostsSuccess: string;
+      reversePaymentFailed: string;
+      reversePaymentSuccess: string;
+      editRequiresItem: string;
+      updatePoFailed: string;
+      updatePoSuccess: string;
+      pdfDownloaded: string;
+      pdfGenerateFailed: string;
+      pdfShareFailed: string;
+      titleFallback: string;
+      mustFinalizeRateBeforePayment: string;
+      pdfDocTitle: string;
+      referenceRate: string;
+      initialRate: string;
+      rateStatusPending: string;
+      rateStatusLocked: string;
+      when: string;
+      rateDifference: string;
+      paymentStatus: string;
+      paid: string;
+      partialPaid: string;
+      unpaid: string;
+      paidAmount: string;
+      outstanding: string;
+      paidAt: string;
+      paymentRecorded: string;
+      by: string;
+      reference: string;
+      readyToSettle: string;
+      finalizeRateTitle: string;
+      finalRateLabel: string;
+      finalRatePlaceholder: string;
+      finalizeRateNoteLabel: string;
+      finalizeRateNotePlaceholder: string;
+      finalizeRateHelp: string;
+      confirmFinalizeRate: string;
+      settlePaymentTitle: string;
+      paymentAmountLabel: string;
+      currentOutstanding: string;
+      paymentDate: string;
+      paymentReferenceLabel: string;
+      paymentReferencePlaceholder: string;
+      optionalNote: string;
+      confirmSettlePayment: string;
+      updateCostsTitle: string;
+      shippingCostLabel: string;
+      otherCostLabel: string;
+      otherCostNoteLabel: string;
+      otherCostNotePlaceholder: string;
+      newGrandTotal: string;
+      newOutstanding: string;
+      updateCostsHelp: string;
+      confirmUpdate: string;
+      paymentHistory: string;
+      paymentEntry: string;
+      reversalEntry: string;
+      systemUser: string;
+      reverseEntry: string;
+      reversed: string;
+      editPo: string;
+      exchangeRateHint: string;
+      itemLines: string;
+      expectedDateAria: string;
+      dueDateAria: string;
+      saveEdit: string;
+      created: string;
+      confirmedOrder: string;
+      shipped: string;
+      received: string;
+      expectedOn: string;
+      dueOn: string;
+      receivedQty: string;
+      goods: string;
+      confirmOrder: string;
+      supplierShipped: string;
+      receiveGoods: string;
+      emptyData: string;
+    };
+  }
+>;
+
+const purchaseWorkspaceTextByLanguage = {
+  lo: {
+    kpiOpenPo: "Open PO",
+    kpiPendingRate: "Pending Rate",
+    kpiOverdueAp: "Overdue AP",
+    kpiOutstanding: "Outstanding",
+    appliedFilter: "ຕົວກອງທີ່ໃຊ້:",
+    savePreset: "ບັນທຶກ preset",
+    clearQuickFilter: "ລ້າງຕົວກອງດ່ວນ",
+    removePreset: "ລຶບ preset {label}",
+    workspaceTitle: "ໂໝດການເຮັດວຽກ",
+    operationsLabel: "ວຽກ PO",
+    operationsDesc: "ສ້າງ/ຕິດຕາມສະຖານະ PO",
+    monthEndLabel: "ປິດງວດປາຍເດືອນ",
+    monthEndDesc: "ປິດເຣດແລະຊຳລະປາຍເດືອນ",
+    supplierApLabel: "AP ຕາມຊັບພລາຍເອີ",
+    supplierApDesc: "statement/filter/export",
+  },
+  th: {
+    kpiOpenPo: "Open PO",
+    kpiPendingRate: "Pending Rate",
+    kpiOverdueAp: "Overdue AP",
+    kpiOutstanding: "Outstanding",
+    appliedFilter: "ตัวกรองที่ใช้:",
+    savePreset: "บันทึก preset นี้",
+    clearQuickFilter: "ล้างตัวกรองด่วน",
+    removePreset: "ลบ preset {label}",
+    workspaceTitle: "โหมดการทำงาน",
+    operationsLabel: "PO Operations",
+    operationsDesc: "สร้าง/ติดตามสถานะ PO",
+    monthEndLabel: "Month-End Close",
+    monthEndDesc: "ปิดเรทและชำระปลายเดือน",
+    supplierApLabel: "AP by Supplier",
+    supplierApDesc: "statement/filter/export",
+  },
+  en: {
+    kpiOpenPo: "Open PO",
+    kpiPendingRate: "Pending Rate",
+    kpiOverdueAp: "Overdue AP",
+    kpiOutstanding: "Outstanding",
+    appliedFilter: "Applied filter:",
+    savePreset: "Save preset",
+    clearQuickFilter: "Clear quick filter",
+    removePreset: "Remove preset {label}",
+    workspaceTitle: "Workspace",
+    operationsLabel: "PO Operations",
+    operationsDesc: "Create and track POs",
+    monthEndLabel: "Month-End Close",
+    monthEndDesc: "Finalize rate and settle",
+    supplierApLabel: "AP by Supplier",
+    supplierApDesc: "statement/filter/export",
+  },
+} satisfies Record<
+  AppLanguage,
+  {
+    kpiOpenPo: string;
+    kpiPendingRate: string;
+    kpiOverdueAp: string;
+    kpiOutstanding: string;
+    appliedFilter: string;
+    savePreset: string;
+    clearQuickFilter: string;
+    removePreset: string;
+    workspaceTitle: string;
+    operationsLabel: string;
+    operationsDesc: string;
+    monthEndLabel: string;
+    monthEndDesc: string;
+    supplierApLabel: string;
+    supplierApDesc: string;
+  }
+>;
+
+const purchaseMonthEndTextByLanguage = {
+  lo: {
+    queueTitle: "ຄິວ PO ລໍຖ້າປິດເຣດ",
+    recordsCount: "{count} ລາຍການ",
+    exportCsv: "ສົ່ງອອກ CSV",
+    filterSupplierPlaceholder: "ກອງຕາມຊັບພລາຍເອີ",
+    receivedFrom: "ຮັບຕັ້ງແຕ່",
+    receivedTo: "ຮັບເຖິງ",
+    receivedFromAria: "ເລືອກວັນທີຮັບເລີ່ມຕົ້ນ",
+    receivedToAria: "ເລືອກວັນທີຮັບສິ້ນສຸດ",
+    loadingQueue: "ກຳລັງໂຫຼດຄິວລໍຖ້າປິດເຣດ...",
+    emptyQueue: "ບໍ່ມີ PO ທີ່ລໍຖ້າປິດເຣດຕາມເງື່ອນໄຂ",
+    selectAll: "ເລືອກທັງໝົດ",
+    clearSelection: "ລ້າງທີ່ເລືອກ",
+    finalizeAndSettle: "ປິດເຣດ + ຊຳລະປາຍເດືອນ",
+    mixedCurrencies:
+      "ລາຍການທີ່ເລືອກມີຫຼາຍສະກຸນເງິນ ກະລຸນາເລືອກທີລະສະກຸນເພື່ອປິດເຣດແບບກຸ່ມ",
+    bulkTitle: "ປິດເຣດ + ບັນທຶກຊຳລະແບບກຸ່ມ (ຮອບປາຍເດືອນ)",
+    rowReceivedAt: "ຮັບເມື່ອ {date}",
+    rowNoReceivedAt: "ຍັງບໍ່ມີວັນທີຮັບ",
+    rowInitialRate: "ເຣດຕັ້ງຕົ້ນ {rate} {store}/{purchase}",
+    rowDueDate: "ຄົບກຳນົດ {date}",
+    rowOutstanding: "ຄ້າງ {amount}",
+  },
+  th: {
+    queueTitle: "คิว PO รอปิดเรท",
+    recordsCount: "{count} รายการ",
+    exportCsv: "Export CSV",
+    filterSupplierPlaceholder: "กรองซัพพลายเออร์",
+    receivedFrom: "วันที่รับตั้งแต่",
+    receivedTo: "วันที่รับถึง",
+    receivedFromAria: "เลือกวันที่รับตั้งแต่ในคิว PO รอปิดเรท",
+    receivedToAria: "เลือกวันที่รับถึงในคิว PO รอปิดเรท",
+    loadingQueue: "กำลังโหลดคิวรอปิดเรท...",
+    emptyQueue: "ไม่มี PO ที่รอปิดเรทตามเงื่อนไข",
+    selectAll: "เลือกทั้งหมด",
+    clearSelection: "ล้างเลือก",
+    finalizeAndSettle: "ปิดเรท + ชำระปลายเดือน",
+    mixedCurrencies: "รายการที่เลือกมีหลายสกุลเงิน กรุณาเลือกทีละสกุลเพื่อปิดเรทแบบกลุ่ม",
+    bulkTitle: "ปิดเรท + บันทึกชำระแบบกลุ่ม (รอบบัตรปลายเดือน)",
+    rowReceivedAt: "รับเมื่อ {date}",
+    rowNoReceivedAt: "ยังไม่มีวันที่รับ",
+    rowInitialRate: "เรทตั้งต้น {rate} {store}/{purchase}",
+    rowDueDate: "ครบกำหนด {date}",
+    rowOutstanding: "ค้าง {amount}",
+  },
+  en: {
+    queueTitle: "Pending rate-finalization queue",
+    recordsCount: "{count} items",
+    exportCsv: "Export CSV",
+    filterSupplierPlaceholder: "Filter supplier",
+    receivedFrom: "Received from",
+    receivedTo: "Received to",
+    receivedFromAria: "Choose received-from date",
+    receivedToAria: "Choose received-to date",
+    loadingQueue: "Loading pending rate-finalization queue...",
+    emptyQueue: "No purchase orders are waiting for rate finalization",
+    selectAll: "Select all",
+    clearSelection: "Clear",
+    finalizeAndSettle: "Finalize rate + settle month-end",
+    mixedCurrencies: "Selected items contain multiple currencies. Please finalize one currency at a time.",
+    bulkTitle: "Bulk finalize rate + settle (month-end cycle)",
+    rowReceivedAt: "Received {date}",
+    rowNoReceivedAt: "No received date",
+    rowInitialRate: "Initial rate {rate} {store}/{purchase}",
+    rowDueDate: "Due {date}",
+    rowOutstanding: "Outstanding {amount}",
+  },
+} satisfies Record<
+  AppLanguage,
+  {
+    queueTitle: string;
+    recordsCount: string;
+    exportCsv: string;
+    filterSupplierPlaceholder: string;
+    receivedFrom: string;
+    receivedTo: string;
+    receivedFromAria: string;
+    receivedToAria: string;
+    loadingQueue: string;
+    emptyQueue: string;
+    selectAll: string;
+    clearSelection: string;
+    finalizeAndSettle: string;
+    mixedCurrencies: string;
+    bulkTitle: string;
+    rowReceivedAt: string;
+    rowNoReceivedAt: string;
+    rowInitialRate: string;
+    rowDueDate: string;
+    rowOutstanding: string;
+  }
+>;
+
+const purchaseOperationsTextByLanguage = {
+  lo: {
+    filterAll: "ທັງໝົດ",
+    filterOpen: "ເປີດຢູ່",
+    filterShipped: "ຈັດສົ່ງ",
+    pendingRateFinalization: "ລໍຖ້າປິດເຣດ",
+    itemCount: "{count} ລາຍການ",
+    outstanding: "ຄ້າງ {amount}",
+    createdAt: "ສ້າງເມື່ອ {date}",
+    orderedAt: "ຢືນຢັນເມື່ອ {date}",
+    shippedAt: "ຈັດສົ່ງເມື່ອ {date}",
+    expectedAt: "ຄາດວ່າ {date}",
+    receivedAt: "ຮັບເມື່ອ {date}",
+    cancelledAt: "ຍົກເລີກເມື່ອ {date}",
+    cancelled: "ຍົກເລີກ",
+    progress: "ຄວາມຄືບໜ້າ",
+    overdue: "ເກີນກຳນົດ",
+    daysLeft: "ເຫຼືອ {days} ມື້",
+  },
+  th: {
+    filterAll: "ทั้งหมด",
+    filterOpen: "งานเปิด",
+    filterShipped: "จัดส่ง",
+    pendingRateFinalization: "รอปิดเรท",
+    itemCount: "{count} รายการ",
+    outstanding: "ค้าง {amount}",
+    createdAt: "สั่งเมื่อ {date}",
+    orderedAt: "ยืนยันเมื่อ {date}",
+    shippedAt: "จัดส่งเมื่อ {date}",
+    expectedAt: "คาดว่า {date}",
+    receivedAt: "รับเมื่อ {date}",
+    cancelledAt: "ยกเลิกเมื่อ {date}",
+    cancelled: "ยกเลิก",
+    progress: "ความคืบหน้า",
+    overdue: "เลยกำหนด",
+    daysLeft: "เหลือ {days} วัน",
+  },
+  en: {
+    filterAll: "All",
+    filterOpen: "Open",
+    filterShipped: "Shipping",
+    pendingRateFinalization: "Pending rate finalization",
+    itemCount: "{count} items",
+    outstanding: "Outstanding {amount}",
+    createdAt: "Created {date}",
+    orderedAt: "Ordered {date}",
+    shippedAt: "Shipped {date}",
+    expectedAt: "Expected {date}",
+    receivedAt: "Received {date}",
+    cancelledAt: "Cancelled {date}",
+    cancelled: "Cancelled",
+    progress: "Progress",
+    overdue: "Overdue",
+    daysLeft: "{days} days left",
+  },
+} satisfies Record<
+  AppLanguage,
+  {
+    filterAll: string;
+    filterOpen: string;
+    filterShipped: string;
+    pendingRateFinalization: string;
+    itemCount: string;
+    outstanding: string;
+    createdAt: string;
+    orderedAt: string;
+    shippedAt: string;
+    expectedAt: string;
+    receivedAt: string;
+    cancelledAt: string;
+    cancelled: string;
+    progress: string;
+    overdue: string;
+    daysLeft: string;
+  }
+>;
+
+const purchaseStatusMutationTextByLanguage = {
+  lo: {
+    failed: "ອັບເດດສະຖານະບໍ່ສຳເລັດ",
+    success: "ອັບເດດສະຖານະເປັນ \"{status}\" ແລ້ວ",
+  },
+  th: {
+    failed: "อัปเดตสถานะไม่สำเร็จ",
+    success: "อัปเดตสถานะเป็น \"{status}\" เรียบร้อย",
+  },
+  en: {
+    failed: "Failed to update status",
+    success: "Status updated to \"{status}\"",
+  },
+} satisfies Record<
+  AppLanguage,
+  {
+    failed: string;
+    success: string;
   }
 >;
 
@@ -796,6 +1798,22 @@ export function PurchaseOrderList({
 }: PurchaseOrderListProps) {
   const t = useMemo(() => createTranslator(language), [language]);
   const ui = useMemo(() => purchaseTextByLanguage[language], [language]);
+  const workspaceUi = useMemo(
+    () => purchaseWorkspaceTextByLanguage[language],
+    [language],
+  );
+  const monthEndUi = useMemo(
+    () => purchaseMonthEndTextByLanguage[language],
+    [language],
+  );
+  const operationsUi = useMemo(
+    () => purchaseOperationsTextByLanguage[language],
+    [language],
+  );
+  const statusMutationUi = useMemo(
+    () => purchaseStatusMutationTextByLanguage[language],
+    [language],
+  );
   const purchaseStatusLabel = useCallback(
     (status: PurchaseOrderListItem["status"]) =>
       getPurchaseStatusLabel(language, status),
@@ -1287,7 +2305,7 @@ export function PurchaseOrderList({
     if (!activeKpiShortcut || typeof window === "undefined") {
       return;
     }
-    const defaultLabel = kpiShortcutDefaultLabel(activeKpiShortcut);
+    const defaultLabel = kpiShortcutDefaultLabel(language, activeKpiShortcut);
     const input = window.prompt(ui.common.savePresetPrompt, defaultLabel);
     if (input === null) {
       return;
@@ -1306,7 +2324,7 @@ export function PurchaseOrderList({
       return next.slice(0, 6);
     });
     toast.success(ui.common.presetSaved);
-  }, [activeKpiShortcut, ui.common.presetSaved, ui.common.savePresetPrompt]);
+  }, [activeKpiShortcut, language, ui.common.presetSaved, ui.common.savePresetPrompt]);
 
   const removeSavedPreset = useCallback((presetId: string) => {
     setSavedPresets((current) => current.filter((item) => item.id !== presetId));
@@ -1978,7 +2996,7 @@ export function PurchaseOrderList({
   /* ── Submit ── */
   const submitPO = async (receiveImmediately: boolean) => {
     if (items.length === 0) {
-      toast.error("กรุณาเพิ่มรายการสินค้าอย่างน้อย 1 รายการ");
+      toast.error(ui.errors.atLeastOneItem);
       return;
     }
     setIsSubmitting(true);
@@ -2012,56 +3030,28 @@ export function PurchaseOrderList({
       });
       const data = await res.json();
       if (!res.ok) {
-        toast.error(
-          data?.message ??
-            (language === "en"
-              ? "Failed to create purchase order"
-              : language === "lo"
-                ? "ສ້າງໃບສັ່ງຊື້ບໍ່ສຳເລັດ"
-                : "สร้างใบสั่งซื้อไม่สำเร็จ"),
-        );
+        toast.error(data?.message ?? ui.create.createFailed);
         return;
       }
       toast.success(
         receiveImmediately
-          ? language === "en"
-            ? "Purchase order created and received"
-            : language === "lo"
-              ? "ສ້າງໃບສັ່ງຊື້ແລະຮັບສິນຄ້າແລ້ວ"
-              : "สร้างใบสั่งซื้อ + รับสินค้าเรียบร้อย"
-          : language === "en"
-            ? "Purchase order created"
-            : language === "lo"
-              ? "ສ້າງໃບສັ່ງຊື້ແລ້ວ"
-              : "สร้างใบสั่งซื้อเรียบร้อย",
+          ? ui.create.createAndReceivedSuccess
+          : ui.create.createSuccess,
       );
       if (
         data?.purchaseOrder?.purchaseCurrency &&
         data.purchaseOrder.purchaseCurrency !== storeCurrency &&
         !data.purchaseOrder.exchangeRateLockedAt
       ) {
-        toast(
-          language === "en"
-            ? "This PO still needs final exchange rate confirmation later"
-            : language === "lo"
-              ? "PO ນີ້ຍັງຕ້ອງປິດເຣດຈິງໃນພາຍຫຼັງ"
-              : "PO นี้อยู่สถานะรอปิดเรท สามารถปิดเรทจริงได้ภายหลัง",
-          {
+        toast(ui.create.pendingRateToast, {
           icon: "🧾",
-          },
-        );
+        });
       }
       forceCloseCreateSheet();
       await reloadFirstPage();
       router.refresh();
     } catch {
-      toast.error(
-        language === "en"
-          ? "Connection failed. Please try again."
-          : language === "lo"
-            ? "ເຊື່ອມຕໍ່ບໍ່ສຳເລັດ ກະລຸນາລອງໃໝ່"
-            : "เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่",
-      );
+      toast.error(ui.errors.connectionRetry);
     } finally {
       setIsSubmitting(false);
     }
@@ -2080,35 +3070,20 @@ export function PurchaseOrderList({
       });
       const data = await res.json();
       if (!res.ok) {
-        toast.error(
-          data?.message ??
-            (language === "en"
-              ? "Failed to update status"
-              : language === "lo"
-                ? "ອັບເດດສະຖານະບໍ່ສຳເລັດ"
-                : "อัปเดตสถานะไม่สำเร็จ"),
-        );
+        toast.error(data?.message ?? statusMutationUi.failed);
         return;
       }
       toast.success(
-        language === "en"
-          ? `Status updated to "${purchaseStatusLabel(status)}"`
-          : language === "lo"
-            ? `ອັບເດດສະຖານະເປັນ "${purchaseStatusLabel(status)}" ແລ້ວ`
-            : `อัปเดตสถานะเป็น "${purchaseStatusLabel(status)}" เรียบร้อย`,
+        interpolatePurchaseText(statusMutationUi.success, {
+          status: purchaseStatusLabel(status),
+        }),
       );
       invalidatePoDetailCache(poId);
       await reloadFirstPage();
       setSelectedPO(null);
       router.refresh();
     } catch {
-      toast.error(
-        language === "en"
-          ? "Connection failed"
-          : language === "lo"
-            ? "ເຊື່ອມຕໍ່ບໍ່ສຳເລັດ"
-            : "เชื่อมต่อไม่สำเร็จ",
-      );
+      toast.error(ui.errors.connectionRetry);
     }
   };
 
@@ -2270,28 +3245,28 @@ export function PurchaseOrderList({
         <div className="mt-2 grid grid-cols-2 gap-2 lg:grid-cols-4">
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-left">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-              Open PO
+              {workspaceUi.kpiOpenPo}
             </p>
             <p className="mt-0.5 text-sm font-semibold text-slate-900">
-              {workspaceSummary.openPoCount.toLocaleString("th-TH")}
+              {formatNumberByLanguage(language, workspaceSummary.openPoCount)}
             </p>
             <p className="text-[11px] text-slate-500">{t("stock.purchase.openPo")}</p>
           </div>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-left">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-              Pending Rate
+              {workspaceUi.kpiPendingRate}
             </p>
             <p className="mt-0.5 text-sm font-semibold text-slate-900">
-              {workspaceSummary.pendingRateCount.toLocaleString("th-TH")}
+              {formatNumberByLanguage(language, workspaceSummary.pendingRateCount)}
             </p>
             <p className="text-[11px] text-slate-500">{t("stock.purchase.pendingRate")}</p>
           </div>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-left">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-              Overdue AP
+              {workspaceUi.kpiOverdueAp}
             </p>
             <p className="mt-0.5 text-sm font-semibold text-slate-900">
-              {workspaceSummary.overduePoCount.toLocaleString("th-TH")}
+              {formatNumberByLanguage(language, workspaceSummary.overduePoCount)}
             </p>
             <p className="text-[11px] text-slate-500">
               {t("stock.purchase.overdueAp", {
@@ -2301,7 +3276,7 @@ export function PurchaseOrderList({
           </div>
           <div className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-2 text-left">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-              Outstanding
+              {workspaceUi.kpiOutstanding}
             </p>
             <p className="mt-0.5 text-sm font-semibold text-slate-900">
               {fmtPrice(workspaceSummary.outstandingBase, storeCurrency)}
@@ -2312,11 +3287,7 @@ export function PurchaseOrderList({
         {activeKpiShortcutLabel ? (
           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2">
             <p className="text-[11px] text-slate-600">
-              {language === "en"
-                ? "Applied filter:"
-                : language === "lo"
-                  ? "ຕົວກອງທີ່ໃຊ້:"
-                  : "ตัวกรองที่ใช้:"}{" "}
+              {workspaceUi.appliedFilter}{" "}
               {activeKpiShortcutLabel}
             </p>
             <div className="flex items-center gap-1.5">
@@ -2325,22 +3296,14 @@ export function PurchaseOrderList({
                 className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
                 onClick={saveCurrentShortcutPreset}
               >
-                {language === "en"
-                  ? "Save preset"
-                  : language === "lo"
-                    ? "ບັນທຶກ preset"
-                    : "บันทึก preset นี้"}
+                {workspaceUi.savePreset}
               </button>
               <button
                 type="button"
                 className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
                 onClick={clearKpiShortcut}
               >
-                {language === "en"
-                  ? "Clear quick filter"
-                  : language === "lo"
-                    ? "ລ້າງຕົວກອງດ່ວນ"
-                    : "ล้างตัวกรองด่วน"}
+                {workspaceUi.clearQuickFilter}
               </button>
             </div>
           </div>
@@ -2364,11 +3327,9 @@ export function PurchaseOrderList({
                   className="rounded-full p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
                   onClick={() => removeSavedPreset(preset.id)}
                   aria-label={
-                    language === "en"
-                      ? `Remove preset ${preset.label}`
-                      : language === "lo"
-                        ? `ລຶບ preset ${preset.label}`
-                        : `ลบ preset ${preset.label}`
+                    interpolatePurchaseText(workspaceUi.removePreset, {
+                      label: preset.label,
+                    })
                   }
                 >
                   <X className="h-3 w-3" />
@@ -2381,59 +3342,30 @@ export function PurchaseOrderList({
 
       <div className="sticky top-2 z-10 rounded-2xl border border-slate-200 bg-white/95 p-2 backdrop-blur md:static md:z-auto md:bg-white md:p-2 md:backdrop-blur-0">
         <p className="px-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-          {language === "en"
-            ? "Workspace"
-            : language === "lo"
-              ? "ໂໝດການເຮັດວຽກ"
-              : "โหมดการทำงาน"}
+          {workspaceUi.workspaceTitle}
         </p>
         <div className="mt-1 flex gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {(
             [
               {
                 id: "OPERATIONS" as PurchaseWorkspace,
-                label:
-                  language === "en"
-                    ? "PO Operations"
-                    : language === "lo"
-                      ? "ວຽກ PO"
-                      : "PO Operations",
+                label: workspaceUi.operationsLabel,
                 icon: ShoppingCart,
-                desc:
-                  language === "en"
-                    ? "Create and track POs"
-                    : language === "lo"
-                      ? "ສ້າງ/ຕິດຕາມສະຖານະ PO"
-                      : "สร้าง/ติดตามสถานะ PO",
+                desc: workspaceUi.operationsDesc,
                 badge: workspaceSummary.openPoCount,
               },
               {
                 id: "MONTH_END" as PurchaseWorkspace,
-                label:
-                  language === "en"
-                    ? "Month-End Close"
-                    : language === "lo"
-                      ? "ປິດງວດປາຍເດືອນ"
-                      : "Month-End Close",
+                label: workspaceUi.monthEndLabel,
                 icon: Banknote,
-                desc:
-                  language === "en"
-                    ? "Finalize rate and settle"
-                    : language === "lo"
-                      ? "ປິດເຣດແລະຊຳລະປາຍເດືອນ"
-                      : "ปิดเรทและชำระปลายเดือน",
+                desc: workspaceUi.monthEndDesc,
                 badge: workspaceSummary.pendingRateCount,
               },
               {
                 id: "SUPPLIER_AP" as PurchaseWorkspace,
-                label:
-                  language === "en"
-                    ? "AP by Supplier"
-                    : language === "lo"
-                      ? "AP ຕາມຊັບພລາຍເອີ"
-                      : "AP by Supplier",
+                label: workspaceUi.supplierApLabel,
                 icon: FileText,
-                desc: "statement/filter/export",
+                desc: workspaceUi.supplierApDesc,
                 badge: workspaceSummary.overduePoCount,
               },
             ] as const
@@ -2461,7 +3393,7 @@ export function PurchaseOrderList({
                         : "bg-slate-200 text-slate-600"
                     }`}
                   >
-                    {workspace.badge.toLocaleString("th-TH")}
+                    {formatNumberByLanguage(language, workspace.badge)}
                   </span>
                 ) : null}
                 <span
@@ -2482,14 +3414,12 @@ export function PurchaseOrderList({
         <div className="flex items-center justify-between gap-2">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">
-              {language === "en"
-                ? "Pending rate-finalization queue"
-                : language === "lo"
-                  ? "ຄິວ PO ລໍຖ້າປິດເຣດ"
-                  : "คิว PO รอปิดเรท"}
+              {monthEndUi.queueTitle}
             </p>
             <p className="text-[11px] text-amber-700/90">
-              {pendingRateQueue.length} รายการ
+              {interpolatePurchaseText(monthEndUi.recordsCount, {
+                count: formatNumberByLanguage(language, pendingRateQueue.length),
+              })}
             </p>
           </div>
           <button
@@ -2500,7 +3430,7 @@ export function PurchaseOrderList({
             className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1.5 text-[11px] font-medium text-amber-700 hover:bg-amber-100"
           >
             <Download className="h-3.5 w-3.5" />
-            {language === "en" ? "Export CSV" : language === "lo" ? "ສົ່ງອອກ CSV" : "Export CSV"}
+            {monthEndUi.exportCsv}
           </button>
         </div>
         <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
@@ -2508,20 +3438,14 @@ export function PurchaseOrderList({
             <label className="text-[11px] text-amber-700">{ui.common.supplier}</label>
             <input
               className="h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
-              placeholder={
-                language === "en"
-                  ? "Filter supplier"
-                  : language === "lo"
-                    ? "ກອງຕາມຊັບພລາຍເອີ"
-                    : "กรองซัพพลายเออร์"
-              }
+              placeholder={monthEndUi.filterSupplierPlaceholder}
               value={pendingSupplierFilter}
               onChange={(event) => setPendingSupplierFilter(event.target.value)}
             />
           </div>
           <div className="space-y-1 min-w-0">
             <label className="text-[11px] text-amber-700">
-              {language === "en" ? "Received from" : language === "lo" ? "ຮັບຕັ້ງແຕ່" : "วันที่รับตั้งแต่"}
+              {monthEndUi.receivedFrom}
             </label>
             <PurchaseDatePickerField
               language={language}
@@ -2529,13 +3453,7 @@ export function PurchaseOrderList({
               onChange={setPendingReceivedFrom}
               triggerClassName="h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-left text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300 flex items-center justify-between gap-2"
               placeholder="dd/mm/yyyy"
-              ariaLabel={
-                language === "en"
-                  ? "Choose received-from date"
-                  : language === "lo"
-                    ? "ເລືອກວັນທີຮັບເລີ່ມຕົ້ນ"
-                    : "เลือกวันที่รับตั้งแต่ในคิว PO รอปิดเรท"
-              }
+              ariaLabel={monthEndUi.receivedFromAria}
             />
             <div className="flex flex-wrap gap-1.5">
               <button
@@ -2543,34 +3461,34 @@ export function PurchaseOrderList({
                 className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
                 onClick={() => applyPendingQueueDateShortcut("receivedFrom", "TODAY")}
               >
-                {language === "en" ? "Today" : language === "lo" ? "ມື້ນີ້" : "วันนี้"}
+                {ui.common.today}
               </button>
               <button
                 type="button"
                 className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
                 onClick={() => applyPendingQueueDateShortcut("receivedFrom", "PLUS_7")}
               >
-                {language === "en" ? "+7 days" : language === "lo" ? "+7 ມື້" : "+7 วัน"}
+                {ui.common.plusSevenDays}
               </button>
               <button
                 type="button"
                 className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
                 onClick={() => applyPendingQueueDateShortcut("receivedFrom", "END_OF_MONTH")}
               >
-                {language === "en" ? "Month end" : language === "lo" ? "ສິ້ນເດືອນ" : "สิ้นเดือน"}
+                {ui.common.endOfMonth}
               </button>
               <button
                 type="button"
                 className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
                 onClick={() => applyPendingQueueDateShortcut("receivedFrom", "CLEAR")}
               >
-                {language === "en" ? "Clear" : language === "lo" ? "ລ້າງ" : "ล้างค่า"}
+                {ui.common.clear}
               </button>
             </div>
           </div>
           <div className="space-y-1 min-w-0">
             <label className="text-[11px] text-amber-700">
-              {language === "en" ? "Received to" : language === "lo" ? "ຮັບເຖິງ" : "วันที่รับถึง"}
+              {monthEndUi.receivedTo}
             </label>
             <PurchaseDatePickerField
               language={language}
@@ -2578,13 +3496,7 @@ export function PurchaseOrderList({
               onChange={setPendingReceivedTo}
               triggerClassName="h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-left text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300 flex items-center justify-between gap-2"
               placeholder="dd/mm/yyyy"
-              ariaLabel={
-                language === "en"
-                  ? "Choose received-to date"
-                  : language === "lo"
-                    ? "ເລືອກວັນທີຮັບສິ້ນສຸດ"
-                    : "เลือกวันที่รับถึงในคิว PO รอปิดเรท"
-              }
+              ariaLabel={monthEndUi.receivedToAria}
             />
             <div className="flex flex-wrap gap-1.5">
               <button
@@ -2592,39 +3504,35 @@ export function PurchaseOrderList({
                 className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
                 onClick={() => applyPendingQueueDateShortcut("receivedTo", "TODAY")}
               >
-                {language === "en" ? "Today" : language === "lo" ? "ມື້ນີ້" : "วันนี้"}
+                {ui.common.today}
               </button>
               <button
                 type="button"
                 className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
                 onClick={() => applyPendingQueueDateShortcut("receivedTo", "PLUS_7")}
               >
-                {language === "en" ? "+7 days" : language === "lo" ? "+7 ມື້" : "+7 วัน"}
+                {ui.common.plusSevenDays}
               </button>
               <button
                 type="button"
                 className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
                 onClick={() => applyPendingQueueDateShortcut("receivedTo", "END_OF_MONTH")}
               >
-                {language === "en" ? "Month end" : language === "lo" ? "ສິ້ນເດືອນ" : "สิ้นเดือน"}
+                {ui.common.endOfMonth}
               </button>
               <button
                 type="button"
                 className="rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-medium text-amber-700 hover:bg-amber-100"
                 onClick={() => applyPendingQueueDateShortcut("receivedTo", "CLEAR")}
               >
-                {language === "en" ? "Clear" : language === "lo" ? "ລ້າງ" : "ล้างค่า"}
+                {ui.common.clear}
               </button>
             </div>
           </div>
         </div>
         {isLoadingPendingQueue ? (
           <p className="text-xs text-amber-700">
-            {language === "en"
-              ? "Loading pending rate-finalization queue..."
-              : language === "lo"
-                ? "ກຳລັງໂຫຼດຄິວລໍຖ້າປິດເຣດ..."
-                : "กำลังโหลดคิวรอปิดเรท..."}
+            {monthEndUi.loadingQueue}
           </p>
         ) : pendingQueueError ? (
           <div className="flex items-center justify-between gap-2">
@@ -2643,14 +3551,10 @@ export function PurchaseOrderList({
         ) : pendingRateQueue.length === 0 ? (
           <div className="space-y-2 rounded-lg border border-dashed border-amber-300 bg-white px-3 py-4 text-center">
             <p className="text-xs text-amber-700/90">
-              {language === "en"
-                ? "No purchase orders are waiting for rate finalization"
-                : language === "lo"
-                  ? "ບໍ່ມີ PO ທີ່ລໍຖ້າປິດເຣດຕາມເງື່ອນໄຂ"
-                  : "ไม่มี PO ที่รอปิดเรทตามเงื่อนไข"}
+              {monthEndUi.emptyQueue}
             </p>
             <p className="text-[11px] text-slate-500">
-              ลองกลับไป `PO Operations` เพื่อเช็กงานรับเข้าสินค้าหรือสร้าง PO เพิ่ม
+              {ui.pendingQueue.emptyHint}
             </p>
             <div className="flex justify-center gap-2">
               <button
@@ -2658,7 +3562,7 @@ export function PurchaseOrderList({
                 className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700 hover:bg-amber-100"
                 onClick={() => handleWorkspaceChange("OPERATIONS")}
               >
-                ไป PO Operations
+                {ui.pendingQueue.goOperations}
               </button>
               {canCreate ? (
                 <button
@@ -2666,7 +3570,7 @@ export function PurchaseOrderList({
                   className="rounded-md bg-amber-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-amber-700"
                   onClick={openCreateSheet}
                 >
-                  สร้าง PO ใหม่
+                  {t("stock.purchase.createNew")}
                 </button>
               ) : null}
             </div>
@@ -2675,8 +3579,11 @@ export function PurchaseOrderList({
           <div className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-white px-2.5 py-2">
               <p className="text-[11px] text-amber-800">
-                เลือกแล้ว {selectedPendingQueueIds.length}/{pendingRateQueue.length} รายการ
-                {selectedPendingCurrency ? ` · สกุล ${selectedPendingCurrency}` : ""}
+                {interpolatePurchaseText(ui.pendingQueue.selectedCount, {
+                  selected: selectedPendingQueueIds.length,
+                  total: pendingRateQueue.length,
+                })}
+                {selectedPendingCurrency ? ` · ${ui.common.currency} ${selectedPendingCurrency}` : ""}
               </p>
               <div className="flex flex-wrap items-center gap-1.5">
                 <button
@@ -2685,7 +3592,7 @@ export function PurchaseOrderList({
                   onClick={selectAllPendingQueue}
                   disabled={isBulkSubmitting}
                 >
-                {language === "en" ? "Select all" : language === "lo" ? "ເລືອກທັງໝົດ" : "เลือกทั้งหมด"}
+                {monthEndUi.selectAll}
                 </button>
                 <button
                   type="button"
@@ -2693,7 +3600,7 @@ export function PurchaseOrderList({
                   onClick={clearPendingQueueSelection}
                   disabled={isBulkSubmitting}
                 >
-                {language === "en" ? "Clear" : language === "lo" ? "ລ້າງທີ່ເລືອກ" : "ล้างเลือก"}
+                {monthEndUi.clearSelection}
                 </button>
                 <button
                   type="button"
@@ -2701,39 +3608,30 @@ export function PurchaseOrderList({
                   onClick={openBulkMonthEndMode}
                   disabled={selectedPendingQueueIds.length === 0 || isBulkSubmitting}
                 >
-                  {language === "en"
-                    ? "Finalize rate + settle month-end"
-                    : language === "lo"
-                      ? "ປິດເຣດ + ຊຳລະປາຍເດືອນ"
-                      : "ปิดเรท + ชำระปลายเดือน"}
+                  {monthEndUi.finalizeAndSettle}
                 </button>
               </div>
             </div>
             {hasMixedPendingCurrencies ? (
               <p className="text-[11px] text-red-600">
-                {language === "en"
-                  ? "Selected items contain multiple currencies. Please finalize one currency at a time."
-                  : language === "lo"
-                    ? "ລາຍການທີ່ເລືອກມີຫຼາຍສະກຸນເງິນ ກະລຸນາເລືອກທີລະສະກຸນເພື່ອປິດເຣດແບບກຸ່ມ"
-                    : "รายการที่เลือกมีหลายสกุลเงิน กรุณาเลือกทีละสกุลเพื่อปิดเรทแบบกลุ่ม"}
+                {monthEndUi.mixedCurrencies}
               </p>
             ) : null}
             {isBulkMonthEndMode ? (
               <div className="space-y-2 rounded-lg border border-amber-300 bg-white p-3">
                 <p className="text-xs font-semibold text-amber-800">
-                  {language === "en"
-                    ? "Bulk finalize rate + settle (month-end cycle)"
-                    : language === "lo"
-                      ? "ປິດເຣດ + ບັນທຶກຊຳລະແບບກຸ່ມ (ຮອບປາຍເດືອນ)"
-                      : "ปิดเรท + บันทึกชำระแบบกลุ่ม (รอบบัตรปลายเดือน)"}
+                  {monthEndUi.bulkTitle}
                 </p>
                 <p className="text-[11px] text-amber-700/90">
-                  ระบบจะจับคู่ยอดชำระอัตโนมัติแบบครบกำหนดเก่าสุดก่อน (oldest due first)
+                  {ui.bulk.autoMatchHint}
                 </p>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <div className="space-y-1">
                     <label className="text-[11px] text-slate-600">
-                      อัตราแลกเปลี่ยนจริง (1 {selectedPendingCurrency ?? "-"} = ? {storeCurrency})
+                      {interpolatePurchaseText(ui.bulk.exchangeRateLabel, {
+                        purchase: selectedPendingCurrency ?? "-",
+                        store: storeCurrency,
+                      })}
                     </label>
                     <input
                       type="number"
@@ -2746,7 +3644,7 @@ export function PurchaseOrderList({
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[11px] text-slate-600">วันที่ชำระ (top-up date)</label>
+                    <label className="text-[11px] text-slate-600">{ui.bulk.paidAtLabel}</label>
                     <input
                       type="date"
                       className="po-date-input h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
@@ -2756,9 +3654,7 @@ export function PurchaseOrderList({
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[11px] text-slate-600">
-                      ยอดชำระรวมตาม statement (ไม่บังคับ)
-                    </label>
+                    <label className="text-[11px] text-slate-600">{ui.bulk.statementTotalLabel}</label>
                     <input
                       type="number"
                       inputMode="numeric"
@@ -2769,52 +3665,53 @@ export function PurchaseOrderList({
                       disabled={isBulkSubmitting}
                     />
                     <p className="text-[10px] text-slate-500">
-                      ถ้าเว้นว่าง ระบบจะชำระเต็มยอดค้างทุก PO ที่เลือก
+                      {ui.bulk.statementTotalHelp}
                     </p>
                   </div>
                   <div className="space-y-1 sm:col-span-2">
                     <label className="text-[11px] text-slate-600">
-                      เลขอ้างอิงรอบบัตร/รอบชำระ (บังคับ)
+                      {ui.bulk.referenceLabel}
                     </label>
                     <input
                       className="h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
                       value={bulkReferenceInput}
                       onChange={(event) => setBulkReferenceInput(event.target.value)}
-                      placeholder="เช่น BCEL-VISA-2026-02"
+                      placeholder={ui.bulk.referencePlaceholder}
                       disabled={isBulkSubmitting}
                     />
                   </div>
                   <div className="space-y-1 sm:col-span-2">
-                    <label className="text-[11px] text-slate-600">หมายเหตุ (ไม่บังคับ)</label>
+                    <label className="text-[11px] text-slate-600">{ui.bulk.noteLabel}</label>
                     <input
                       className="h-9 w-full rounded-lg border border-amber-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-300"
                       value={bulkNoteInput}
                       onChange={(event) => setBulkNoteInput(event.target.value)}
-                      placeholder="เช่น top-up รอบปลายเดือน"
+                      placeholder={ui.bulk.notePlaceholder}
                       disabled={isBulkSubmitting}
                     />
                   </div>
                 </div>
                 <div className="space-y-1 rounded-md border border-amber-200 bg-amber-50/50 p-2">
                   <p className="text-[11px] font-medium text-amber-800">
-                    แผนกระทบยอดอัตโนมัติ (ก่อนกดยืนยัน)
+                    {ui.bulk.reconcilePlanTitle}
                   </p>
                   <p className="text-[11px] text-amber-800">
-                    ยอดค้างที่เลือก {fmtPrice(bulkAllocationPreview.totalOutstanding, storeCurrency)}
-                    {" · "}
-                    จะลงชำระ {fmtPrice(bulkAllocationPreview.plannedTotal, storeCurrency)}
-                    {" · "}
-                    ค้างหลังรอบนี้ {fmtPrice(bulkAllocationPreview.outstandingAfter, storeCurrency)}
+                    {interpolatePurchaseText(ui.bulk.reconcilePlanSummary, {
+                      outstanding: fmtPrice(bulkAllocationPreview.totalOutstanding, storeCurrency),
+                      planned: fmtPrice(bulkAllocationPreview.plannedTotal, storeCurrency),
+                      after: fmtPrice(bulkAllocationPreview.outstandingAfter, storeCurrency),
+                    })}
                   </p>
                   {bulkAllocationPreview.statementTotal !== null ? (
                     <p className="text-[11px] text-amber-800">
-                      ยอด statement ที่ยังไม่ถูกจับคู่{" "}
-                      {fmtPrice(bulkAllocationPreview.remainingUnallocated, storeCurrency)}
+                      {interpolatePurchaseText(ui.bulk.unmatchedStatement, {
+                        amount: fmtPrice(bulkAllocationPreview.remainingUnallocated, storeCurrency),
+                      })}
                     </p>
                   ) : null}
                   {bulkAllocationPreview.invalidStatementTotal ? (
                     <p className="text-[11px] text-red-600">
-                      ยอดชำระรวมต้องมากกว่า 0
+                      {ui.bulk.statementTotalMustBePositive}
                     </p>
                   ) : null}
                   <div className="max-h-24 space-y-0.5 overflow-y-auto pr-1">
@@ -2822,11 +3719,11 @@ export function PurchaseOrderList({
                       <p key={row.id} className="text-[11px] text-amber-800">
                         {row.poNumber}
                         {row.supplierName ? ` · ${row.supplierName}` : ""}
-                        {row.dueDate ? ` · due ${formatDate(row.dueDate)}` : ""}
+                        {row.dueDate ? ` · ${ui.bulk.dueShort} ${formatDate(row.dueDate)}` : ""}
                         {" · "}
-                        จับคู่ {fmtPrice(row.planned, storeCurrency)}
-                        {" / ค้าง "}
-                        {fmtPrice(row.outstanding, storeCurrency)}
+                        {ui.bulk.reconcileRowMatched} {fmtPrice(row.planned, storeCurrency)}
+                        {" / "}
+                        {ui.bulk.reconcileRowOutstanding} {fmtPrice(row.outstanding, storeCurrency)}
                       </p>
                     ))}
                   </div>
@@ -2837,7 +3734,9 @@ export function PurchaseOrderList({
                 {bulkErrors.length > 0 ? (
                   <div className="space-y-1 rounded-md border border-red-200 bg-red-50 p-2">
                     <p className="text-[11px] font-medium text-red-700">
-                      รายการที่ไม่สำเร็จ ({bulkErrors.length})
+                      {interpolatePurchaseText(ui.bulk.failedListTitle, {
+                        count: bulkErrors.length,
+                      })}
                     </p>
                     <ul className="max-h-24 list-disc space-y-0.5 overflow-y-auto pl-4 text-[11px] text-red-700">
                       {bulkErrors.map((error, index) => (
@@ -2867,11 +3766,7 @@ export function PurchaseOrderList({
                     {isBulkSubmitting ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
-                      language === "en"
-                        ? "Start finalize + settle"
-                        : language === "lo"
-                          ? "ເລີ່ມປິດເຣດ + ຊຳລະ"
-                          : "เริ่มปิดเรท + ชำระ"
+                      ui.bulk.startFinalizeAndSettle
                     )}
                   </Button>
                 </div>
@@ -2902,13 +3797,25 @@ export function PurchaseOrderList({
                       </p>
                       <p className="text-[11px] text-slate-500">
                         {item.receivedAt
-                          ? `รับเมื่อ ${formatDate(item.receivedAt)}`
-                          : "ยังไม่มีวันที่รับ"}
+                          ? interpolatePurchaseText(monthEndUi.rowReceivedAt, {
+                              date: formatDate(item.receivedAt, language),
+                            })
+                          : monthEndUi.rowNoReceivedAt}
                         {" · "}
-                        เรทตั้งต้น {item.exchangeRateInitial} {storeCurrency}/{item.purchaseCurrency}
-                        {item.dueDate ? ` · ครบกำหนด ${formatDate(item.dueDate)}` : ""}
+                        {interpolatePurchaseText(monthEndUi.rowInitialRate, {
+                          rate: item.exchangeRateInitial,
+                          store: storeCurrency,
+                          purchase: item.purchaseCurrency,
+                        })}
+                        {item.dueDate
+                          ? ` · ${interpolatePurchaseText(monthEndUi.rowDueDate, {
+                              date: formatDate(item.dueDate, language),
+                            })}`
+                          : ""}
                         {" · "}
-                        ค้าง {fmtPrice(item.outstandingBase, storeCurrency)}
+                        {interpolatePurchaseText(monthEndUi.rowOutstanding, {
+                          amount: fmtPrice(item.outstandingBase, storeCurrency, language),
+                        })}
                       </p>
                     </div>
                     <ChevronRight className="h-4 w-4 shrink-0 text-amber-500" />
@@ -2923,6 +3830,7 @@ export function PurchaseOrderList({
 
       {workspaceTab === "SUPPLIER_AP" ? (
       <PurchaseApSupplierPanel
+        language={language}
         storeCurrency={storeCurrency}
         refreshKey={lastUpdatedAt}
         preset={apPanelPreset ?? apQueryPreset}
@@ -2947,7 +3855,7 @@ export function PurchaseOrderList({
               void reloadFirstPage();
             }}
           >
-            ลองใหม่
+            {ui.common.retry}
           </Button>
         </div>
       ) : null}
@@ -2956,11 +3864,11 @@ export function PurchaseOrderList({
       <div className="flex gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {(
           [
-            { id: "ALL" as StatusFilter, label: language === "en" ? "All" : language === "lo" ? "ທັງໝົດ" : "ทั้งหมด" },
-            { id: "OPEN" as StatusFilter, label: language === "en" ? "Open" : language === "lo" ? "ເປີດຢູ່" : "งานเปิด" },
+            { id: "ALL" as StatusFilter, label: operationsUi.filterAll },
+            { id: "OPEN" as StatusFilter, label: operationsUi.filterOpen },
             { id: "DRAFT" as StatusFilter, label: getPurchaseStatusLabel(language, "DRAFT") },
             { id: "ORDERED" as StatusFilter, label: getPurchaseStatusLabel(language, "ORDERED") },
-            { id: "SHIPPED" as StatusFilter, label: language === "en" ? "Shipping" : language === "lo" ? "ຈັດສົ່ງ" : "จัดส่ง" },
+            { id: "SHIPPED" as StatusFilter, label: operationsUi.filterShipped },
             { id: "RECEIVED" as StatusFilter, label: getPurchaseStatusLabel(language, "RECEIVED") },
             { id: "CANCELLED" as StatusFilter, label: getPurchaseStatusLabel(language, "CANCELLED") },
           ] as const
@@ -3075,11 +3983,7 @@ export function PurchaseOrderList({
                     )}
                     {isExchangeRatePending && (
                       <p className="mt-1 inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700">
-                        {language === "en"
-                          ? "Pending rate finalization"
-                          : language === "lo"
-                            ? "ລໍຖ້າປິດເຣດ"
-                            : "รอปิดเรท"}
+                        {operationsUi.pendingRateFinalization}
                       </p>
                     )}
                     {po.status === "RECEIVED" && (
@@ -3093,36 +3997,26 @@ export function PurchaseOrderList({
                         }`}
                       >
                         {po.paymentStatus === "PAID"
-                          ? language === "en"
-                            ? "Paid"
-                            : language === "lo"
-                              ? "ຊຳລະແລ້ວ"
-                              : "ชำระแล้ว"
+                          ? ui.detail.paid
                           : po.paymentStatus === "PARTIAL"
-                            ? language === "en"
-                              ? "Partially paid"
-                              : language === "lo"
-                                ? "ຊຳລະບາງສ່ວນ"
-                                : "ชำระบางส่วน"
-                            : language === "en"
-                              ? "Unpaid"
-                              : language === "lo"
-                                ? "ຍັງບໍ່ຊຳລະ"
-                                : "ยังไม่ชำระ"}
+                            ? ui.detail.partialPaid
+                            : ui.detail.unpaid}
                       </p>
                     )}
                     <p className="mt-1 text-xs text-slate-500">
-                      {formatNumberByLanguage(language, po.itemCount)}{" "}
-                      {language === "en" ? "items" : language === "lo" ? "ລາຍການ" : "รายการ"} ·{" "}
+                      {interpolatePurchaseText(operationsUi.itemCount, {
+                        count: formatNumberByLanguage(language, po.itemCount),
+                      })}{" "}
+                      ·{" "}
                       {fmtPrice(
                         po.totalCostBase + po.shippingCost + po.otherCost,
                         storeCurrency,
                         language,
                       )}
                       {po.status === "RECEIVED"
-                        ? ` · ${
-                            language === "en" ? "Outstanding" : language === "lo" ? "ຄ້າງ" : "ค้าง"
-                          } ${fmtPrice(po.outstandingBase, storeCurrency, language)}`
+                        ? ` · ${interpolatePurchaseText(operationsUi.outstanding, {
+                            amount: fmtPrice(po.outstandingBase, storeCurrency, language),
+                          })}`
                         : ""}
                     </p>
                   </div>
@@ -3133,78 +4027,89 @@ export function PurchaseOrderList({
                     {/* Timeline based on status */}
                     {po.status === "DRAFT" && (
                       <div>
-                        {language === "en" ? "Created" : language === "lo" ? "ສ້າງເມື່ອ" : "สั่งเมื่อ"}{" "}
-                        {formatDate(po.createdAt, language)}
+                        {interpolatePurchaseText(operationsUi.createdAt, {
+                          date: formatDate(po.createdAt, language),
+                        })}
                       </div>
                     )}
                     {po.status === "ORDERED" && (
                       <div>
-                        {language === "en" ? "Created" : language === "lo" ? "ສ້າງເມື່ອ" : "สั่งเมื่อ"}{" "}
-                        {formatDate(po.createdAt, language)}
+                        {interpolatePurchaseText(operationsUi.createdAt, {
+                          date: formatDate(po.createdAt, language),
+                        })}
                         {po.orderedAt && (
                           <>
                             {" "}
                             →{" "}
-                            {language === "en" ? "Ordered" : language === "lo" ? "ຢືນຢັນເມື່ອ" : "ยืนยันเมื่อ"}{" "}
-                            {formatDate(po.orderedAt, language)}
+                            {interpolatePurchaseText(operationsUi.orderedAt, {
+                              date: formatDate(po.orderedAt, language),
+                            })}
                           </>
                         )}
                       </div>
                     )}
                     {po.status === "SHIPPED" && (
                       <div>
-                        {language === "en" ? "Created" : language === "lo" ? "ສ້າງເມື່ອ" : "สั่งเมื่อ"}{" "}
-                        {formatDate(po.createdAt, language)}
+                        {interpolatePurchaseText(operationsUi.createdAt, {
+                          date: formatDate(po.createdAt, language),
+                        })}
                         {po.shippedAt && (
                           <>
                             {" "}
                             →{" "}
-                            {language === "en" ? "Shipped" : language === "lo" ? "ຈັດສົ່ງເມື່ອ" : "จัดส่งเมื่อ"}{" "}
-                            {formatDate(po.shippedAt, language)}
+                            {interpolatePurchaseText(operationsUi.shippedAt, {
+                              date: formatDate(po.shippedAt, language),
+                            })}
                           </>
                         )}
                         {po.expectedAt && (
                           <>
                             {" "}
                             →{" "}
-                            {language === "en" ? "Expected" : language === "lo" ? "ຄາດວ່າ" : "คาดว่า"}{" "}
-                            {formatDate(po.expectedAt, language)}
+                            {interpolatePurchaseText(operationsUi.expectedAt, {
+                              date: formatDate(po.expectedAt, language),
+                            })}
                           </>
                         )}
                       </div>
                     )}
                     {po.status === "RECEIVED" && (
                       <div>
-                        {language === "en" ? "Created" : language === "lo" ? "ສ້າງເມື່ອ" : "สั่งเมื่อ"}{" "}
-                        {formatDate(po.createdAt, language)}
+                        {interpolatePurchaseText(operationsUi.createdAt, {
+                          date: formatDate(po.createdAt, language),
+                        })}
                         {po.shippedAt && (
                           <>
                             {" "}
                             →{" "}
-                            {language === "en" ? "Shipped" : language === "lo" ? "ຈັດສົ່ງເມື່ອ" : "จัดส่งเมื่อ"}{" "}
-                            {formatDate(po.shippedAt, language)}
+                            {interpolatePurchaseText(operationsUi.shippedAt, {
+                              date: formatDate(po.shippedAt, language),
+                            })}
                           </>
                         )}
                         {po.receivedAt && (
                           <>
                             {" "}
                             →{" "}
-                            {language === "en" ? "Received" : language === "lo" ? "ຮັບເມື່ອ" : "รับเมื่อ"}{" "}
-                            {formatDate(po.receivedAt, language)}
+                            {interpolatePurchaseText(operationsUi.receivedAt, {
+                              date: formatDate(po.receivedAt, language),
+                            })}
                           </>
                         )}
                       </div>
                     )}
     {po.status === "CANCELLED" && (
                       <div>
-                        {language === "en" ? "Created" : language === "lo" ? "ສ້າງເມື່ອ" : "สั่งเมื่อ"}{" "}
-                        {formatDate(po.createdAt, language)}{" "}
+                        {interpolatePurchaseText(operationsUi.createdAt, {
+                          date: formatDate(po.createdAt, language),
+                        })}{" "}
                         {po.cancelledAt && (
                           <>
                             ·{" "}
                             <span className="text-red-600">
-                              {language === "en" ? "Cancelled" : language === "lo" ? "ຍົກເລີກເມື່ອ" : "ยกเลิกเมื่อ"}{" "}
-                              {formatDate(po.cancelledAt, language)}
+                              {interpolatePurchaseText(operationsUi.cancelledAt, {
+                                date: formatDate(po.cancelledAt, language),
+                              })}
                             </span>
                           </>
                         )}
@@ -3212,7 +4117,7 @@ export function PurchaseOrderList({
                           <>
                             ·{" "}
                             <span className="text-red-600">
-                              {language === "en" ? "Cancelled" : language === "lo" ? "ຍົກເລີກ" : "ยกเลิก"}
+                              {operationsUi.cancelled}
                             </span>
                           </>
                         )}
@@ -3224,7 +4129,7 @@ export function PurchaseOrderList({
                   <div className="mt-1.5">
                     <div className="flex items-center justify-between text-[11px]">
                       <span className="text-slate-500">
-                        {language === "en" ? "Progress" : language === "lo" ? "ຄວາມຄືບໜ້າ" : "ความคืบหน้า"}
+                        {operationsUi.progress}
                       </span>
                       <span
                         className={
@@ -3236,16 +4141,10 @@ export function PurchaseOrderList({
                         }
                       >
                         {remaining <= 0
-                          ? language === "en"
-                            ? "Overdue"
-                            : language === "lo"
-                              ? "ເກີນກຳນົດ"
-                              : "เลยกำหนด"
-                          : language === "en"
-                            ? `${remaining} days left`
-                            : language === "lo"
-                              ? `ເຫຼືອ ${remaining} ມື້`
-                              : `เหลือ ${remaining} วัน`}
+                          ? operationsUi.overdue
+                          : interpolatePurchaseText(operationsUi.daysLeft, {
+                              days: formatNumberByLanguage(language, remaining),
+                            })}
                       </span>
                     </div>
                     <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100">
@@ -3292,16 +4191,8 @@ export function PurchaseOrderList({
       <SlideUpSheet
         isOpen={isCreateOpen}
         onClose={closeCreateSheet}
-        title={
-          language === "en"
-            ? "Create purchase order"
-            : language === "lo"
-              ? "ສ້າງໃບສັ່ງຊື້"
-              : "สร้างใบสั่งซื้อ"
-        }
-        description={`${
-          language === "en" ? "Step" : language === "lo" ? "ຂັ້ນຕອນ" : "ขั้นตอน"
-        } ${wizardStep}/3`}
+        title={ui.create.title}
+        description={`${ui.create.stepLabel} ${wizardStep}/3`}
         closeOnBackdrop={false}
         disabled={isSubmitting}
         footer={
@@ -3322,11 +4213,7 @@ export function PurchaseOrderList({
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <label className="text-xs text-muted-foreground">
-                      {language === "en"
-                        ? "Supplier name (optional)"
-                        : language === "lo"
-                          ? "ຊື່ຊັບພລາຍເອີ (ບໍ່ບັງຄັບ)"
-                          : "ชื่อซัพพลายเออร์ (ไม่บังคับ)"}
+                      {ui.create.supplierNameOptional}
                     </label>
                     {supplierNameOptions.length > 0 ? (
                       <button
@@ -3335,16 +4222,8 @@ export function PurchaseOrderList({
                         onClick={() => setIsSupplierPickerOpen((current) => !current)}
                       >
                         {isSupplierPickerOpen
-                          ? language === "en"
-                            ? "Hide suppliers"
-                            : language === "lo"
-                              ? "ຊ່ອນລາຍການຊັບພລາຍເອີ"
-                              : "ซ่อนรายการซัพพลายเออร์"
-                          : language === "en"
-                            ? "All suppliers"
-                            : language === "lo"
-                              ? "ເບິ່ງຊັບພລາຍເອີທັງໝົດ"
-                              : "ดูซัพพลายเออร์ทั้งหมด"}
+                          ? ui.create.hideSuppliers
+                          : ui.create.allSuppliers}
                       </button>
                     ) : null}
                   </div>
@@ -3362,32 +4241,18 @@ export function PurchaseOrderList({
                         setIsSupplierPickerOpen(true);
                       }
                     }}
-                    placeholder={
-                      language === "en"
-                        ? "e.g. Somchai Supply, Morning Market"
-                        : language === "lo"
-                          ? "ເຊັ່ນ ຮ້ານສົມໄຊ, ຕະຫຼາດເຊົ້າ"
-                          : "เช่น ร้านสมชาย, ตลาดเช้า"
-                    }
+                    placeholder={ui.create.supplierPlaceholder}
                   />
                   {supplierNameOptions.length > 0 ? (
                     <p className="text-[11px] text-slate-500">
-                      {language === "en"
-                        ? "Type to search and pick from existing suppliers, or enter a new name."
-                        : language === "lo"
-                          ? "ພິມເພື່ອຄົ້ນຫາ ແລະເລືອກຈາກລາຍຊື່ເກົ່າ ຫຼືພິມຊື່ໃໝ່ໄດ້"
-                          : "พิมพ์เพื่อค้นหาและแตะเลือกจากรายการเดิม หรือพิมพ์ชื่อใหม่เองได้"}
+                      {ui.create.supplierSearchHint}
                     </p>
                   ) : null}
                   {supplierNameOptions.length > 0 && (isSupplierPickerOpen || supplierName) ? (
                     <div className="max-h-36 overflow-y-auto rounded-xl border border-slate-200 bg-white">
                       {visibleSupplierPickerOptions.length === 0 ? (
                         <p className="px-3 py-2 text-xs text-slate-400">
-                          {language === "en"
-                            ? "No supplier matches this search. You can use the typed name."
-                            : language === "lo"
-                              ? "ບໍ່ພົບຊື່ຊັບພລາຍເອີຕາມຄຳຄົ້ນຫາ ສາມາດໃຊ້ຊື່ທີ່ພິມໄດ້ເລີຍ"
-                              : "ไม่พบชื่อซัพพลายเออร์ที่ตรงกับคำค้นหา (ใช้ชื่อที่พิมพ์ได้เลย)"}
+                          {ui.create.supplierSearchEmpty}
                         </p>
                       ) : (
                         visibleSupplierPickerOptions.map((name) => (
@@ -3409,11 +4274,7 @@ export function PurchaseOrderList({
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs text-muted-foreground">
-                    {language === "en"
-                      ? "Contact number (optional)"
-                      : language === "lo"
-                        ? "ເບີຕິດຕໍ່ (ບໍ່ບັງຄັບ)"
-                        : "เบอร์ติดต่อ (ไม่บังคับ)"}
+                    {ui.create.contactOptional}
                   </label>
                   <input
                     className={fieldClassName}
@@ -3428,11 +4289,7 @@ export function PurchaseOrderList({
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs text-muted-foreground">
-                    {language === "en"
-                      ? "Purchase currency"
-                      : language === "lo"
-                        ? "ສະກຸນເງິນທີ່ຊື້"
-                        : "สกุลเงินที่ซื้อ"}
+                    {ui.create.purchaseCurrency}
                   </label>
                   <div className="flex gap-2">
                     {(["LAK", "THB", "USD"] as StoreCurrency[]).map((c) => (
@@ -3459,11 +4316,7 @@ export function PurchaseOrderList({
                 {purchaseCurrency !== storeCurrency && (
                   <div className="space-y-2">
                     <label className="text-xs text-muted-foreground">
-                      {language === "en"
-                        ? "Actual exchange rate (if known)"
-                        : language === "lo"
-                          ? "ອັດຕາແລກປ່ຽນຈິງ (ຖ້າຮູ້)"
-                          : "อัตราแลกเปลี่ยนจริง (ถ้าทราบ)"}
+                      {ui.create.actualExchangeRateOptional}
                     </label>
                     <input
                       className={fieldClassName}
@@ -3471,14 +4324,13 @@ export function PurchaseOrderList({
                       inputMode="decimal"
                       value={exchangeRate}
                       onChange={(e) => setExchangeRate(e.target.value)}
-                      placeholder={`เช่น 600 (1 ${purchaseCurrency} = ? ${storeCurrency})`}
+                      placeholder={interpolatePurchaseText(
+                        ui.create.exchangeRatePlaceholder,
+                        { purchase: purchaseCurrency, store: storeCurrency },
+                      )}
                     />
                     <p className="text-[11px] text-slate-500">
-                      {language === "en"
-                        ? "Leave this blank if the final rate is not known yet. You can finalize it after receiving goods or at payment time."
-                        : language === "lo"
-                          ? "ຖ້າຍັງບໍ່ຮູ້ເຣດຈິງ ສາມາດປ່ອຍວ່າງໄວ້ ແລະໄປປິດເຣດຫຼັງຮັບສິນຄ້າ/ຕອນຊຳລະ"
-                          : <>ถ้ายังไม่ทราบเรทตอนนี้ สามารถเว้นว่างได้ แล้วไปกด{" "}<span className="font-medium">ปิดเรท</span> หลังรับสินค้า/ตอนชำระจริง</>}
+                      {ui.create.exchangeRateHelp}
                     </p>
                   </div>
                 )}
@@ -3489,7 +4341,7 @@ export function PurchaseOrderList({
                     setWizardStep(2);
                   }}
                 >
-                  {language === "en" ? "Next →" : language === "lo" ? "ຖັດໄປ →" : "ถัดไป →"}
+                  {ui.create.next}
                 </Button>
               </div>
             )}
@@ -3501,7 +4353,7 @@ export function PurchaseOrderList({
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <label className="text-xs text-muted-foreground">
-                      {language === "en" ? "Add products" : language === "lo" ? "ເພີ່ມສິນຄ້າ" : "เพิ่มสินค้า"}
+                      {ui.create.addProducts}
                     </label>
                     <button
                       type="button"
@@ -3515,16 +4367,8 @@ export function PurchaseOrderList({
                       }}
                     >
                       {isProductPickerOpen
-                        ? language === "en"
-                          ? "Hide products"
-                          : language === "lo"
-                            ? "ຊ່ອນລາຍການສິນຄ້າ"
-                            : "ซ่อนรายการสินค้า"
-                        : language === "en"
-                          ? "All products"
-                          : language === "lo"
-                            ? "ເບິ່ງສິນຄ້າທັງໝົດ"
-                            : "ดูสินค้าทั้งหมด"}
+                        ? ui.create.hideProducts
+                        : ui.create.allProducts}
                     </button>
                   </div>
                   <input
@@ -3538,20 +4382,10 @@ export function PurchaseOrderList({
                       setProductSearch(e.target.value);
                       setIsProductPickerOpen(true);
                     }}
-                    placeholder={
-                      language === "en"
-                        ? "Search products..."
-                        : language === "lo"
-                          ? "ຄົ້ນຫາສິນຄ້າ..."
-                          : "🔍 ค้นหาสินค้า..."
-                    }
+                    placeholder={ui.create.searchProductsPlaceholder}
                   />
                   <p className="text-[11px] text-slate-500">
-                    {language === "en"
-                      ? "Search by name or SKU, or open the full product list."
-                      : language === "lo"
-                        ? "ຄົ້ນຫາດ້ວຍຊື່ ຫຼື SKU ຫຼືກົດເພື່ອເລືອກຈາກລາຍການ"
-                        : "ค้นหาด้วยชื่อหรือ SKU หรือกดปุ่มเพื่อเลือกจากรายการ"}
+                    {ui.create.searchProductsHint}
                   </p>
                   {(isProductPickerOpen || productSearch) && (
                     <div className="max-h-36 overflow-y-auto rounded-xl border border-slate-200 bg-white">
@@ -3562,16 +4396,8 @@ export function PurchaseOrderList({
                       ) : visibleProductPickerOptions.length === 0 ? (
                         <p className="px-3 py-2 text-xs text-slate-400">
                           {productSearch
-                            ? language === "en"
-                              ? "No matching products"
-                              : language === "lo"
-                                ? "ບໍ່ພົບສິນຄ້າຕາມຄຳຄົ້ນຫາ"
-                                : "ไม่พบสินค้าที่ค้นหา"
-                            : language === "en"
-                              ? "No products available"
-                              : language === "lo"
-                                ? "ບໍ່ມີສິນຄ້າໃຫ້ເລືອກ"
-                                : "ไม่มีสินค้าให้เลือก"}
+                            ? ui.create.noMatchingProducts
+                            : ui.create.noProductsAvailable}
                         </p>
                       ) : (
                         visibleProductPickerOptions.map((p) => (
@@ -3597,11 +4423,7 @@ export function PurchaseOrderList({
                 {/* Item list */}
                 {items.length === 0 ? (
                   <p className="rounded-xl border border-dashed border-slate-200 px-3 py-6 text-center text-sm text-slate-400">
-                    {language === "en"
-                      ? "No products added yet"
-                      : language === "lo"
-                        ? "ຍັງບໍ່ໄດ້ເພີ່ມສິນຄ້າ"
-                        : "ยังไม่ได้เพิ่มสินค้า"}
+                    {ui.create.noProductsAdded}
                   </p>
                 ) : (
                   <div className="space-y-2">
@@ -3625,7 +4447,7 @@ export function PurchaseOrderList({
                         <div className="mt-2 grid grid-cols-2 gap-2">
                           <div>
                             <label className="text-[11px] text-slate-500">
-                              {language === "en" ? "Quantity" : language === "lo" ? "ຈຳນວນ" : "จำนวน"}
+                              {ui.create.quantity}
                             </label>
                             <input
                               className="h-9 w-full rounded-lg border border-slate-200 px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
@@ -3643,11 +4465,9 @@ export function PurchaseOrderList({
                           </div>
                           <div>
                             <label className="text-[11px] text-slate-500">
-                              {language === "en"
-                                ? `Cost / ${currencySymbol(purchaseCurrency)}`
-                                : language === "lo"
-                                  ? `ລາຄາ / ${currencySymbol(purchaseCurrency)}`
-                                  : `ราคา/${currencySymbol(purchaseCurrency)}`}
+                              {interpolatePurchaseText(ui.create.costPerCurrency, {
+                                currency: currencySymbol(purchaseCurrency),
+                              })}
                             </label>
                             <input
                               className="h-9 w-full rounded-lg border border-slate-200 px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
@@ -3687,14 +4507,14 @@ export function PurchaseOrderList({
                     className="h-11 flex-1 rounded-xl"
                     onClick={() => setWizardStep(1)}
                   >
-                    {language === "en" ? "← Back" : language === "lo" ? "← ກັບ" : "← ย้อนกลับ"}
+                    {ui.create.back}
                   </Button>
                   <Button
                     className="h-11 flex-1 rounded-xl"
                     onClick={() => setWizardStep(3)}
                     disabled={items.length === 0}
                   >
-                    {language === "en" ? "Next →" : language === "lo" ? "ຖັດໄປ →" : "ถัดไป →"}
+                    {ui.create.next}
                   </Button>
                 </div>
               </div>
@@ -3706,11 +4526,9 @@ export function PurchaseOrderList({
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
                     <label className="text-xs text-muted-foreground">
-                      {language === "en"
-                        ? `Shipping (${currencySymbol(storeCurrency)})`
-                        : language === "lo"
-                          ? `ຄ່າຂົນສົ່ງ (${currencySymbol(storeCurrency)})`
-                          : `ค่าขนส่ง (${currencySymbol(storeCurrency)})`}
+                      {interpolatePurchaseText(ui.create.shippingCostLabel, {
+                        currency: currencySymbol(storeCurrency),
+                      })}
                     </label>
                     <input
                       className={fieldClassName}
@@ -3723,11 +4541,9 @@ export function PurchaseOrderList({
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs text-muted-foreground">
-                      {language === "en"
-                        ? `Other costs (${currencySymbol(storeCurrency)})`
-                        : language === "lo"
-                          ? `ຄ່າອື່ນໆ (${currencySymbol(storeCurrency)})`
-                          : `ค่าอื่นๆ (${currencySymbol(storeCurrency)})`}
+                      {interpolatePurchaseText(ui.create.otherCostLabel, {
+                        currency: currencySymbol(storeCurrency),
+                      })}
                     </label>
                     <input
                       className={fieldClassName}
@@ -3742,42 +4558,30 @@ export function PurchaseOrderList({
                 {Number(otherCost) > 0 && (
                   <div className="space-y-2">
                     <label className="text-xs text-muted-foreground">
-                      {language === "en"
-                        ? "Other cost note"
-                        : language === "lo"
-                          ? "ໝາຍເຫດຄ່າອື່ນໆ"
-                          : "หมายเหตุค่าอื่นๆ"}
+                      {ui.create.otherCostNoteLabel}
                     </label>
                     <input
                       className={fieldClassName}
                       value={otherCostNote}
                       onChange={(e) => setOtherCostNote(e.target.value)}
-                      placeholder="เช่น ค่าภาษี, ค่าดำเนินการ"
+                      placeholder={ui.create.otherCostNotePlaceholder}
                     />
                   </div>
                 )}
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <div className="space-y-2 min-w-0">
                     <label className="text-xs text-muted-foreground">
-                      {language === "en"
-                        ? "Expected receive date (optional)"
-                        : language === "lo"
-                          ? "ຄາດວ່າຈະໄດ້ຮັບ (ບໍ່ບັງຄັບ)"
-                          : "คาดว่าจะได้รับ (ไม่บังคับ)"}
+                      {ui.create.expectedReceiveDateOptional}
                     </label>
                     <PurchaseDatePickerField
                       language={language}
                       value={expectedAt}
                       onChange={setExpectedAt}
                       triggerClassName={`${fieldClassName} flex items-center justify-between gap-2 text-left`}
-                      ariaLabel="เลือกวันที่คาดว่าจะได้รับ"
+                      ariaLabel={ui.create.expectedReceiveAria}
                     />
                     <p className="text-[11px] text-slate-500">
-                      {language === "en"
-                        ? "You can leave this blank and set it later."
-                        : language === "lo"
-                          ? "ຍັງບໍ່ຈຳເປັນຕ້ອງລະບຸ ເລືອກພາຍຫຼັງໄດ້"
-                          : "ยังไม่ระบุได้ เลือกภายหลังได้"}
+                      {ui.create.expectedReceiveHelp}
                     </p>
                     <div className="flex flex-wrap gap-1.5">
                       <button
@@ -3785,52 +4589,44 @@ export function PurchaseOrderList({
                         className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
                         onClick={() => applyCreateDateShortcut("expectedAt", "TODAY")}
                       >
-                        {language === "en" ? "Today" : language === "lo" ? "ມື້ນີ້" : "วันนี้"}
+                        {ui.common.today}
                       </button>
                       <button
                         type="button"
                         className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
                         onClick={() => applyCreateDateShortcut("expectedAt", "PLUS_7")}
                       >
-                        {language === "en" ? "+7 days" : language === "lo" ? "+7 ມື້" : "+7 วัน"}
+                        {ui.common.plusSevenDays}
                       </button>
                       <button
                         type="button"
                         className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
                         onClick={() => applyCreateDateShortcut("expectedAt", "END_OF_MONTH")}
                       >
-                        {language === "en" ? "Month end" : language === "lo" ? "ສິ້ນເດືອນ" : "สิ้นเดือน"}
+                        {ui.common.endOfMonth}
                       </button>
                       <button
                         type="button"
                         className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
                         onClick={() => applyCreateDateShortcut("expectedAt", "CLEAR")}
                       >
-                        {language === "en" ? "Clear" : language === "lo" ? "ລ້າງ" : "ล้างค่า"}
+                        {ui.common.clear}
                       </button>
                     </div>
                   </div>
                   <div className="space-y-2 min-w-0">
                     <label className="text-xs text-muted-foreground">
-                      {language === "en"
-                        ? "Due date"
-                        : language === "lo"
-                          ? "ຄົບກຳນົດຊຳລະ"
-                          : "ครบกำหนดชำระ (due date)"}
+                      {ui.create.dueDateLabel}
                     </label>
                     <PurchaseDatePickerField
                       language={language}
                       value={dueDate}
                       onChange={setDueDate}
                       triggerClassName={`${fieldClassName} flex items-center justify-between gap-2 text-left`}
-                      ariaLabel="เลือกวันที่ครบกำหนดชำระ"
+                      ariaLabel={ui.create.dueDateAria}
                     />
                     <p className="text-[11px] text-slate-500">
-                      {language === "en"
-                        ? "Leave blank if the actual due date is not known yet."
-                        : language === "lo"
-                          ? "ຖ້າຍັງບໍ່ຮູ້ກຳນົດຈິງ ສາມາດປ່ອຍວ່າງໄວ້ກ່ອນ"
-                          : "ถ้ายังไม่รู้กำหนดจริง ให้เว้นว่างไว้ก่อนได้"}
+                      {ui.create.dueDateHelp}
                     </p>
                     <div className="flex flex-wrap gap-1.5">
                       <button
@@ -3838,76 +4634,60 @@ export function PurchaseOrderList({
                         className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
                         onClick={() => applyCreateDateShortcut("dueDate", "TODAY")}
                       >
-                        {language === "en" ? "Today" : language === "lo" ? "ມື້ນີ້" : "วันนี้"}
+                        {ui.common.today}
                       </button>
                       <button
                         type="button"
                         className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
                         onClick={() => applyCreateDateShortcut("dueDate", "PLUS_7")}
                       >
-                        {language === "en" ? "+7 days" : language === "lo" ? "+7 ມື້" : "+7 วัน"}
+                        {ui.common.plusSevenDays}
                       </button>
                       <button
                         type="button"
                         className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
                         onClick={() => applyCreateDateShortcut("dueDate", "END_OF_MONTH")}
                       >
-                        {language === "en" ? "Month end" : language === "lo" ? "ສິ້ນເດືອນ" : "สิ้นเดือน"}
+                        {ui.common.endOfMonth}
                       </button>
                       <button
                         type="button"
                         className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
                         onClick={() => applyCreateDateShortcut("dueDate", "CLEAR")}
                       >
-                        {language === "en" ? "Clear" : language === "lo" ? "ລ້າງ" : "ล้างค่า"}
+                        {ui.common.clear}
                       </button>
                     </div>
                   </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs text-muted-foreground">
-                    {language === "en"
-                      ? "Note (optional)"
-                      : language === "lo"
-                        ? "ໝາຍເຫດ (ບໍ່ບັງຄັບ)"
-                        : "หมายเหตุ (ไม่บังคับ)"}
+                    {ui.create.noteOptional}
                   </label>
                   <input
                     className={fieldClassName}
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
-                    placeholder={
-                      language === "en"
-                        ? "Additional note"
-                        : language === "lo"
-                          ? "ໝາຍເຫດເພີ່ມເຕີມ"
-                          : "หมายเหตุเพิ่มเติม"
-                    }
+                    placeholder={ui.create.notePlaceholder}
                   />
                 </div>
 
                 {/* Summary */}
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                    {language === "en" ? "Summary" : language === "lo" ? "ສະຫຼຸບ" : "สรุป"}
+                    {ui.create.summary}
                   </p>
                   {purchaseCurrency !== storeCurrency && !hasExchangeRateInput && (
                     <p className="mt-1 text-[11px] text-amber-700">
-                      {language === "en"
-                        ? "Final exchange rate is still pending: the system will temporarily use rate 1 and let you finalize it later."
-                        : language === "lo"
-                          ? "ຍັງບໍ່ໄດ້ປິດເຣດຈິງ: ລະບົບຈະໃຊ້ເຣດຊົ່ວຄາວ 1 ເພື່ອບັນທຶກ PO ແລະໃຫ້ໄປປິດເຣດພາຍຫຼັງ"
-                          : "ยังไม่ปิดเรทจริง: ระบบจะใช้เรทชั่วคราว 1 เพื่อบันทึก PO และให้ไปปิดเรทภายหลัง"}
+                      {ui.create.pendingRateSummary}
                     </p>
                   )}
                   <div className="mt-2 space-y-1 text-sm">
                     <div className="flex justify-between">
                         <span className="text-slate-600">
-                          {language === "en"
-                            ? `Products (${items.length})`
-                            : language === "lo"
-                              ? `ສິນຄ້າ (${items.length} ລາຍການ)`
-                              : `สินค้า (${items.length} รายการ)`}
+                          {interpolatePurchaseText(ui.create.productsCount, {
+                            count: items.length,
+                          })}
                         </span>
                       <span className="font-medium">
                         {fmtPrice(itemsTotalBase, storeCurrency)}
@@ -3916,7 +4696,7 @@ export function PurchaseOrderList({
                     {shipping > 0 && (
                       <div className="flex justify-between">
                         <span className="text-slate-600">
-                          {language === "en" ? "Shipping" : language === "lo" ? "ຄ່າຂົນສົ່ງ" : "ค่าขนส่ง"}
+                          {ui.create.shipping}
                         </span>
                         <span>{fmtPrice(shipping, storeCurrency)}</span>
                       </div>
@@ -3924,13 +4704,13 @@ export function PurchaseOrderList({
                     {other > 0 && (
                       <div className="flex justify-between">
                         <span className="text-slate-600">
-                          {language === "en" ? "Other costs" : language === "lo" ? "ຄ່າອື່ນໆ" : "ค่าอื่นๆ"}
+                          {ui.create.otherCosts}
                         </span>
                         <span>{fmtPrice(other, storeCurrency)}</span>
                       </div>
                     )}
                     <div className="flex justify-between border-t border-slate-200 pt-1 font-semibold">
-                      <span>{language === "en" ? "Grand total" : language === "lo" ? "ລວມທັງໝົດ" : "รวมทั้งหมด"}</span>
+                      <span>{ui.create.grandTotal}</span>
                       <span>{fmtPrice(grandTotal, storeCurrency)}</span>
                     </div>
                   </div>
@@ -3943,7 +4723,7 @@ export function PurchaseOrderList({
                   onClick={() => setWizardStep(2)}
                   disabled={isSubmitting}
                 >
-                  {language === "en" ? "← Back" : language === "lo" ? "← ກັບ" : "← ย้อนกลับ"}
+                  {ui.create.back}
                 </Button>
                 <div className="grid grid-cols-2 gap-2">
                   <Button
@@ -3957,7 +4737,7 @@ export function PurchaseOrderList({
                     ) : (
                       <FileText className="mr-1 h-3.5 w-3.5" />
                     )}
-                    บันทึกร่าง
+                    {ui.create.saveDraft}
                   </Button>
                   <Button
                     className="h-11 rounded-xl bg-emerald-600 text-xs text-white hover:bg-emerald-700"
@@ -3969,20 +4749,14 @@ export function PurchaseOrderList({
                     ) : (
                       <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
                     )}
-                    รับสินค้าทันที
+                    {ui.create.receiveNow}
                   </Button>
                 </div>
                 <Button
                   className="h-11 w-full rounded-xl"
                   onClick={async () => {
                     if (items.length === 0) {
-                      toast.error(
-                        language === "en"
-                          ? "Please add at least 1 product"
-                          : language === "lo"
-                            ? "ກະລຸນາເພີ່ມສິນຄ້າຢ່າງນ້ອຍ 1 ລາຍການ"
-                            : "กรุณาเพิ่มรายการสินค้าอย่างน้อย 1 รายการ",
-                      );
+                      toast.error(ui.errors.atLeastOneItem);
                       return;
                     }
                     setIsSubmitting(true);
@@ -4016,14 +4790,7 @@ export function PurchaseOrderList({
                       });
                       const data = await res.json();
                       if (!res.ok) {
-                        toast.error(
-                          data?.message ??
-                            (language === "en"
-                              ? "Failed to create"
-                              : language === "lo"
-                                ? "ສ້າງບໍ່ສຳເລັດ"
-                                : "สร้างไม่สำเร็จ"),
-                        );
+                        toast.error(data?.message ?? ui.create.createFailed);
                         return;
                       }
                       // Now set it to ORDERED
@@ -4034,23 +4801,13 @@ export function PurchaseOrderList({
                         body: JSON.stringify({ status: "ORDERED" }),
                       });
                       toast.success(
-                        language === "en"
-                          ? "Purchase order created and confirmed"
-                          : language === "lo"
-                            ? "ສ້າງໃບສັ່ງຊື້ແລະຢືນຢັນແລ້ວ"
-                            : "สร้างใบสั่งซื้อ + ยืนยันสั่งแล้ว",
+                        ui.create.createAndConfirmSuccess,
                       );
                       forceCloseCreateSheet();
                       await reloadFirstPage();
                       router.refresh();
                     } catch {
-                      toast.error(
-                        language === "en"
-                          ? "Connection failed"
-                          : language === "lo"
-                            ? "ເຊື່ອມຕໍ່ບໍ່ສຳເລັດ"
-                            : "เชื่อมต่อไม่สำเร็จ",
-                      );
+                      toast.error(ui.errors.connectionRetry);
                     } finally {
                       setIsSubmitting(false);
                     }
@@ -4062,7 +4819,7 @@ export function PurchaseOrderList({
                   ) : (
                     <Package className="mr-1 h-3.5 w-3.5" />
                   )}
-                  {language === "en" ? "Confirm order" : language === "lo" ? "ຢືນຢັນການສັ່ງຊື້" : "ยืนยันสั่งซื้อ"}
+                  {ui.create.confirmOrder}
                 </Button>
               </div>
             )}
@@ -4072,21 +4829,21 @@ export function PurchaseOrderList({
         <div className="fixed inset-0 z-[90] flex items-center justify-center px-4">
           <button
             type="button"
-            aria-label="ปิดกล่องยืนยันปิดฟอร์ม"
+            aria-label={ui.create.closeConfirmBackdropAria}
             className="absolute inset-0 bg-slate-900/55"
             onClick={() => setIsCreateCloseConfirmOpen(false)}
           />
           <div
             role="dialog"
             aria-modal="true"
-            aria-label="ยืนยันปิดฟอร์มสร้างใบสั่งซื้อ"
+            aria-label={ui.create.closeConfirmDialogAria}
             className="relative w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-xl"
           >
             <p className="text-sm font-semibold text-slate-900">
-              ยืนยันปิดฟอร์มสร้างใบสั่งซื้อ
+              {ui.create.closeConfirmTitle}
             </p>
             <p className="mt-2 text-xs text-slate-600">
-              มีข้อมูลที่ยังไม่บันทึก ต้องการปิดและทิ้งข้อมูลที่กรอกไว้หรือไม่
+              {ui.create.closeConfirmBody}
             </p>
             <div className="mt-4 grid grid-cols-2 gap-2">
               <Button
@@ -4095,14 +4852,14 @@ export function PurchaseOrderList({
                 className="h-9 rounded-lg text-xs"
                 onClick={() => setIsCreateCloseConfirmOpen(false)}
               >
-                กลับไปแก้ไข
+                {ui.create.closeConfirmBack}
               </Button>
               <Button
                 type="button"
                 className="h-9 rounded-lg bg-red-600 text-xs text-white hover:bg-red-700"
                 onClick={forceCloseCreateSheet}
               >
-                ปิดและทิ้งข้อมูล
+                {ui.create.closeConfirmDiscard}
               </Button>
             </div>
           </div>
@@ -4246,16 +5003,11 @@ function PODetailSheet({
       if (!keepExisting) {
         setPo(null);
         setDetailError(
-          result.error ??
-            (language === "en"
-              ? "Failed to load purchase order detail"
-              : language === "lo"
-                ? "ໂຫຼດລາຍລະອຽດໃບສັ່ງຊື້ບໍ່ສຳເລັດ"
-                : "โหลดรายละเอียดใบสั่งซื้อไม่สำเร็จ"),
+          result.error ?? ui.errors.loadPoDetailFailed,
         );
       }
     },
-    [language, loadPoDetail],
+    [loadPoDetail, ui.errors.loadPoDetailFailed],
   );
 
   useEffect(() => {
@@ -4312,12 +5064,7 @@ function PODetailSheet({
       } else {
         setPo(null);
         setDetailError(
-          result.error ??
-            (language === "en"
-              ? "Failed to load purchase order detail"
-              : language === "lo"
-                ? "ໂຫຼດລາຍລະອຽດໃບສັ່ງຊື້ບໍ່ສຳເລັດ"
-                : "โหลดรายละเอียดใบสั่งซื้อไม่สำเร็จ"),
+          result.error ?? ui.errors.loadPoDetailFailed,
         );
       }
       setLoading(false);
@@ -4326,7 +5073,7 @@ function PODetailSheet({
     return () => {
       cancelled = true;
     };
-  }, [getCachedPoDetail, language, loadPoDetail, poId]);
+  }, [getCachedPoDetail, loadPoDetail, poId, ui.errors.loadPoDetailFailed]);
 
   const handleStatusChange = async (
     newStatus: "ORDERED" | "SHIPPED" | "RECEIVED" | "CANCELLED",
@@ -4360,13 +5107,7 @@ function PODetailSheet({
     if (!po) return;
     const nextRate = Number(finalRateInput);
     if (!Number.isFinite(nextRate) || nextRate <= 0) {
-      toast.error(
-        language === "en"
-          ? "Please enter a valid final exchange rate"
-          : language === "lo"
-            ? "ກະລຸນາກອກອັດຕາແລກປ່ຽນຈິງໃຫ້ຖືກຕ້ອງ"
-            : "กรุณากรอกอัตราแลกเปลี่ยนจริงให้ถูกต้อง",
-      );
+      toast.error(ui.detail.finalRateInvalid);
       return;
     }
 
@@ -4394,12 +5135,7 @@ function PODetailSheet({
         | null;
       if (!res.ok) {
         toast.error(
-          data?.message ??
-            (language === "en"
-              ? "Failed to finalize exchange rate"
-              : language === "lo"
-                ? "ປິດເຣດບໍ່ສຳເລັດ"
-                : "ปิดเรทไม่สำเร็จ"),
+          data?.message ?? ui.detail.finalizeRateFailed,
         );
         return;
       }
@@ -4411,27 +5147,26 @@ function PODetailSheet({
       }
       setIsFinalizeRateMode(false);
       setFinalRateNoteInput("");
-      toast.success(
-        language === "en"
-          ? "Exchange rate finalized"
-          : language === "lo"
-            ? "ປິດເຣດຮຽບຮ້ອຍແລ້ວ"
-            : "ปิดเรทเรียบร้อย",
-      );
+      toast.success(ui.detail.finalizeRateSuccess);
       await onRefreshList();
       router.refresh();
     } catch {
-      toast.error(
-        language === "en"
-          ? "Connection failed"
-          : language === "lo"
-            ? "ເຊື່ອມຕໍ່ບໍ່ສຳເລັດ"
-            : "เชื่อมต่อไม่สำเร็จ",
-      );
+      toast.error(ui.errors.connectionRetry);
     } finally {
       setIsFinalizingRate(false);
     }
-  }, [finalRateInput, finalRateNoteInput, language, onCacheUpdate, onRefreshList, po, router]);
+  }, [
+    finalRateInput,
+    finalRateNoteInput,
+    onCacheUpdate,
+    onRefreshList,
+    po,
+    router,
+    ui.detail.finalRateInvalid,
+    ui.detail.finalizeRateFailed,
+    ui.detail.finalizeRateSuccess,
+    ui.errors.connectionRetry,
+  ]);
 
   const startSettlePayment = useCallback(() => {
     if (!po) return;
@@ -4447,23 +5182,11 @@ function PODetailSheet({
     if (!po) return;
     const amountBase = Math.round(Number(settleAmountInput));
     if (!Number.isFinite(amountBase) || amountBase <= 0) {
-      toast.error(
-        language === "en"
-          ? "Please enter a valid payment amount"
-          : language === "lo"
-            ? "ກະລຸນາກອກຍອດຊຳລະໃຫ້ຖືກຕ້ອງ"
-            : "กรุณากรอกยอดชำระให้ถูกต้อง",
-      );
+      toast.error(ui.detail.paymentAmountInvalid);
       return;
     }
     if (amountBase > po.outstandingBase) {
-      toast.error(
-        language === "en"
-          ? "Payment amount exceeds outstanding balance"
-          : language === "lo"
-            ? "ຍອດຊຳລະເກີນຍອດຄ້າງ"
-            : "ยอดชำระเกินยอดค้าง",
-      );
+      toast.error(ui.detail.paymentExceedsOutstanding);
       return;
     }
     setIsSettlingPayment(true);
@@ -4490,12 +5213,7 @@ function PODetailSheet({
 
       if (!res.ok) {
         toast.error(
-          data?.message ??
-            (language === "en"
-              ? "Failed to record payment"
-              : language === "lo"
-                ? "ບັນທຶກການຊຳລະບໍ່ສຳເລັດ"
-                : "บันทึกชำระไม่สำเร็จ"),
+          data?.message ?? ui.detail.settleFailed,
         );
         return;
       }
@@ -4506,23 +5224,11 @@ function PODetailSheet({
         onCacheUpdate(updatedPo);
       }
       setIsSettleMode(false);
-      toast.success(
-        language === "en"
-          ? "Payment recorded"
-          : language === "lo"
-            ? "ບັນທຶກການຊຳລະຮຽບຮ້ອຍ"
-            : "บันทึกชำระเรียบร้อย",
-      );
+      toast.success(ui.detail.settleSuccess);
       await onRefreshList();
       router.refresh();
     } catch {
-      toast.error(
-        language === "en"
-          ? "Connection failed"
-          : language === "lo"
-            ? "ເຊື່ອມຕໍ່ບໍ່ສຳເລັດ"
-            : "เชื่อมต่อไม่สำเร็จ",
-      );
+      toast.error(ui.errors.connectionRetry);
     } finally {
       setIsSettlingPayment(false);
     }
@@ -4532,10 +5238,14 @@ function PODetailSheet({
     po,
     router,
     settleAmountInput,
-    language,
     settleNoteInput,
     settlePaidAtInput,
     settleReferenceInput,
+    ui.detail.paymentAmountInvalid,
+    ui.detail.paymentExceedsOutstanding,
+    ui.detail.settleFailed,
+    ui.detail.settleSuccess,
+    ui.errors.connectionRetry,
   ]);
 
   const startApplyExtraCost = useCallback(() => {
@@ -4552,23 +5262,11 @@ function PODetailSheet({
     const otherCost = Math.round(Number(extraCostOtherInput));
 
     if (!Number.isFinite(shippingCost) || shippingCost < 0) {
-      toast.error(
-        language === "en"
-          ? "Please enter a valid shipping cost"
-          : language === "lo"
-            ? "ກະລຸນາກອກຄ່າຂົນສົ່ງໃຫ້ຖືກຕ້ອງ"
-            : "กรุณากรอกค่าขนส่งให้ถูกต้อง",
-      );
+      toast.error(ui.detail.shippingCostInvalid);
       return;
     }
     if (!Number.isFinite(otherCost) || otherCost < 0) {
-      toast.error(
-        language === "en"
-          ? "Please enter a valid additional cost"
-          : language === "lo"
-            ? "ກະລຸນາກອກຄ່າໃຊ້ຈ່າຍອື່ນໃຫ້ຖືກຕ້ອງ"
-            : "กรุณากรอกค่าอื่นๆ ให้ถูกต้อง",
-      );
+      toast.error(ui.detail.otherCostInvalid);
       return;
     }
 
@@ -4597,12 +5295,7 @@ function PODetailSheet({
         | null;
       if (!res.ok) {
         toast.error(
-          data?.message ??
-            (language === "en"
-              ? "Failed to update extra costs"
-              : language === "lo"
-                ? "ອັບເດດຄ່າໃຊ້ຈ່າຍບໍ່ສຳເລັດ"
-                : "อัปเดตค่าขนส่ง/ค่าอื่นไม่สำเร็จ"),
+          data?.message ?? ui.detail.updateCostsFailed,
         );
         return;
       }
@@ -4611,23 +5304,11 @@ function PODetailSheet({
         onCacheUpdate(data.purchaseOrder);
       }
       setIsApplyExtraCostMode(false);
-      toast.success(
-        language === "en"
-          ? "Extra costs updated"
-          : language === "lo"
-            ? "ອັບເດດຄ່າໃຊ້ຈ່າຍຮຽບຮ້ອຍ"
-            : "อัปเดตค่าขนส่ง/ค่าอื่นเรียบร้อย",
-      );
+      toast.success(ui.detail.updateCostsSuccess);
       await onRefreshList();
       router.refresh();
     } catch {
-      toast.error(
-        language === "en"
-          ? "Connection failed"
-          : language === "lo"
-            ? "ເຊື່ອມຕໍ່ບໍ່ສຳເລັດ"
-            : "เชื่อมต่อไม่สำเร็จ",
-      );
+      toast.error(ui.errors.connectionRetry);
     } finally {
       setIsApplyingExtraCost(false);
     }
@@ -4635,11 +5316,15 @@ function PODetailSheet({
     extraCostOtherInput,
     extraCostOtherNoteInput,
     extraCostShippingInput,
-    language,
     onCacheUpdate,
     onRefreshList,
     po,
     router,
+    ui.detail.otherCostInvalid,
+    ui.detail.shippingCostInvalid,
+    ui.detail.updateCostsFailed,
+    ui.detail.updateCostsSuccess,
+    ui.errors.connectionRetry,
   ]);
 
   const reversePayment = useCallback(
@@ -4666,12 +5351,7 @@ function PODetailSheet({
           | null;
         if (!res.ok) {
           toast.error(
-            data?.message ??
-              (language === "en"
-                ? "Failed to reverse payment entry"
-                : language === "lo"
-                  ? "ຍ້ອນລາຍການຊຳລະບໍ່ສຳເລັດ"
-                  : "ย้อนรายการชำระไม่สำเร็จ"),
+            data?.message ?? ui.detail.reversePaymentFailed,
           );
           return;
         }
@@ -4679,28 +5359,24 @@ function PODetailSheet({
           setPo(data.purchaseOrder);
           onCacheUpdate(data.purchaseOrder);
         }
-        toast.success(
-          language === "en"
-            ? "Payment entry reversed"
-            : language === "lo"
-              ? "ຍ້ອນລາຍການຊຳລະຮຽບຮ້ອຍ"
-              : "ย้อนรายการชำระเรียบร้อย",
-        );
+        toast.success(ui.detail.reversePaymentSuccess);
         await onRefreshList();
         router.refresh();
       } catch {
-        toast.error(
-          language === "en"
-            ? "Connection failed"
-            : language === "lo"
-              ? "ເຊື່ອມຕໍ່ບໍ່ສຳເລັດ"
-              : "เชื่อมต่อไม่สำเร็จ",
-        );
+        toast.error(ui.errors.connectionRetry);
       } finally {
         setReversingPaymentId(null);
       }
     },
-    [language, onCacheUpdate, onRefreshList, po, router],
+    [
+      onCacheUpdate,
+      onRefreshList,
+      po,
+      router,
+      ui.detail.reversePaymentFailed,
+      ui.detail.reversePaymentSuccess,
+      ui.errors.connectionRetry,
+    ],
   );
 
   const canEditPO =
@@ -4757,13 +5433,7 @@ function PODetailSheet({
   const saveEdit = async () => {
     if (!po) return;
     if (isDraftEditable && editForm.items.length === 0) {
-      toast.error(
-        language === "en"
-          ? "At least one line item is required"
-          : language === "lo"
-            ? "ຕ້ອງມີສິນຄ້າຢ່າງໜ້ອຍ 1 ລາຍການ"
-            : "ต้องมีอย่างน้อย 1 รายการสินค้า",
-      );
+      toast.error(ui.detail.editRequiresItem);
       return;
     }
 
@@ -4811,12 +5481,7 @@ function PODetailSheet({
       const data = await res.json();
       if (!res.ok) {
         toast.error(
-          data?.message ??
-            (language === "en"
-              ? "Failed to update purchase order"
-              : language === "lo"
-                ? "ອັບເດດໃບສັ່ງຊື້ບໍ່ສຳເລັດ"
-                : "อัปเดต PO ไม่สำเร็จ"),
+          data?.message ?? ui.detail.updatePoFailed,
         );
         return;
       }
@@ -4825,22 +5490,10 @@ function PODetailSheet({
       setPo(updatedPo);
       onCacheUpdate(updatedPo);
       setIsEditMode(false);
-      toast.success(
-        language === "en"
-          ? "Purchase order updated"
-          : language === "lo"
-            ? "ບັນທຶກການແກ້ໄຂໃບສັ່ງຊື້ຮຽບຮ້ອຍ"
-            : "บันทึกการแก้ไข PO เรียบร้อย",
-      );
+      toast.success(ui.detail.updatePoSuccess);
       router.refresh();
     } catch {
-      toast.error(
-        language === "en"
-          ? "Connection failed"
-          : language === "lo"
-            ? "ເຊື່ອມຕໍ່ບໍ່ສຳເລັດ"
-            : "เชื่อมต่อไม่สำเร็จ",
-      );
+      toast.error(ui.errors.connectionRetry);
     } finally {
       setIsSavingEdit(false);
     }
@@ -4848,238 +5501,20 @@ function PODetailSheet({
 
   const isOpen = poId !== null;
   const detailUi = {
-    mustFinalizeRateBeforePayment:
-      language === "en"
-        ? "Finalize the exchange rate before recording payment"
-        : language === "lo"
-          ? "ຕ້ອງປິດເຣດກ່ອນບັນທຶກການຊຳລະ"
-          : "ต้องปิดเรทก่อนบันทึกชำระ",
-    pdfDocTitle:
-      language === "en"
-        ? "Purchase order"
-        : language === "lo"
-          ? "ໃບສັ່ງຊື້"
-          : "ใบสั่งซื้อ",
-    referenceRate:
-      language === "en"
-        ? "Reference rate"
-        : language === "lo"
-          ? "ເຣດອ້າງອີງ"
-          : "เรทอ้างอิง",
-    initialRate:
-      language === "en"
-        ? "Initial rate at PO creation"
-        : language === "lo"
-          ? "ເຣດຕັ້ງຕົ້ນຕອນສ້າງ PO"
-          : "เรทตั้งต้นตอนสร้าง PO",
-    rateStatusPending:
-      language === "en"
-        ? "Status: waiting for final exchange rate (recommended at actual settlement)"
-        : language === "lo"
-          ? "ສະຖານະ: ລໍຖ້າປິດເຣດຈິງ (ແນະນຳຕອນຊຳລະຈິງ)"
-          : "สถานะ: รอปิดเรทจริง (แนะนำปิดเรทตอนชำระจริงปลายงวด)",
-    rateStatusLocked:
-      language === "en"
-        ? "Status: finalized"
-        : language === "lo"
-          ? "ສະຖານະ: ປິດເຣດແລ້ວ"
-          : "สถานะ: ปิดเรทแล้ว",
-    when:
-      language === "en" ? "on" : language === "lo" ? "ເມື່ອ" : "เมื่อ",
-    rateDifference:
-      language === "en"
-        ? "rate diff"
-        : language === "lo"
-          ? "ສ່ວນຕ່າງເຣດ"
-          : "ส่วนต่างเรท",
-    paymentStatus:
-      language === "en"
-        ? "Payment status"
-        : language === "lo"
-          ? "ສະຖານະການຊຳລະ"
-          : "สถานะชำระ",
-    paid: language === "en" ? "Paid" : language === "lo" ? "ຊຳລະແລ້ວ" : "ชำระแล้ว",
-    partialPaid:
-      language === "en" ? "Partially paid" : language === "lo" ? "ຊຳລະບາງສ່ວນ" : "ชำระบางส่วน",
-    unpaid:
-      language === "en" ? "Unpaid" : language === "lo" ? "ຍັງບໍ່ຊຳລະ" : "ยังไม่ชำระ",
-    paidAmount:
-      language === "en" ? "Paid" : language === "lo" ? "ຈ່າຍແລ້ວ" : "จ่ายแล้ว",
-    outstanding:
-      language === "en" ? "Outstanding" : language === "lo" ? "ຄ້າງ" : "ค้าง",
-    paidAt:
-      language === "en" ? "Paid on" : language === "lo" ? "ຊຳລະເມື່ອ" : "ชำระเมื่อ",
-    paymentRecorded:
-      language === "en"
-        ? "Payment recorded"
-        : language === "lo"
-          ? "ບັນທຶກການຊຳລະແລ້ວ"
-          : "บันทึกชำระแล้ว",
-    by: language === "en" ? "by" : language === "lo" ? "ໂດຍ" : "โดย",
-    reference:
-      language === "en" ? "ref" : language === "lo" ? "ອ້າງອີງ" : "อ้างอิง",
-    pendingPaymentHint:
-      language === "en"
-        ? "Exchange rate is still pending: finalize the rate before recording payment"
-        : language === "lo"
-          ? "ຍັງບໍ່ປິດເຣດ: ຕ້ອງປິດເຣດກ່ອນບັນທຶກການຊຳລະ"
-          : "ยังปิดเรทไม่ครบ: ต้องปิดเรทก่อนบันทึกชำระ",
-    readyToSettle:
-      language === "en"
-        ? "Ready to record payment when settlement happens"
-        : language === "lo"
-          ? "ພ້ອມບັນທຶກການຊຳລະເມື່ອຈ່າຍຈິງ"
-          : "พร้อมบันทึกชำระเมื่อจ่ายจริง",
-    finalizeRateTitle:
-      language === "en" ? "Finalize exchange rate" : language === "lo" ? "ປິດເຣດແລກປ່ຽນຈິງ" : "ปิดเรทแลกเปลี่ยนจริง",
-    finalRateLabel:
-      language === "en"
-        ? `Final exchange rate (1 ${po?.purchaseCurrency ?? "-"} = ? ${storeCurrency})`
-        : language === "lo"
-          ? `ອັດຕາແລກປ່ຽນຈິງ (1 ${po?.purchaseCurrency ?? "-"} = ? ${storeCurrency})`
-          : `อัตราแลกเปลี่ยนจริง (1 ${po?.purchaseCurrency ?? "-"} = ? ${storeCurrency})`,
-    finalRatePlaceholder:
-      language === "en" ? "e.g. 670" : language === "lo" ? "ເຊັ່ນ 670" : "เช่น 670",
-    finalizeRateNoteLabel:
-      language === "en"
-        ? "Finalize rate note (optional)"
-        : language === "lo"
-          ? "ໝາຍເຫດການປິດເຣດ (ບໍ່ບັງຄັບ)"
-          : "หมายเหตุการปิดเรท (ไม่บังคับ)",
-    finalizeRateNotePlaceholder:
-      language === "en"
-        ? "e.g. month-end settlement / invoice ref"
-        : language === "lo"
-          ? "ເຊັ່ນ ຊຳລະປາຍເດືອນ / ອ້າງອີງໃບແຈ້ງໜີ້"
-          : "เช่น ชำระปลายเดือน/อ้างอิงใบแจ้งหนี้",
-    finalizeRateHelp:
-      language === "en"
-        ? "Finalizing the rate updates the base values for accounting reference on this PO only and does not retroactively change closed documents."
-        : language === "lo"
-          ? "ການປິດເຣດຈະອັບເດດມູນຄ່າຖານສຳລັບອ້າງອີງບັນຊີໃນ PO ນີ້ເທົ່ານັ້ນ ແລະບໍ່ຍ້ອນແກ້ເອກະສານທີ່ປິດແລ້ວ"
-          : "หมายเหตุ: การปิดเรทจะอัปเดตราคาฐานใน PO นี้สำหรับการอ้างอิงบัญชี ไม่ย้อนแก้เอกสารที่ปิดไปแล้ว",
-    confirmFinalizeRate:
-      language === "en" ? "Confirm finalize rate" : language === "lo" ? "ຢືນຢັນປິດເຣດ" : "ยืนยันปิดเรท",
-    settlePaymentTitle:
-      language === "en" ? "Record PO payment" : language === "lo" ? "ບັນທຶກການຊຳລະ PO" : "บันทึกชำระ PO",
-    paymentAmountLabel:
-      language === "en" ? `Payment amount (${storeCurrency})` : language === "lo" ? `ຍອດຊຳລະ (${storeCurrency})` : `ยอดชำระ (${storeCurrency})`,
-    currentOutstanding:
-      language === "en"
-        ? "Current outstanding"
-        : language === "lo"
-          ? "ຍອດຄ້າງປັດຈຸບັນ"
-          : "ยอดค้างปัจจุบัน",
-    paymentDate:
-      language === "en" ? "Payment date" : language === "lo" ? "ວັນທີຊຳລະ" : "วันที่ชำระ",
-    paymentReferenceLabel:
-      language === "en"
-        ? "Payment reference (optional)"
-        : language === "lo"
-          ? "ເລກອ້າງອີງການຊຳລະ (ບໍ່ບັງຄັບ)"
-          : "เลขอ้างอิงชำระ (ไม่บังคับ)",
-    paymentReferencePlaceholder:
-      language === "en"
-        ? "e.g. month-end statement / invoice number"
-        : language === "lo"
-          ? "ເຊັ່ນ statement ປາຍເດືອນ / ເລກໃບແຈ້ງໜີ້"
-          : "เช่น Statement ปลายเดือน / เลขใบแจ้งหนี้",
-    optionalNote:
-      language === "en" ? "Note (optional)" : language === "lo" ? "ໝາຍເຫດ (ບໍ່ບັງຄັບ)" : "หมายเหตุ (ไม่บังคับ)",
-    confirmSettlePayment:
-      language === "en" ? "Confirm payment" : language === "lo" ? "ຢືນຢັນບັນທຶກການຊຳລະ" : "ยืนยันบันทึกชำระ",
-    updateCostsTitle:
-      language === "en"
-        ? "Update shipping and extra costs after receiving"
-        : language === "lo"
-          ? "ອັບເດດຄ່າຂົນສົ່ງ/ຄ່າອື່ນຫຼັງຮັບສິນຄ້າ"
-          : "อัปเดตค่าขนส่ง/ค่าอื่นหลังรับสินค้า",
-    shippingCostLabel:
-      language === "en" ? `Shipping cost (${storeCurrency})` : language === "lo" ? `ຄ່າຂົນສົ່ງ (${storeCurrency})` : `ค่าขนส่ง (${storeCurrency})`,
-    otherCostLabel:
-      language === "en" ? `Other cost (${storeCurrency})` : language === "lo" ? `ຄ່າອື່ນໆ (${storeCurrency})` : `ค่าอื่นๆ (${storeCurrency})`,
-    otherCostNoteLabel:
-      language === "en"
-        ? "Other cost note (optional)"
-        : language === "lo"
-          ? "ໝາຍເຫດຄ່າອື່ນໆ (ບໍ່ບັງຄັບ)"
-          : "หมายเหตุค่าอื่นๆ (ไม่บังคับ)",
-    otherCostNotePlaceholder:
-      language === "en"
-        ? "e.g. month-end freight / extra service fee"
-        : language === "lo"
-          ? "ເຊັ່ນ ຄ່າຂົນສົ່ງປາຍເດືອນ / ຄ່າບໍລິການເພີ່ມ"
-          : "เช่น ค่าขนส่งปลายเดือน / ค่าบริการเพิ่มเติม",
-    newGrandTotal:
-      language === "en" ? "New grand total" : language === "lo" ? "ຍອດລວມໃໝ່" : "ยอดรวมใหม่",
-    newOutstanding:
-      language === "en" ? "New outstanding" : language === "lo" ? "ຍອດຄ້າງໃໝ່" : "คงค้างใหม่",
-    updateCostsHelp:
-      language === "en"
-        ? "This updates AP and statement balances immediately, but does not retroactively change product costs."
-        : language === "lo"
-          ? "ລະບົບຈະອັບເດດ AP/statement ທັນທີ ແຕ່ບໍ່ຍ້ອນປັບຕົ້ນທຶນສິນຄ້າ"
-          : "หมายเหตุ: อัปเดตยอด AP/statement ทันที แต่ไม่ปรับต้นทุนสินค้าแบบย้อนย้อนหลัง",
-    confirmUpdate:
-      language === "en" ? "Confirm update" : language === "lo" ? "ຢືນຢັນອັບເດດ" : "ยืนยันอัปเดต",
-    paymentHistory:
-      language === "en" ? "Payment history" : language === "lo" ? "ປະຫວັດການຊຳລະ" : "ประวัติการชำระ",
-    paymentEntry:
-      language === "en" ? "Payment" : language === "lo" ? "ຊຳລະ" : "ชำระ",
-    reversalEntry:
-      language === "en" ? "Reversal" : language === "lo" ? "ຍ້ອນລາຍການ" : "ย้อนรายการ",
-    systemUser:
-      language === "en" ? "system" : language === "lo" ? "ລະບົບ" : "โดยระบบ",
-    reverseEntry:
-      language === "en" ? "Reverse entry" : language === "lo" ? "ຍ້ອນລາຍການ" : "ย้อนรายการ",
-    reversed:
-      language === "en" ? "Reversed" : language === "lo" ? "ຖືກຍ້ອນແລ້ວ" : "ถูกย้อนแล้ว",
-    editPo:
-      language === "en" ? "Edit purchase order" : language === "lo" ? "ແກ້ໄຂໃບສັ່ງຊື້" : "แก้ไข PO",
-    exchangeRateHint:
-      language === "en"
-        ? "Leave blank if the final exchange rate is not known yet. The PO will remain pending final rate."
-        : language === "lo"
-          ? "ປ່ອຍວ່າງໄວ້ໄດ້ຖ້າຍັງບໍ່ຮູ້ເຣດຈິງ (ລະບົບຈະຕັ້ງເປັນລໍຖ້າປິດເຣດ)"
-          : "เว้นว่างได้ถ้ายังไม่ทราบเรทจริง (ระบบจะตั้งเป็นรอปิดเรท)",
-    itemLines:
-      language === "en" ? "Line items" : language === "lo" ? "ລາຍການສິນຄ້າ" : "รายการสินค้า",
-    expectedDateAria:
-      language === "en"
-        ? "Select expected receive date in edit form"
-        : language === "lo"
-          ? "ເລືອກວັນທີຄາດຮັບໃນຟອມແກ້ໄຂ PO"
-          : "เลือกวันที่คาดรับในฟอร์มแก้ไข PO",
-    dueDateAria:
-      language === "en"
-        ? "Select due date in edit form"
-        : language === "lo"
-          ? "ເລືອກວັນທີຄົບກຳນົດຊຳລະໃນຟອມແກ້ໄຂ PO"
-          : "เลือกวันที่ครบกำหนดชำระในฟอร์มแก้ไข PO",
-    saveEdit:
-      language === "en" ? "Save changes" : language === "lo" ? "ບັນທຶກການແກ້ໄຂ" : "บันทึกการแก้ไข",
-    created:
-      language === "en" ? "Created" : language === "lo" ? "ສ້າງ" : "สร้าง",
-    confirmedOrder:
-      language === "en" ? "Confirmed" : language === "lo" ? "ຢືນຢັນສັ່ງຊື້" : "ยืนยันสั่งซื้อ",
-    shipped:
-      language === "en" ? "Shipped" : language === "lo" ? "ຈັດສົ່ງ" : "จัดส่ง",
-    received:
-      language === "en" ? "Received" : language === "lo" ? "ຮັບສິນຄ້າແລ້ວ" : "รับสินค้าแล้ว",
-    expectedOn:
-      language === "en" ? "Expected on" : language === "lo" ? "ຄາດວ່າ" : "คาดว่า",
-    dueOn:
-      language === "en" ? "Due on" : language === "lo" ? "ຄົບກຳນົດຊຳລະ" : "ครบกำหนดชำระ",
-    receivedQty:
-      language === "en" ? "received" : language === "lo" ? "ຮັບແລ້ວ" : "ได้รับ",
-    goods:
-      language === "en" ? "Goods" : language === "lo" ? "ສິນຄ້າ" : "สินค้า",
-    confirmOrder:
-      language === "en" ? "Confirm order" : language === "lo" ? "ຢືນຢັນສັ່ງຊື້" : "ยืนยันสั่งซื้อ",
-    supplierShipped:
-      language === "en" ? "Supplier shipped" : language === "lo" ? "ຜູ້ສະໜອງຈັດສົ່ງແລ້ວ" : "ซัพพลายเออร์ส่งแล้ว",
-    receiveGoods:
-      language === "en" ? "Receive goods" : language === "lo" ? "ຮັບສິນຄ້າ" : "รับสินค้า",
+    ...ui.detail,
+    finalRateLabel: interpolatePurchaseText(ui.detail.finalRateLabel, {
+      purchase: po?.purchaseCurrency ?? "-",
+      store: storeCurrency,
+    }),
+    paymentAmountLabel: interpolatePurchaseText(ui.detail.paymentAmountLabel, {
+      currency: storeCurrency,
+    }),
+    shippingCostLabel: interpolatePurchaseText(ui.detail.shippingCostLabel, {
+      currency: storeCurrency,
+    }),
+    otherCostLabel: interpolatePurchaseText(ui.detail.otherCostLabel, {
+      currency: storeCurrency,
+    }),
   };
 
   return (
@@ -5088,7 +5523,7 @@ function PODetailSheet({
       onClose={onClose}
       title={
         po?.poNumber ??
-        (language === "en" ? "Detail" : language === "lo" ? "ລາຍລະອຽດ" : "รายละเอียด")
+        detailUi.titleFallback
       }
       disabled={
         updating ||
@@ -5243,21 +5678,9 @@ function PODetailSheet({
                         const blob = await generatePoPdf(pdfData, storeCurrency, pdfConfig);
                         const { downloadBlob } = await import("@/lib/pdf/share-or-download");
                         downloadBlob(blob, `${po.poNumber}.pdf`);
-                        toast.success(
-                          language === "en"
-                            ? "PDF downloaded"
-                            : language === "lo"
-                              ? "ດາວໂຫລດ PDF ຮຽບຮ້ອຍ"
-                              : "ดาวน์โหลด PDF เรียบร้อย",
-                        );
+                        toast.success(ui.detail.pdfDownloaded);
                       } catch {
-                        toast.error(
-                          language === "en"
-                            ? "Failed to generate PDF"
-                            : language === "lo"
-                              ? "ສ້າງ PDF ບໍ່ສຳເລັດ"
-                              : "สร้าง PDF ไม่สำเร็จ",
-                        );
+                        toast.error(ui.detail.pdfGenerateFailed);
                       } finally {
                         setIsGeneratingPdf(false);
                       }
@@ -5312,30 +5735,14 @@ function PODetailSheet({
                           const result = await shareOrDownload(
                             blob,
                             `${po.poNumber}.pdf`,
-                            `${
-                              language === "en"
-                                ? "Purchase order"
-                                : language === "lo"
-                                  ? "ໃບສັ່ງຊື້"
-                                  : "ใบสั่งซื้อ"
-                            } ${po.poNumber}`,
+                            `${detailUi.pdfDocTitle} ${po.poNumber}`,
                           );
                           if (result === "downloaded") {
-                            toast.success(
-                              language === "en"
-                                ? "PDF downloaded"
-                                : language === "lo"
-                                  ? "ດາວໂຫລດ PDF ຮຽບຮ້ອຍ"
-                                  : "ดาวน์โหลด PDF เรียบร้อย",
-                            );
+                            toast.success(ui.detail.pdfDownloaded);
                           }
                         } catch {
                           toast.error(
-                            language === "en"
-                              ? "Failed to share PDF"
-                              : language === "lo"
-                                ? "ແບ່ງປັນ PDF ບໍ່ສຳເລັດ"
-                                : "แชร์ PDF ไม่สำเร็จ",
+                            ui.detail.pdfShareFailed,
                           );
                         } finally {
                           setIsGeneratingPdf(false);
@@ -5426,7 +5833,7 @@ function PODetailSheet({
                   </p>
                   <div className="space-y-1">
                     <label className="text-[11px] text-amber-700">
-                      {detailUi.finalRateLabel} (1 {po.purchaseCurrency} = ? {storeCurrency})
+                      {detailUi.finalRateLabel}
                     </label>
                     <input
                       type="number"
@@ -5486,7 +5893,7 @@ function PODetailSheet({
                   </p>
                   <div className="space-y-1">
                     <label className="text-[11px] text-emerald-700">
-                      {detailUi.paymentAmountLabel} ({storeCurrency})
+                      {detailUi.paymentAmountLabel}
                     </label>
                     <input
                       type="number"
@@ -5567,7 +5974,7 @@ function PODetailSheet({
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <div className="space-y-1">
                       <label className="text-[11px] text-sky-700">
-                        {detailUi.shippingCostLabel} ({storeCurrency})
+                        {detailUi.shippingCostLabel}
                       </label>
                       <input
                         type="number"
@@ -5579,7 +5986,7 @@ function PODetailSheet({
                     </div>
                     <div className="space-y-1">
                       <label className="text-[11px] text-sky-700">
-                        {detailUi.otherCostLabel} ({storeCurrency})
+                        {detailUi.otherCostLabel}
                       </label>
                       <input
                         type="number"
@@ -5964,7 +6371,7 @@ function PODetailSheet({
                       </div>
                     </div>
                     <div className="space-y-1 min-w-0">
-                      <label className="text-[11px] text-slate-500">Tracking</label>
+                      <label className="text-[11px] text-slate-500">{ui.common.tracking}</label>
                       <input
                         className="h-9 w-full min-w-0 max-w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:ring-2 focus:ring-primary"
                         value={editForm.trackingInfo}
@@ -6226,11 +6633,7 @@ function PODetailSheet({
             <div className="space-y-3 py-8 text-center">
               <p className="text-sm text-slate-400">
                 {detailError ??
-                  (language === "en"
-                    ? "No data found"
-                    : language === "lo"
-                      ? "ບໍ່ພົບຂໍ້ມູນ"
-                      : "ไม่พบข้อมูล")}
+                  detailUi.emptyData}
               </p>
               {poId && (
                 <Button

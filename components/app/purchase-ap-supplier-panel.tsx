@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { authFetch } from "@/lib/auth/client-token";
 import { currencySymbol } from "@/lib/finance/store-financial";
 import type { StoreCurrency } from "@/lib/finance/store-financial";
+import { formatNumberByLanguage } from "@/lib/i18n/translate";
+import type { AppLanguage } from "@/lib/i18n/types";
 
 type PurchaseApSupplierSummaryItem = {
   supplierKey: string;
@@ -56,6 +58,7 @@ type PurchaseApStatementSummary = {
 };
 
 type PurchaseApSupplierPanelProps = {
+  language: AppLanguage;
   storeCurrency: StoreCurrency;
   refreshKey?: string | null;
   preset?: PurchaseApPanelPreset | null;
@@ -80,34 +83,29 @@ export type PurchaseApPanelPreset = {
   resetPoQuery?: boolean;
 };
 
-function fmtPrice(amount: number, currency: StoreCurrency): string {
-  return `${currencySymbol(currency)}${amount.toLocaleString("th-TH")}`;
+const localeByLanguage: Record<AppLanguage, string> = {
+  lo: "lo-LA",
+  th: "th-TH",
+  en: "en-US",
+};
+
+function fmtPrice(
+  amount: number,
+  currency: StoreCurrency,
+  language: AppLanguage,
+): string {
+  return `${currencySymbol(currency)}${amount.toLocaleString(localeByLanguage[language])}`;
 }
 
-function formatDate(dateStr: string | null): string {
+function formatDate(dateStr: string | null, language: AppLanguage): string {
   if (!dateStr) return "-";
   const date = new Date(dateStr);
   if (!Number.isFinite(date.getTime())) return "-";
-  return date.toLocaleDateString("th-TH", {
+  return date.toLocaleDateString(localeByLanguage[language], {
     day: "numeric",
     month: "short",
     year: "numeric",
   });
-}
-
-function dueStatusLabel(status: DueFilter): string {
-  if (status === "OVERDUE") return "เลยกำหนด";
-  if (status === "DUE_SOON") return "ใกล้ครบกำหนด";
-  if (status === "NOT_DUE") return "ยังไม่ถึงกำหนด";
-  if (status === "NO_DUE_DATE") return "ไม่ระบุ due";
-  return "ทั้งหมด";
-}
-
-function paymentStatusLabel(status: PaymentFilter): string {
-  if (status === "UNPAID") return "ยังไม่ชำระ";
-  if (status === "PARTIAL") return "ชำระบางส่วน";
-  if (status === "PAID") return "ชำระแล้ว";
-  return "ทั้งหมด";
 }
 
 function toDateInputValue(date: Date): string {
@@ -150,9 +148,367 @@ function formatIsoDateDisplay(value: string): string {
   return `${day}/${month}/${year}`;
 }
 
-const calendarWeekdayLabels = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"] as const;
+function interpolatePurchaseText(
+  template: string,
+  values?: Record<string, string | number>,
+): string {
+  if (!values) return template;
+  return template.replace(/\{(\w+)\}/g, (_, key: string) => {
+    if (!(key in values)) return "";
+    return String(values[key]);
+  });
+}
+
+const calendarWeekdayLabelsByLanguage: Record<AppLanguage, readonly string[]> = {
+  lo: ["ອາ", "ຈ", "ອ", "ພ", "ພຫ", "ສກ", "ສ"] as const,
+  th: ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"] as const,
+  en: ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] as const,
+};
+
+const purchaseApTextByLanguage = {
+  lo: {
+    retry: "ລອງໃໝ່",
+    cancel: "ຍົກເລີກ",
+    all: "ທັງໝົດ",
+    loading: "ກຳລັງໂຫຼດ...",
+    today: "ມື້ນີ້",
+    plusSevenDays: "+7 ມື້",
+    endOfMonth: "ສິ້ນເດືອນ",
+    clear: "ລ້າງ",
+    apBySupplierTitle: "AP ຕາມຊັບພລາຍເອີ",
+    apBySupplierDescription: "ເລືອກ supplier ເພື່ອເບິ່ງ statement ແລະເປີດ PO ແບບ drill-down",
+    refresh: "ຣີເຟຣຊ",
+    searchSupplierPlaceholder: "ຄົ້ນຫາ supplier",
+    loadingSuppliers: "ກຳລັງໂຫຼດລາຍການ supplier...",
+    loadSuppliersFailed: "ໂຫຼດ AP ລາຍ supplier ບໍ່ສຳເລັດ",
+    connectionRetry: "ເຊື່ອມຕໍ່ບໍ່ສຳເລັດ ກະລຸນາລອງໃໝ່",
+    noApMatches: "ຍັງບໍ່ມີ AP ຄ້າງຊຳລະຕາມເງື່ອນໄຂ",
+    clearSupplierSearch: "ລ້າງຄຳຄົ້ນຫາ supplier",
+    supplierPoSummary: "{count} PO · ຄ້າງ {amount}",
+    supplierRiskSummary: "ເກີນກຳນົດ {overdue} · ໃກ້ຄົບ {dueSoon}",
+    selectSupplier: "ເລືອກ supplier",
+    statementSummary: "{count} PO · ຄ້າງລວມ {amount}",
+    noStatementData: "ຍັງບໍ່ມີຂໍ້ມູນ statement",
+    exportSupplierCsv: "Export Supplier CSV",
+    selectedCount: "ເລືອກແລ້ວ {selected}/{total} ລາຍການ",
+    selectAll: "ເລືອກທັງໝົດ",
+    clearSelection: "ລ້າງທີ່ເລືອກ",
+    bulkSettle: "ບັນທຶກຊຳລະແບບກຸ່ມ",
+    searchPoPlaceholder: "ຄົ້ນຫາເລກ PO",
+    sortDueAsc: "ຮຽງຕາມ due date",
+    sortOutstandingDesc: "ຮຽງຍອດຄ້າງຫຼາຍສຸດ",
+    dueRangeHelp: "ຊ່ວງ due date (ໃຊ້ກັບທັງ statement ແລະ export CSV)",
+    dueFrom: "Due ຕັ້ງແຕ່",
+    dueTo: "Due ເຖິງ",
+    dueFromAria: "ເລືອກ due date ເລີ່ມຕົ້ນໃນ AP statement",
+    dueToAria: "ເລືອກ due date ສິ້ນສຸດໃນ AP statement",
+    overdue: "ເກີນກຳນົດ",
+    dueSoon: "ໃກ້ຄົບກຳນົດ",
+    notDue: "ຍັງບໍ່ເຖິງກຳນົດ",
+    noDueDate: "ບໍ່ລະບຸ due",
+    bulkSettleTitle: "ຊຳລະແບບກຸ່ມຈາກ AP statement",
+    bulkSettleHelp: "ລະບົບຈະຈັບຄູ່ຍອດອັດຕະໂນມັດແບບ due date ເກົ່າສຸດກ່ອນ (oldest due first)",
+    paidAtLabel: "ວັນທີຊຳລະ",
+    referenceLabel: "ເລກອ້າງອີງຮອບຊຳລະ",
+    referencePlaceholder: "ເຊັ່ນ Statement 2026-02",
+    statementTotalLabel: "ຍອດຊຳລະລວມຕາມ statement (ບໍ່ບັງຄັບ)",
+    statementTotalPlaceholder: "ຖ້າບໍ່ກອກ = ຈ່າຍເຕັມຍອດຄ້າງທີ່ເລືອກ",
+    noteOptional: "ໝາຍເຫດ (ບໍ່ບັງຄັບ)",
+    notePlaceholder: "ເຊັ່ນ ຈ່າຍປາຍເດືອນ",
+    allocationSummary: "ຍອດຄ້າງທີ່ເລືອກ {outstanding} · ຈະລົງຊຳລະ {planned} · ຄ້າງຫຼັງຮອບນີ້ {after}",
+    unmatchedStatement: "ຍອດ statement ທີ່ຍັງບໍ່ຖືກຈັບຄູ່ {amount}",
+    invalidStatementTotal: "ຍອດຊຳລະລວມຈາກ statement ບໍ່ຖືກຕ້ອງ",
+    failedListTitle: "ລາຍການທີ່ບໍ່ສຳເລັດ ({count})",
+    confirmBulkSettle: "ຢືນຢັນບັນທຶກຊຳລະແບບກຸ່ມ",
+    loadingStatement: "ກຳລັງໂຫຼດ statement...",
+    loadStatementFailed: "ໂຫຼດ statement ບໍ່ສຳເລັດ",
+    noRowsMatch: "ບໍ່ພົບລາຍການຕາມຕົວກອງ",
+    clearStatementFilters: "ລ້າງຕົວກອງ statement",
+    rowMeta: "due {due} · ຮັບເມື່ອ {received}",
+    daysLeft: "ເຫຼືອ {days} ມື້",
+    overdueDays: "ເລີຍ {days} ມື້",
+    paidAmount: "ຈ່າຍແລ້ວ {amount}",
+    selectAtLeastOne: "ກະລຸນາເລືອກ PO ຢ່າງນ້ອຍ 1 ລາຍການ",
+    selectPoToSettle: "ກະລຸນາເລືອກ PO ທີ່ຕ້ອງການບັນທຶກຊຳລະ",
+    paymentReferenceRequired: "ກະລຸນາກອກເລກອ້າງອີງຮອບບັດ/ຮອບຊຳລະ",
+    statementTotalRequired: "ກະລຸນາກອກຍອດຊຳລະລວມຈາກ statement ໃຫ້ຖືກຕ້ອງ",
+    bulkStarting: "ເລີ່ມປະມວນຜົນ...",
+    bulkProcessing: "ກຳລັງບັນທຶກຊຳລະ {current}/{total} ({poNumber})",
+    settleFailed: "{poNumber}: ບັນທຶກຊຳລະບໍ່ສຳເລັດ ({message})",
+    settleSuccess: "ບັນທຶກຊຳລະສຳເລັດ {count}/{total} ລາຍການ (ລວມ {amount})",
+    failedCount: "ມີລາຍການບໍ່ສຳເລັດ {count} ລາຍການ",
+    bulkConnectionFailed: "ເຊື່ອມຕໍ່ບໍ່ສຳເລັດລະຫວ່າງບັນທຶກຊຳລະແບບກຸ່ມ",
+    unknown: "unknown",
+    paymentStatuses: {
+      ALL: "ທັງໝົດ",
+      UNPAID: "ຍັງບໍ່ຊຳລະ",
+      PARTIAL: "ຊຳລະບາງສ່ວນ",
+      PAID: "ຊຳລະແລ້ວ",
+    },
+    dueStatuses: {
+      ALL: "ທັງໝົດ",
+      OVERDUE: "ເກີນກຳນົດ",
+      DUE_SOON: "ໃກ້ຄົບກຳນົດ",
+      NOT_DUE: "ຍັງບໍ່ເຖິງກຳນົດ",
+      NO_DUE_DATE: "ບໍ່ລະບຸ due",
+    },
+  },
+  th: {
+    retry: "ลองใหม่",
+    cancel: "ยกเลิก",
+    all: "ทั้งหมด",
+    loading: "กำลังโหลด...",
+    today: "วันนี้",
+    plusSevenDays: "+7 วัน",
+    endOfMonth: "สิ้นเดือน",
+    clear: "ล้าง",
+    apBySupplierTitle: "AP ราย supplier",
+    apBySupplierDescription: "เลือก supplier เพื่อดู statement และเปิด PO แบบ drill-down",
+    refresh: "รีเฟรช",
+    searchSupplierPlaceholder: "ค้นหา supplier",
+    loadingSuppliers: "กำลังโหลดรายการ supplier...",
+    loadSuppliersFailed: "โหลด AP ราย supplier ไม่สำเร็จ",
+    connectionRetry: "เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่",
+    noApMatches: "ยังไม่มี AP ค้างชำระตามเงื่อนไข",
+    clearSupplierSearch: "ล้างคำค้นหา supplier",
+    supplierPoSummary: "{count} PO · ค้าง {amount}",
+    supplierRiskSummary: "เลยกำหนด {overdue} · ใกล้ครบ {dueSoon}",
+    selectSupplier: "เลือก supplier",
+    statementSummary: "{count} PO · ค้างรวม {amount}",
+    noStatementData: "ยังไม่มีข้อมูล statement",
+    exportSupplierCsv: "Export Supplier CSV",
+    selectedCount: "เลือกแล้ว {selected}/{total} รายการ",
+    selectAll: "เลือกทั้งหมด",
+    clearSelection: "ล้างที่เลือก",
+    bulkSettle: "บันทึกชำระแบบกลุ่ม",
+    searchPoPlaceholder: "ค้นหาเลข PO",
+    sortDueAsc: "เรียงตาม due date",
+    sortOutstandingDesc: "เรียงยอดค้างมากสุด",
+    dueRangeHelp: "ช่วง due date (ใช้กับทั้ง statement และ export CSV)",
+    dueFrom: "Due ตั้งแต่",
+    dueTo: "Due ถึง",
+    dueFromAria: "เลือก due date เริ่มต้นใน AP statement",
+    dueToAria: "เลือก due date สิ้นสุดใน AP statement",
+    overdue: "เลยกำหนด",
+    dueSoon: "ใกล้ครบกำหนด",
+    notDue: "ยังไม่ถึงกำหนด",
+    noDueDate: "ไม่ระบุ due",
+    bulkSettleTitle: "ชำระแบบกลุ่มจาก AP statement",
+    bulkSettleHelp: "ระบบจะจับคู่ยอดอัตโนมัติแบบ due date เก่าสุดก่อน (oldest due first)",
+    paidAtLabel: "วันที่ชำระ",
+    referenceLabel: "เลขอ้างอิงรอบชำระ",
+    referencePlaceholder: "เช่น Statement 2026-02",
+    statementTotalLabel: "ยอดชำระรวมตาม statement (ไม่บังคับ)",
+    statementTotalPlaceholder: "ถ้าไม่กรอก = จ่ายเต็มยอดค้างที่เลือก",
+    noteOptional: "หมายเหตุ (ไม่บังคับ)",
+    notePlaceholder: "เช่น จ่ายปลายเดือน",
+    allocationSummary: "ยอดค้างที่เลือก {outstanding} · จะลงชำระ {planned} · ค้างหลังรอบนี้ {after}",
+    unmatchedStatement: "ยอด statement ที่ยังไม่ถูกจับคู่ {amount}",
+    invalidStatementTotal: "ยอดชำระรวมจาก statement ไม่ถูกต้อง",
+    failedListTitle: "รายการที่ไม่สำเร็จ ({count})",
+    confirmBulkSettle: "ยืนยันบันทึกชำระแบบกลุ่ม",
+    loadingStatement: "กำลังโหลด statement...",
+    loadStatementFailed: "โหลด statement ไม่สำเร็จ",
+    noRowsMatch: "ไม่พบรายการตามตัวกรอง",
+    clearStatementFilters: "ล้างตัวกรอง statement",
+    rowMeta: "due {due} · รับเมื่อ {received}",
+    daysLeft: "เหลือ {days} วัน",
+    overdueDays: "เลย {days} วัน",
+    paidAmount: "จ่ายแล้ว {amount}",
+    selectAtLeastOne: "กรุณาเลือก PO อย่างน้อย 1 รายการ",
+    selectPoToSettle: "กรุณาเลือก PO ที่ต้องการบันทึกชำระ",
+    paymentReferenceRequired: "กรุณากรอกเลขอ้างอิงรอบบัตร/รอบชำระ",
+    statementTotalRequired: "กรุณากรอกยอดชำระรวมจาก statement ให้ถูกต้อง",
+    bulkStarting: "เริ่มประมวลผล...",
+    bulkProcessing: "กำลังบันทึกชำระ {current}/{total} ({poNumber})",
+    settleFailed: "{poNumber}: บันทึกชำระไม่สำเร็จ ({message})",
+    settleSuccess: "บันทึกชำระสำเร็จ {count}/{total} รายการ (รวม {amount})",
+    failedCount: "มีรายการไม่สำเร็จ {count} รายการ",
+    bulkConnectionFailed: "เชื่อมต่อไม่สำเร็จระหว่างบันทึกชำระแบบกลุ่ม",
+    unknown: "unknown",
+    paymentStatuses: {
+      ALL: "ทั้งหมด",
+      UNPAID: "ยังไม่ชำระ",
+      PARTIAL: "ชำระบางส่วน",
+      PAID: "ชำระแล้ว",
+    },
+    dueStatuses: {
+      ALL: "ทั้งหมด",
+      OVERDUE: "เลยกำหนด",
+      DUE_SOON: "ใกล้ครบกำหนด",
+      NOT_DUE: "ยังไม่ถึงกำหนด",
+      NO_DUE_DATE: "ไม่ระบุ due",
+    },
+  },
+  en: {
+    retry: "Retry",
+    cancel: "Cancel",
+    all: "All",
+    loading: "Loading...",
+    today: "Today",
+    plusSevenDays: "+7 days",
+    endOfMonth: "Month end",
+    clear: "Clear",
+    apBySupplierTitle: "AP by supplier",
+    apBySupplierDescription: "Select a supplier to review the statement and drill down into purchase orders.",
+    refresh: "Refresh",
+    searchSupplierPlaceholder: "Search supplier",
+    loadingSuppliers: "Loading suppliers...",
+    loadSuppliersFailed: "Failed to load AP by supplier",
+    connectionRetry: "Connection failed. Please try again.",
+    noApMatches: "No outstanding AP matches the current filters",
+    clearSupplierSearch: "Clear supplier search",
+    supplierPoSummary: "{count} POs · outstanding {amount}",
+    supplierRiskSummary: "Overdue {overdue} · due soon {dueSoon}",
+    selectSupplier: "Select supplier",
+    statementSummary: "{count} POs · total outstanding {amount}",
+    noStatementData: "No statement data yet",
+    exportSupplierCsv: "Export Supplier CSV",
+    selectedCount: "Selected {selected}/{total} items",
+    selectAll: "Select all",
+    clearSelection: "Clear selection",
+    bulkSettle: "Bulk settle",
+    searchPoPlaceholder: "Search PO number",
+    sortDueAsc: "Sort by due date",
+    sortOutstandingDesc: "Sort by highest outstanding",
+    dueRangeHelp: "Due date range (applies to both the statement and CSV export)",
+    dueFrom: "Due from",
+    dueTo: "Due to",
+    dueFromAria: "Choose statement due-date start",
+    dueToAria: "Choose statement due-date end",
+    overdue: "Overdue",
+    dueSoon: "Due soon",
+    notDue: "Not due yet",
+    noDueDate: "No due date",
+    bulkSettleTitle: "Bulk settlement from AP statement",
+    bulkSettleHelp: "The system auto-matches payments oldest due first.",
+    paidAtLabel: "Payment date",
+    referenceLabel: "Settlement reference",
+    referencePlaceholder: "e.g. Statement 2026-02",
+    statementTotalLabel: "Statement total (optional)",
+    statementTotalPlaceholder: "Leave blank to pay the full outstanding balance of selected POs",
+    noteOptional: "Note (optional)",
+    notePlaceholder: "e.g. month-end settlement",
+    allocationSummary: "Selected outstanding {outstanding} · will settle {planned} · remaining after this cycle {after}",
+    unmatchedStatement: "Unmatched statement amount {amount}",
+    invalidStatementTotal: "Invalid statement total",
+    failedListTitle: "Failed items ({count})",
+    confirmBulkSettle: "Confirm bulk settlement",
+    loadingStatement: "Loading statement...",
+    loadStatementFailed: "Failed to load statement",
+    noRowsMatch: "No rows match the current filters",
+    clearStatementFilters: "Clear statement filters",
+    rowMeta: "due {due} · received {received}",
+    daysLeft: "{days} days left",
+    overdueDays: "{days} days overdue",
+    paidAmount: "Paid {amount}",
+    selectAtLeastOne: "Please select at least one PO",
+    selectPoToSettle: "Please select the PO entries to settle",
+    paymentReferenceRequired: "Please enter the payment-cycle reference",
+    statementTotalRequired: "Please enter a valid statement total",
+    bulkStarting: "Starting...",
+    bulkProcessing: "Recording payment {current}/{total} ({poNumber})",
+    settleFailed: "{poNumber}: payment recording failed ({message})",
+    settleSuccess: "Recorded payments for {count}/{total} POs (total {amount})",
+    failedCount: "{count} items failed",
+    bulkConnectionFailed: "Connection failed during bulk settlement",
+    unknown: "unknown",
+    paymentStatuses: {
+      ALL: "All",
+      UNPAID: "Unpaid",
+      PARTIAL: "Partially paid",
+      PAID: "Paid",
+    },
+    dueStatuses: {
+      ALL: "All",
+      OVERDUE: "Overdue",
+      DUE_SOON: "Due soon",
+      NOT_DUE: "Not due yet",
+      NO_DUE_DATE: "No due date",
+    },
+  },
+} satisfies Record<
+  AppLanguage,
+  {
+    retry: string;
+    cancel: string;
+    all: string;
+    loading: string;
+    today: string;
+    plusSevenDays: string;
+    endOfMonth: string;
+    clear: string;
+    apBySupplierTitle: string;
+    apBySupplierDescription: string;
+    refresh: string;
+    searchSupplierPlaceholder: string;
+    loadingSuppliers: string;
+    loadSuppliersFailed: string;
+    connectionRetry: string;
+    noApMatches: string;
+    clearSupplierSearch: string;
+    supplierPoSummary: string;
+    supplierRiskSummary: string;
+    selectSupplier: string;
+    statementSummary: string;
+    noStatementData: string;
+    exportSupplierCsv: string;
+    selectedCount: string;
+    selectAll: string;
+    clearSelection: string;
+    bulkSettle: string;
+    searchPoPlaceholder: string;
+    sortDueAsc: string;
+    sortOutstandingDesc: string;
+    dueRangeHelp: string;
+    dueFrom: string;
+    dueTo: string;
+    dueFromAria: string;
+    dueToAria: string;
+    overdue: string;
+    dueSoon: string;
+    notDue: string;
+    noDueDate: string;
+    bulkSettleTitle: string;
+    bulkSettleHelp: string;
+    paidAtLabel: string;
+    referenceLabel: string;
+    referencePlaceholder: string;
+    statementTotalLabel: string;
+    statementTotalPlaceholder: string;
+    noteOptional: string;
+    notePlaceholder: string;
+    allocationSummary: string;
+    unmatchedStatement: string;
+    invalidStatementTotal: string;
+    failedListTitle: string;
+    confirmBulkSettle: string;
+    loadingStatement: string;
+    loadStatementFailed: string;
+    noRowsMatch: string;
+    clearStatementFilters: string;
+    rowMeta: string;
+    daysLeft: string;
+    overdueDays: string;
+    paidAmount: string;
+    selectAtLeastOne: string;
+    selectPoToSettle: string;
+    paymentReferenceRequired: string;
+    statementTotalRequired: string;
+    bulkStarting: string;
+    bulkProcessing: string;
+    settleFailed: string;
+    settleSuccess: string;
+    failedCount: string;
+    bulkConnectionFailed: string;
+    unknown: string;
+    paymentStatuses: Record<PaymentFilter, string>;
+    dueStatuses: Record<DueFilter, string>;
+  }
+>;
 
 type PurchaseDatePickerFieldProps = {
+  language: AppLanguage;
   value: string;
   onChange: (nextValue: string) => void;
   triggerClassName: string;
@@ -162,6 +518,7 @@ type PurchaseDatePickerFieldProps = {
 };
 
 function PurchaseDatePickerField({
+  language,
   value,
   onChange,
   triggerClassName,
@@ -223,7 +580,7 @@ function PurchaseDatePickerField({
   }
   const todayIso = toDateInputValue(new Date());
   const selectedIso = parseIsoDateValue(value) ? value : "";
-  const monthLabel = viewCursor.toLocaleDateString("th-TH", {
+  const monthLabel = viewCursor.toLocaleDateString(localeByLanguage[language], {
     month: "long",
     year: "numeric",
   });
@@ -277,7 +634,7 @@ function PurchaseDatePickerField({
           </div>
 
           <div className="grid grid-cols-7 gap-1 pb-1">
-            {calendarWeekdayLabels.map((label) => (
+            {calendarWeekdayLabelsByLanguage[language].map((label) => (
               <span
                 key={label}
                 className="flex h-6 items-center justify-center text-[10px] font-medium text-slate-400"
@@ -325,6 +682,7 @@ function PurchaseDatePickerField({
 }
 
 export function PurchaseApSupplierPanel({
+  language,
   storeCurrency,
   refreshKey,
   preset,
@@ -332,6 +690,7 @@ export function PurchaseApSupplierPanel({
   onOpenPurchaseOrder,
   onAfterBulkSettle,
 }: PurchaseApSupplierPanelProps) {
+  const ui = useMemo(() => purchaseApTextByLanguage[language], [language]);
   const [supplierSearchInput, setSupplierSearchInput] = useState("");
   const [supplierQuery, setSupplierQuery] = useState("");
   const [suppliers, setSuppliers] = useState<PurchaseApSupplierSummaryItem[]>([]);
@@ -429,7 +788,7 @@ export function PurchaseApSupplierPanel({
           }
         | null;
       if (!res.ok || !data?.ok) {
-        setSupplierError(data?.message ?? "โหลด AP ราย supplier ไม่สำเร็จ");
+        setSupplierError(data?.message ?? ui.loadSuppliersFailed);
         return;
       }
 
@@ -448,11 +807,11 @@ export function PurchaseApSupplierPanel({
         return nextSuppliers[0]!.supplierKey;
       });
     } catch {
-      setSupplierError("เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่");
+      setSupplierError(ui.connectionRetry);
     } finally {
       setIsLoadingSuppliers(false);
     }
-  }, [supplierQuery]);
+  }, [supplierQuery, ui.connectionRetry, ui.loadSuppliersFailed]);
 
   const loadStatement = useCallback(async () => {
     if (!selectedSupplierKey) {
@@ -486,7 +845,7 @@ export function PurchaseApSupplierPanel({
         | null;
 
       if (!res.ok || !data?.ok) {
-        setStatementError(data?.message ?? "โหลด statement ไม่สำเร็จ");
+        setStatementError(data?.message ?? ui.loadStatementFailed);
         return;
       }
 
@@ -494,11 +853,20 @@ export function PurchaseApSupplierPanel({
       setStatementSummary(data.summary ?? null);
       setStatementError(null);
     } catch {
-      setStatementError("เชื่อมต่อไม่สำเร็จ กรุณาลองใหม่");
+      setStatementError(ui.connectionRetry);
     } finally {
       setIsLoadingStatement(false);
     }
-  }, [dueFilter, dueFrom, dueTo, paymentFilter, poQuery, selectedSupplierKey]);
+  }, [
+    dueFilter,
+    dueFrom,
+    dueTo,
+    paymentFilter,
+    poQuery,
+    selectedSupplierKey,
+    ui.connectionRetry,
+    ui.loadStatementFailed,
+  ]);
 
   useEffect(() => {
     void loadSupplierSummary();
@@ -679,7 +1047,7 @@ export function PurchaseApSupplierPanel({
 
   const toggleRowSelection = useCallback((poId: string) => {
     setSelectedPoIds((prev) => {
-      if (prev.includes(poId)) {
+    if (prev.includes(poId)) {
         return prev.filter((id) => id !== poId);
       }
       return [...prev, poId];
@@ -696,7 +1064,7 @@ export function PurchaseApSupplierPanel({
 
   const openBulkSettleMode = useCallback(() => {
     if (sortedSelectedRows.length === 0) {
-      toast.error("กรุณาเลือก PO อย่างน้อย 1 รายการ");
+      toast.error(ui.selectAtLeastOne);
       return;
     }
     setBulkPaidAtInput(new Date().toISOString().slice(0, 10));
@@ -706,16 +1074,16 @@ export function PurchaseApSupplierPanel({
     setBulkErrors([]);
     setBulkProgressText(null);
     setIsBulkSettleMode(true);
-  }, [sortedSelectedRows.length]);
+  }, [sortedSelectedRows.length, ui.selectAtLeastOne]);
 
   const submitBulkSettle = useCallback(async () => {
     if (sortedSelectedRows.length === 0) {
-      toast.error("กรุณาเลือก PO ที่ต้องการบันทึกชำระ");
+      toast.error(ui.selectPoToSettle);
       return;
     }
     const paymentReference = bulkReferenceInput.trim();
     if (!paymentReference) {
-      toast.error("กรุณากรอกเลขอ้างอิงรอบบัตร/รอบชำระ");
+      toast.error(ui.paymentReferenceRequired);
       return;
     }
 
@@ -725,7 +1093,7 @@ export function PurchaseApSupplierPanel({
       hasStatementTotal &&
       (!Number.isFinite(parsedStatementTotal) || parsedStatementTotal <= 0)
     ) {
-      toast.error("กรุณากรอกยอดชำระรวมจาก statement ให้ถูกต้อง");
+      toast.error(ui.statementTotalRequired);
       return;
     }
 
@@ -740,13 +1108,17 @@ export function PurchaseApSupplierPanel({
 
     setIsBulkSettling(true);
     setBulkErrors([]);
-    setBulkProgressText("เริ่มประมวลผล...");
+    setBulkProgressText(ui.bulkStarting);
 
     try {
       for (let i = 0; i < sortedSelectedRows.length; i += 1) {
         const row = sortedSelectedRows[i]!;
         setBulkProgressText(
-          `กำลังบันทึกชำระ ${i + 1}/${sortedSelectedRows.length} (${row.poNumber})`,
+          interpolatePurchaseText(ui.bulkProcessing, {
+            current: i + 1,
+            total: sortedSelectedRows.length,
+            poNumber: row.poNumber,
+          }),
         );
 
         const outstandingAmount = Math.max(0, Math.round(row.outstandingBase));
@@ -781,7 +1153,10 @@ export function PurchaseApSupplierPanel({
           | null;
         if (!res.ok) {
           errors.push(
-            `${row.poNumber}: บันทึกชำระไม่สำเร็จ (${data?.message ?? "unknown"})`,
+            interpolatePurchaseText(ui.settleFailed, {
+              poNumber: row.poNumber,
+              message: data?.message ?? ui.unknown,
+            }),
           );
           continue;
         }
@@ -795,22 +1170,28 @@ export function PurchaseApSupplierPanel({
 
       if (settledCount > 0) {
         toast.success(
-          `บันทึกชำระสำเร็จ ${settledCount}/${sortedSelectedRows.length} รายการ (รวม ${fmtPrice(
-            settledAmountTotal,
-            storeCurrency,
-          )})`,
+          interpolatePurchaseText(ui.settleSuccess, {
+            count: settledCount,
+            total: sortedSelectedRows.length,
+            amount: fmtPrice(settledAmountTotal, storeCurrency, language),
+          }),
         );
       }
       if ((remainingStatementBudget ?? 0) > 0) {
         toast(
-          `ยังมียอด statement ที่ยังไม่ถูกจับคู่ ${fmtPrice(
-            remainingStatementBudget ?? 0,
-            storeCurrency,
-          )}`,
+          interpolatePurchaseText(ui.unmatchedStatement, {
+            amount: fmtPrice(
+              remainingStatementBudget ?? 0,
+              storeCurrency,
+              language,
+            ),
+          }),
         );
       }
       if (errors.length > 0) {
-        toast.error(`มีรายการไม่สำเร็จ ${errors.length} รายการ`);
+        toast.error(
+          interpolatePurchaseText(ui.failedCount, { count: errors.length }),
+        );
       } else {
         setSelectedPoIds([]);
         setIsBulkSettleMode(false);
@@ -821,7 +1202,7 @@ export function PurchaseApSupplierPanel({
       await loadStatement();
       await onAfterBulkSettle?.();
     } catch {
-      toast.error("เชื่อมต่อไม่สำเร็จระหว่างบันทึกชำระแบบกลุ่ม");
+      toast.error(ui.bulkConnectionFailed);
     } finally {
       setIsBulkSettling(false);
       setBulkProgressText(null);
@@ -836,6 +1217,18 @@ export function PurchaseApSupplierPanel({
     onAfterBulkSettle,
     sortedSelectedRows,
     storeCurrency,
+    language,
+    ui.bulkConnectionFailed,
+    ui.bulkProcessing,
+    ui.bulkStarting,
+    ui.failedCount,
+    ui.paymentReferenceRequired,
+    ui.selectPoToSettle,
+    ui.settleFailed,
+    ui.settleSuccess,
+    ui.statementTotalRequired,
+    ui.unmatchedStatement,
+    ui.unknown,
   ]);
 
   return (
@@ -843,10 +1236,10 @@ export function PurchaseApSupplierPanel({
       <div className="flex items-center justify-between gap-2">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wider text-slate-700">
-            AP ราย supplier
+            {ui.apBySupplierTitle}
           </p>
           <p className="text-[11px] text-slate-500">
-            เลือก supplier เพื่อดู statement และเปิด PO แบบ drill-down
+            {ui.apBySupplierDescription}
           </p>
         </div>
         <Button
@@ -858,7 +1251,7 @@ export function PurchaseApSupplierPanel({
           }}
           disabled={isLoadingSuppliers}
         >
-          {isLoadingSuppliers ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "รีเฟรช"}
+          {isLoadingSuppliers ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : ui.refresh}
         </Button>
       </div>
 
@@ -866,14 +1259,14 @@ export function PurchaseApSupplierPanel({
         <div className="space-y-2">
           <input
             className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-slate-300"
-            placeholder="ค้นหา supplier"
+            placeholder={ui.searchSupplierPlaceholder}
             value={supplierSearchInput}
             onChange={(event) => setSupplierSearchInput(event.target.value)}
           />
           <div className="max-h-72 space-y-1.5 overflow-y-auto pr-1">
             {isLoadingSuppliers ? (
               <p className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-500">
-                กำลังโหลดรายการ supplier...
+                {ui.loadingSuppliers}
               </p>
             ) : supplierError ? (
               <div className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-2 text-xs text-red-700">
@@ -881,14 +1274,14 @@ export function PurchaseApSupplierPanel({
               </div>
             ) : suppliers.length === 0 ? (
               <div className="rounded-lg border border-dashed border-slate-300 bg-white px-2.5 py-4 text-center">
-                <p className="text-xs text-slate-500">ยังไม่มี AP ค้างชำระตามเงื่อนไข</p>
+                <p className="text-xs text-slate-500">{ui.noApMatches}</p>
                 {supplierSearchInput.trim().length > 0 ? (
                   <button
                     type="button"
                     className="mt-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
                     onClick={resetSupplierSearch}
                   >
-                    ล้างคำค้นหา supplier
+                    {ui.clearSupplierSearch}
                   </button>
                 ) : null}
               </div>
@@ -910,15 +1303,18 @@ export function PurchaseApSupplierPanel({
                       {supplier.supplierName}
                     </p>
                     <p className="mt-0.5 text-[11px] text-slate-500">
-                      {supplier.poCount} PO · ค้าง{" "}
-                      {fmtPrice(supplier.totalOutstandingBase, storeCurrency)}
+                      {interpolatePurchaseText(ui.supplierPoSummary, {
+                        count: formatNumberByLanguage(language, supplier.poCount),
+                        amount: fmtPrice(supplier.totalOutstandingBase, storeCurrency, language),
+                      })}
                     </p>
                     {(supplier.overdueOutstandingBase > 0 ||
                       supplier.dueSoonOutstandingBase > 0) && (
                       <p className="mt-1 text-[10px] text-amber-700">
-                        เลยกำหนด {fmtPrice(supplier.overdueOutstandingBase, storeCurrency)}
-                        {" · "}
-                        ใกล้ครบ {fmtPrice(supplier.dueSoonOutstandingBase, storeCurrency)}
+                        {interpolatePurchaseText(ui.supplierRiskSummary, {
+                          overdue: fmtPrice(supplier.overdueOutstandingBase, storeCurrency, language),
+                          dueSoon: fmtPrice(supplier.dueSoonOutstandingBase, storeCurrency, language),
+                        })}
                       </p>
                     )}
                   </button>
@@ -932,15 +1328,17 @@ export function PurchaseApSupplierPanel({
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div>
               <p className="text-sm font-semibold text-slate-900">
-                {selectedSupplier?.supplierName ?? "เลือก supplier"}
+                {selectedSupplier?.supplierName ?? ui.selectSupplier}
               </p>
               {statementSummary ? (
                 <p className="text-xs text-slate-500">
-                  {statementSummary.poCount} PO · ค้างรวม{" "}
-                  {fmtPrice(statementSummary.totalOutstandingBase, storeCurrency)}
+                  {interpolatePurchaseText(ui.statementSummary, {
+                    count: formatNumberByLanguage(language, statementSummary.poCount),
+                    amount: fmtPrice(statementSummary.totalOutstandingBase, storeCurrency, language),
+                  })}
                 </p>
               ) : (
-                <p className="text-xs text-slate-500">ยังไม่มีข้อมูล statement</p>
+                <p className="text-xs text-slate-500">{ui.noStatementData}</p>
               )}
             </div>
             <Button
@@ -951,13 +1349,16 @@ export function PurchaseApSupplierPanel({
               disabled={!selectedSupplierKey || isLoadingStatement}
             >
               <Download className="mr-1 h-3.5 w-3.5" />
-              Export Supplier CSV
+              {ui.exportSupplierCsv}
             </Button>
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5">
             <span className="text-[11px] text-slate-600">
-              เลือกแล้ว {selectedPoIds.length}/{selectableStatementRows.length} รายการ
+              {interpolatePurchaseText(ui.selectedCount, {
+                selected: formatNumberByLanguage(language, selectedPoIds.length),
+                total: formatNumberByLanguage(language, selectableStatementRows.length),
+              })}
             </span>
             <Button
               type="button"
@@ -966,7 +1367,7 @@ export function PurchaseApSupplierPanel({
               onClick={selectAllRows}
               disabled={selectableStatementRows.length === 0 || isBulkSettling}
             >
-              เลือกทั้งหมด
+              {ui.selectAll}
             </Button>
             <Button
               type="button"
@@ -975,7 +1376,7 @@ export function PurchaseApSupplierPanel({
               onClick={clearSelectedRows}
               disabled={selectedPoIds.length === 0 || isBulkSettling}
             >
-              ล้างที่เลือก
+              {ui.clearSelection}
             </Button>
             <Button
               type="button"
@@ -983,14 +1384,14 @@ export function PurchaseApSupplierPanel({
               onClick={openBulkSettleMode}
               disabled={selectedPoIds.length === 0 || isBulkSettling}
             >
-              บันทึกชำระแบบกลุ่ม
+              {ui.bulkSettle}
             </Button>
           </div>
 
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-5">
             <input
               className="h-8 w-full rounded-md border border-slate-200 px-2 text-xs outline-none focus:ring-2 focus:ring-slate-300 xl:col-span-2"
-              placeholder="ค้นหาเลข PO"
+              placeholder={ui.searchPoPlaceholder}
               value={poQueryInput}
               onChange={(event) => setPoQueryInput(event.target.value)}
             />
@@ -1001,43 +1402,45 @@ export function PurchaseApSupplierPanel({
                 setPaymentFilter(event.target.value as PaymentFilter)
               }
             >
-              <option value="ALL">{paymentStatusLabel("ALL")}</option>
-              <option value="UNPAID">{paymentStatusLabel("UNPAID")}</option>
-              <option value="PARTIAL">{paymentStatusLabel("PARTIAL")}</option>
+              <option value="ALL">{ui.paymentStatuses.ALL}</option>
+              <option value="UNPAID">{ui.paymentStatuses.UNPAID}</option>
+              <option value="PARTIAL">{ui.paymentStatuses.PARTIAL}</option>
+              <option value="PAID">{ui.paymentStatuses.PAID}</option>
             </select>
             <select
               className="h-8 w-full rounded-md border border-slate-200 px-2 text-xs outline-none focus:ring-2 focus:ring-slate-300"
               value={dueFilter}
               onChange={(event) => setDueFilter(event.target.value as DueFilter)}
             >
-              <option value="ALL">{dueStatusLabel("ALL")}</option>
-              <option value="OVERDUE">{dueStatusLabel("OVERDUE")}</option>
-              <option value="DUE_SOON">{dueStatusLabel("DUE_SOON")}</option>
-              <option value="NOT_DUE">{dueStatusLabel("NOT_DUE")}</option>
-              <option value="NO_DUE_DATE">{dueStatusLabel("NO_DUE_DATE")}</option>
+              <option value="ALL">{ui.dueStatuses.ALL}</option>
+              <option value="OVERDUE">{ui.dueStatuses.OVERDUE}</option>
+              <option value="DUE_SOON">{ui.dueStatuses.DUE_SOON}</option>
+              <option value="NOT_DUE">{ui.dueStatuses.NOT_DUE}</option>
+              <option value="NO_DUE_DATE">{ui.dueStatuses.NO_DUE_DATE}</option>
             </select>
             <select
               className="h-8 w-full rounded-md border border-slate-200 px-2 text-xs outline-none focus:ring-2 focus:ring-slate-300"
               value={statementSort}
               onChange={(event) => setStatementSort(event.target.value as StatementSort)}
             >
-              <option value="DUE_ASC">เรียงตาม due date</option>
-              <option value="OUTSTANDING_DESC">เรียงยอดค้างมากสุด</option>
+              <option value="DUE_ASC">{ui.sortDueAsc}</option>
+              <option value="OUTSTANDING_DESC">{ui.sortOutstandingDesc}</option>
             </select>
           </div>
 
           <div className="space-y-2 rounded-md border border-slate-200 bg-slate-50 p-2.5">
             <p className="text-[11px] text-slate-600">
-              ช่วง due date (ใช้กับทั้ง statement และ export CSV)
+              {ui.dueRangeHelp}
             </p>
             <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
               <div className="space-y-1 min-w-0">
-                <label className="text-[11px] text-slate-500">Due ตั้งแต่</label>
+                <label className="text-[11px] text-slate-500">{ui.dueFrom}</label>
                 <PurchaseDatePickerField
+                  language={language}
                   value={dueFrom}
                   onChange={setDueFrom}
                   triggerClassName="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-left text-xs outline-none focus:ring-2 focus:ring-slate-300 flex items-center justify-between gap-2"
-                  ariaLabel="เลือก due date เริ่มต้นใน AP statement"
+                  ariaLabel={ui.dueFromAria}
                 />
                 <div className="flex flex-wrap gap-1">
                   <button
@@ -1045,38 +1448,39 @@ export function PurchaseApSupplierPanel({
                     className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-100"
                     onClick={() => applyStatementDateShortcut("dueFrom", "TODAY")}
                   >
-                    วันนี้
+                    {ui.today}
                   </button>
                   <button
                     type="button"
                     className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-100"
                     onClick={() => applyStatementDateShortcut("dueFrom", "PLUS_7")}
                   >
-                    +7 วัน
+                    {ui.plusSevenDays}
                   </button>
                   <button
                     type="button"
                     className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-100"
                     onClick={() => applyStatementDateShortcut("dueFrom", "END_OF_MONTH")}
                   >
-                    สิ้นเดือน
+                    {ui.endOfMonth}
                   </button>
                   <button
                     type="button"
                     className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-100"
                     onClick={() => applyStatementDateShortcut("dueFrom", "CLEAR")}
                   >
-                    ล้าง
+                    {ui.clear}
                   </button>
                 </div>
               </div>
               <div className="space-y-1 min-w-0">
-                <label className="text-[11px] text-slate-500">Due ถึง</label>
+                <label className="text-[11px] text-slate-500">{ui.dueTo}</label>
                 <PurchaseDatePickerField
+                  language={language}
                   value={dueTo}
                   onChange={setDueTo}
                   triggerClassName="h-8 w-full rounded-md border border-slate-200 bg-white px-2 text-left text-xs outline-none focus:ring-2 focus:ring-slate-300 flex items-center justify-between gap-2"
-                  ariaLabel="เลือก due date สิ้นสุดใน AP statement"
+                  ariaLabel={ui.dueToAria}
                 />
                 <div className="flex flex-wrap gap-1">
                   <button
@@ -1084,28 +1488,28 @@ export function PurchaseApSupplierPanel({
                     className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-100"
                     onClick={() => applyStatementDateShortcut("dueTo", "TODAY")}
                   >
-                    วันนี้
+                    {ui.today}
                   </button>
                   <button
                     type="button"
                     className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-100"
                     onClick={() => applyStatementDateShortcut("dueTo", "PLUS_7")}
                   >
-                    +7 วัน
+                    {ui.plusSevenDays}
                   </button>
                   <button
                     type="button"
                     className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-100"
                     onClick={() => applyStatementDateShortcut("dueTo", "END_OF_MONTH")}
                   >
-                    สิ้นเดือน
+                    {ui.endOfMonth}
                   </button>
                   <button
                     type="button"
                     className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-slate-100"
                     onClick={() => applyStatementDateShortcut("dueTo", "CLEAR")}
                   >
-                    ล้าง
+                    {ui.clear}
                   </button>
                 </div>
               </div>
@@ -1115,27 +1519,27 @@ export function PurchaseApSupplierPanel({
           {statementSummary && (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5">
-                <p className="text-[10px] text-slate-500">เลยกำหนด</p>
+                <p className="text-[10px] text-slate-500">{ui.overdue}</p>
                 <p className="text-xs font-medium text-red-600">
-                  {fmtPrice(statementSummary.overdueOutstandingBase, storeCurrency)}
+                  {fmtPrice(statementSummary.overdueOutstandingBase, storeCurrency, language)}
                 </p>
               </div>
               <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5">
-                <p className="text-[10px] text-slate-500">ใกล้ครบกำหนด</p>
+                <p className="text-[10px] text-slate-500">{ui.dueSoon}</p>
                 <p className="text-xs font-medium text-amber-700">
-                  {fmtPrice(statementSummary.dueSoonOutstandingBase, storeCurrency)}
+                  {fmtPrice(statementSummary.dueSoonOutstandingBase, storeCurrency, language)}
                 </p>
               </div>
               <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5">
-                <p className="text-[10px] text-slate-500">ยังไม่ถึงกำหนด</p>
+                <p className="text-[10px] text-slate-500">{ui.notDue}</p>
                 <p className="text-xs font-medium text-emerald-700">
-                  {fmtPrice(statementSummary.notDueOutstandingBase, storeCurrency)}
+                  {fmtPrice(statementSummary.notDueOutstandingBase, storeCurrency, language)}
                 </p>
               </div>
               <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5">
-                <p className="text-[10px] text-slate-500">ไม่ระบุ due</p>
+                <p className="text-[10px] text-slate-500">{ui.noDueDate}</p>
                 <p className="text-xs font-medium text-slate-700">
-                  {fmtPrice(statementSummary.noDueDateOutstandingBase, storeCurrency)}
+                  {fmtPrice(statementSummary.noDueDateOutstandingBase, storeCurrency, language)}
                 </p>
               </div>
             </div>
@@ -1144,15 +1548,15 @@ export function PurchaseApSupplierPanel({
           {isBulkSettleMode ? (
             <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 p-2.5">
               <p className="text-xs font-semibold text-emerald-800">
-                ชำระแบบกลุ่มจาก AP statement
+                {ui.bulkSettleTitle}
               </p>
               <p className="text-[11px] text-emerald-700/90">
-                ระบบจะจับคู่ยอดอัตโนมัติแบบ due date เก่าสุดก่อน (oldest due first)
+                {ui.bulkSettleHelp}
               </p>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="space-y-1">
                   <label className="text-[11px] text-emerald-700">
-                    วันที่ชำระ
+                    {ui.paidAtLabel}
                   </label>
                   <input
                     type="date"
@@ -1163,18 +1567,18 @@ export function PurchaseApSupplierPanel({
                 </div>
                 <div className="space-y-1">
                   <label className="text-[11px] text-emerald-700">
-                    เลขอ้างอิงรอบชำระ
+                    {ui.referenceLabel}
                   </label>
                   <input
                     className="h-8 w-full rounded-md border border-emerald-200 bg-white px-2 text-xs outline-none focus:ring-2 focus:ring-emerald-300"
                     value={bulkReferenceInput}
                     onChange={(event) => setBulkReferenceInput(event.target.value)}
-                    placeholder="เช่น Statement 2026-02"
+                    placeholder={ui.referencePlaceholder}
                   />
                 </div>
                 <div className="space-y-1">
                   <label className="text-[11px] text-emerald-700">
-                    ยอดชำระรวมตาม statement (ไม่บังคับ)
+                    {ui.statementTotalLabel}
                   </label>
                   <input
                     type="number"
@@ -1182,38 +1586,39 @@ export function PurchaseApSupplierPanel({
                     className="h-8 w-full rounded-md border border-emerald-200 bg-white px-2 text-xs outline-none focus:ring-2 focus:ring-emerald-300"
                     value={bulkStatementTotalInput}
                     onChange={(event) => setBulkStatementTotalInput(event.target.value)}
-                    placeholder="ถ้าไม่กรอก = จ่ายเต็มยอดค้างที่เลือก"
+                    placeholder={ui.statementTotalPlaceholder}
                   />
                 </div>
                 <div className="space-y-1">
                   <label className="text-[11px] text-emerald-700">
-                    หมายเหตุ (ไม่บังคับ)
+                    {ui.noteOptional}
                   </label>
                   <input
                     className="h-8 w-full rounded-md border border-emerald-200 bg-white px-2 text-xs outline-none focus:ring-2 focus:ring-emerald-300"
                     value={bulkNoteInput}
                     onChange={(event) => setBulkNoteInput(event.target.value)}
-                    placeholder="เช่น จ่ายปลายเดือน"
+                    placeholder={ui.notePlaceholder}
                   />
                 </div>
               </div>
               <div className="rounded-md border border-emerald-200 bg-white p-2">
                 <p className="text-[11px] text-slate-600">
-                  ยอดค้างที่เลือก {fmtPrice(bulkAllocationPreview.totalOutstanding, storeCurrency)}
-                  {" · "}
-                  จะลงชำระ {fmtPrice(bulkAllocationPreview.plannedTotal, storeCurrency)}
-                  {" · "}
-                  ค้างหลังรอบนี้ {fmtPrice(bulkAllocationPreview.outstandingAfter, storeCurrency)}
+                  {interpolatePurchaseText(ui.allocationSummary, {
+                    outstanding: fmtPrice(bulkAllocationPreview.totalOutstanding, storeCurrency, language),
+                    planned: fmtPrice(bulkAllocationPreview.plannedTotal, storeCurrency, language),
+                    after: fmtPrice(bulkAllocationPreview.outstandingAfter, storeCurrency, language),
+                  })}
                 </p>
                 {bulkAllocationPreview.statementTotal !== null ? (
                   <p className="mt-1 text-[11px] text-slate-600">
-                    ยอด statement ที่ยังไม่ถูกจับคู่{" "}
-                    {fmtPrice(bulkAllocationPreview.remainingUnallocated, storeCurrency)}
+                    {interpolatePurchaseText(ui.unmatchedStatement, {
+                      amount: fmtPrice(bulkAllocationPreview.remainingUnallocated, storeCurrency, language),
+                    })}
                   </p>
                 ) : null}
                 {bulkAllocationPreview.invalidStatementTotal ? (
                   <p className="mt-1 text-[11px] text-red-600">
-                    ยอดชำระรวมจาก statement ไม่ถูกต้อง
+                    {ui.invalidStatementTotal}
                   </p>
                 ) : null}
               </div>
@@ -1223,7 +1628,9 @@ export function PurchaseApSupplierPanel({
               {bulkErrors.length > 0 ? (
                 <div className="space-y-1 rounded-md border border-red-200 bg-red-50 p-2">
                   <p className="text-[11px] font-semibold text-red-700">
-                    รายการที่ไม่สำเร็จ ({bulkErrors.length})
+                    {interpolatePurchaseText(ui.failedListTitle, {
+                      count: bulkErrors.length,
+                    })}
                   </p>
                   <ul className="space-y-0.5 text-[11px] text-red-700">
                     {bulkErrors.map((error, index) => (
@@ -1240,7 +1647,7 @@ export function PurchaseApSupplierPanel({
                   onClick={() => setIsBulkSettleMode(false)}
                   disabled={isBulkSettling}
                 >
-                  ยกเลิก
+                  {ui.cancel}
                 </Button>
                 <Button
                   type="button"
@@ -1257,7 +1664,7 @@ export function PurchaseApSupplierPanel({
                   {isBulkSettling ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   ) : (
-                    "ยืนยันบันทึกชำระแบบกลุ่ม"
+                    ui.confirmBulkSettle
                   )}
                 </Button>
               </div>
@@ -1266,7 +1673,7 @@ export function PurchaseApSupplierPanel({
 
           {isLoadingStatement ? (
             <p className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-3 text-xs text-slate-500">
-              กำลังโหลด statement...
+              {ui.loadingStatement}
             </p>
           ) : statementError ? (
             <div className="rounded-md border border-red-200 bg-red-50 px-2.5 py-2 text-xs text-red-700">
@@ -1274,13 +1681,13 @@ export function PurchaseApSupplierPanel({
             </div>
           ) : displayStatementRows.length === 0 ? (
             <div className="space-y-2 rounded-md border border-dashed border-slate-300 bg-slate-50 px-2.5 py-4 text-center">
-              <p className="text-xs text-slate-500">ไม่พบรายการตามตัวกรอง</p>
+              <p className="text-xs text-slate-500">{ui.noRowsMatch}</p>
               <button
                 type="button"
                 className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
                 onClick={resetStatementFilters}
               >
-                ล้างตัวกรอง statement
+                {ui.clearStatementFilters}
               </button>
             </div>
           ) : (
@@ -1308,21 +1715,32 @@ export function PurchaseApSupplierPanel({
                         {row.poNumber}
                       </p>
                       <p className="text-[11px] text-slate-500">
-                        due {formatDate(row.dueDate)} · รับเมื่อ {formatDate(row.receivedAt)}
+                        {interpolatePurchaseText(ui.rowMeta, {
+                          due: formatDate(row.dueDate, language),
+                          received: formatDate(row.receivedAt, language),
+                        })}
                       </p>
                       <p className="text-[11px] text-slate-500">
-                        {paymentStatusLabel(row.paymentStatus)} · {dueStatusLabel(row.dueStatus)}
+                        {ui.paymentStatuses[row.paymentStatus]} · {ui.dueStatuses[row.dueStatus]}
                         {row.daysUntilDue !== null
-                          ? ` (${row.daysUntilDue >= 0 ? `เหลือ ${row.daysUntilDue} วัน` : `เลย ${Math.abs(row.daysUntilDue)} วัน`})`
+                          ? ` (${row.daysUntilDue >= 0
+                              ? interpolatePurchaseText(ui.daysLeft, {
+                                  days: formatNumberByLanguage(language, row.daysUntilDue),
+                                })
+                              : interpolatePurchaseText(ui.overdueDays, {
+                                  days: formatNumberByLanguage(language, Math.abs(row.daysUntilDue)),
+                                })})`
                           : ""}
                       </p>
                     </div>
                     <div className="text-right">
                       <p className="text-xs font-semibold text-slate-900">
-                        {fmtPrice(row.outstandingBase, storeCurrency)}
+                        {fmtPrice(row.outstandingBase, storeCurrency, language)}
                       </p>
                       <p className="text-[11px] text-slate-500">
-                        จ่ายแล้ว {fmtPrice(row.totalPaidBase, storeCurrency)}
+                        {interpolatePurchaseText(ui.paidAmount, {
+                          amount: fmtPrice(row.totalPaidBase, storeCurrency, language),
+                        })}
                       </p>
                     </div>
                   </div>

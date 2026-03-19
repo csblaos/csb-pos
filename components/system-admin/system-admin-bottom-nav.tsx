@@ -1,13 +1,11 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { LayoutGrid, Settings } from "lucide-react";
 
-const tabs = [
-  { href: "/system-admin", label: "Dashboard", icon: LayoutGrid },
-  { href: "/system-admin/config", label: "Config", icon: Settings },
-];
+import { createTranslator } from "@/lib/i18n/translate";
+import type { AppLanguage } from "@/lib/i18n/types";
 
 const prefetchRoutes = ["/system-admin", "/system-admin/config", "/system-admin/config/clients"];
 
@@ -19,12 +17,20 @@ const isTabActive = (pathname: string, href: string) => {
   return pathname === href || pathname.startsWith(`${href}/`);
 };
 
-export function SystemAdminBottomNav() {
+export function SystemAdminBottomNav({ language }: { language: AppLanguage }) {
   const pathname = usePathname();
   const router = useRouter();
   const [optimisticPath, setOptimisticPath] = useState<string | null>(null);
   const [, startTransition] = useTransition();
   const currentPath = optimisticPath ?? pathname;
+  const t = useMemo(() => createTranslator(language), [language]);
+  const tabs = useMemo(
+    () => [
+      { href: "/system-admin", label: t("systemAdmin.nav.dashboard"), icon: LayoutGrid },
+      { href: "/system-admin/config", label: t("systemAdmin.nav.config"), icon: Settings },
+    ],
+    [t],
+  );
 
   useEffect(() => {
     prefetchRoutes.forEach((href) => {

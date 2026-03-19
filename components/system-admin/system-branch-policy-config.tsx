@@ -1,18 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { authFetch } from "@/lib/auth/client-token";
+import { createTranslator } from "@/lib/i18n/translate";
+import type { AppLanguage } from "@/lib/i18n/types";
+import { translateSystemAdminApiMessage } from "@/lib/system-admin/i18n";
 
 type SystemBranchPolicyConfigProps = {
+  language: AppLanguage;
   initialConfig: {
     defaultCanCreateBranches: boolean;
     defaultMaxBranchesPerStore: number | null;
   };
 };
 
-export function SystemBranchPolicyConfig({ initialConfig }: SystemBranchPolicyConfigProps) {
+export function SystemBranchPolicyConfig({
+  initialConfig,
+  language,
+}: SystemBranchPolicyConfigProps) {
   const [defaultCanCreateBranches, setDefaultCanCreateBranches] = useState(
     initialConfig.defaultCanCreateBranches,
   );
@@ -24,6 +31,7 @@ export function SystemBranchPolicyConfig({ initialConfig }: SystemBranchPolicyCo
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const t = useMemo(() => createTranslator(language), [language]);
 
   const parseOptionalLimit = (raw: string) => {
     const trimmed = raw.trim();
@@ -42,7 +50,7 @@ export function SystemBranchPolicyConfig({ initialConfig }: SystemBranchPolicyCo
   const save = async () => {
     const parsedLimit = parseOptionalLimit(defaultMaxBranchesPerStore);
     if (Number.isNaN(parsedLimit)) {
-      setErrorMessage("โควตาสาขาต้องเป็นตัวเลข 0-500 หรือเว้นว่างเพื่อไม่จำกัด");
+      setErrorMessage(t("systemAdmin.branchPolicy.validation.limit"));
       setSuccessMessage(null);
       return;
     }
@@ -73,7 +81,16 @@ export function SystemBranchPolicyConfig({ initialConfig }: SystemBranchPolicyCo
       | null;
 
     if (!response.ok) {
-      setErrorMessage(data?.message ?? "บันทึก Global Branch Policy ไม่สำเร็จ");
+      setErrorMessage(
+        translateSystemAdminApiMessage({
+          message: data?.message,
+          t,
+          fallbackKey: "systemAdmin.branchPolicy.saveFailed",
+          overrides: {
+            "ข้อมูลตั้งค่าไม่ถูกต้อง": "systemAdmin.branchPolicy.invalidPayload",
+          },
+        }),
+      );
       setIsSubmitting(false);
       return;
     }
@@ -87,19 +104,19 @@ export function SystemBranchPolicyConfig({ initialConfig }: SystemBranchPolicyCo
       );
     }
 
-    setSuccessMessage("บันทึก Global Branch Policy แล้ว");
+    setSuccessMessage(t("systemAdmin.branchPolicy.saveSuccess"));
     setIsSubmitting(false);
   };
 
   return (
     <article className="space-y-3 rounded-xl border bg-white p-4">
-      <h2 className="text-sm font-semibold">Global Branch Policy</h2>
+      <h2 className="text-sm font-semibold">{t("systemAdmin.branchPolicy.title")}</h2>
       <p className="text-sm text-muted-foreground">
-        ค่าเริ่มต้นนี้จะถูกใช้เมื่อ SUPERADMIN ไม่ได้กำหนด override ของตัวเอง
+        {t("systemAdmin.branchPolicy.description")}
       </p>
 
       <label className="flex items-center justify-between gap-2 rounded-md border p-3 text-sm">
-        <span>อนุญาตให้ SUPERADMIN สร้างสาขา</span>
+        <span>{t("systemAdmin.branchPolicy.allowBranches")}</span>
         <input
           type="checkbox"
           checked={defaultCanCreateBranches}
@@ -110,7 +127,7 @@ export function SystemBranchPolicyConfig({ initialConfig }: SystemBranchPolicyCo
 
       <div className="space-y-2">
         <label className="text-xs text-muted-foreground" htmlFor="global-max-branches">
-          โควตาสาขาต่อร้าน (ว่าง = ไม่จำกัด)
+          {t("systemAdmin.branchPolicy.maxBranchesLabel")}
         </label>
         <input
           id="global-max-branches"
@@ -121,12 +138,12 @@ export function SystemBranchPolicyConfig({ initialConfig }: SystemBranchPolicyCo
           onChange={(event) => setDefaultMaxBranchesPerStore(event.target.value)}
           className="h-10 w-full rounded-md border px-3 text-sm outline-none ring-primary focus:ring-2"
           disabled={isSubmitting || !defaultCanCreateBranches}
-          placeholder="เช่น 5"
+          placeholder={t("systemAdmin.branchPolicy.maxBranchesPlaceholder")}
         />
       </div>
 
       <Button className="h-10 w-full" onClick={save} disabled={isSubmitting}>
-        {isSubmitting ? "กำลังบันทึก..." : "บันทึก Global Policy"}
+        {isSubmitting ? t("systemAdmin.branchPolicy.saving") : t("systemAdmin.branchPolicy.save")}
       </Button>
 
       {successMessage ? <p className="text-sm text-emerald-700">{successMessage}</p> : null}

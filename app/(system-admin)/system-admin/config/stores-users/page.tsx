@@ -1,10 +1,19 @@
+import { redirect } from "next/navigation";
+
 import { SystemStoreUserConfig } from "@/components/system-admin/system-store-user-config";
+import { getSession } from "@/lib/auth/session";
 import { queryMany } from "@/lib/db/query";
+import { createTranslator } from "@/lib/i18n/translate";
 
 type StoreType = "ONLINE_RETAIL" | "RESTAURANT" | "CAFE" | "OTHER";
 type SystemRole = "USER" | "SUPERADMIN" | "SYSTEM_ADMIN";
 
 export default async function SystemAdminStoresUsersConfigPage() {
+  const session = await getSession();
+  if (!session) {
+    redirect("/login");
+  }
+  const t = createTranslator(session.language);
   const [rawStoreRows, rawUserRows] = await Promise.all([
     queryMany<{
       id: string;
@@ -89,13 +98,11 @@ export default async function SystemAdminStoresUsersConfigPage() {
   return (
     <section className="space-y-4">
       <header className="space-y-1">
-        <h1 className="text-xl font-semibold">Store & User Config</h1>
-        <p className="text-sm text-muted-foreground">
-          SYSTEM_ADMIN สามารถตั้งค่าร้านทั้งหมด และผู้ใช้ทั้งหมดได้จากหน้านี้
-        </p>
+        <h1 className="text-xl font-semibold">{t("systemAdmin.config.storesUsers.pageTitle")}</h1>
+        <p className="text-sm text-muted-foreground">{t("systemAdmin.config.storesUsers.pageDescription")}</p>
       </header>
 
-      <SystemStoreUserConfig stores={storeRows} users={userRows} />
+      <SystemStoreUserConfig language={session.language} stores={storeRows} users={userRows} />
     </section>
   );
 }

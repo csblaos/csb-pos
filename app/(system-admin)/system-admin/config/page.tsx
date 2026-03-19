@@ -1,41 +1,48 @@
 import Link from "next/link";
 import { Settings2, ShieldCheck, Store, Users } from "lucide-react";
+import { redirect } from "next/navigation";
 
-const menus = [
-  {
-    href: "/system-admin/config/clients",
-    title: "Manage Client",
-    description: "จัดการบัญชี SUPERADMIN และโควตาร้าน/สาขา",
-    icon: Users,
-  },
-  {
-    href: "/system-admin/config/system",
-    title: "System Config",
-    description: "ตั้งค่า Global Policy เช่นโควตาสาขาเริ่มต้น",
-    icon: Settings2,
-  },
-  {
-    href: "/system-admin/config/stores-users",
-    title: "Store & User Config",
-    description: "ตั้งค่าร้านทั้งหมดและผู้ใช้ทั้งหมดโดย SYSTEM_ADMIN",
-    icon: Store,
-  },
-  {
-    href: "/system-admin/config/security",
-    title: "Security",
-    description: "ดูแนวทางความปลอดภัยและนโยบายการเข้าถึง",
-    icon: ShieldCheck,
-  },
-];
+import { getSession } from "@/lib/auth/session";
+import { createTranslator } from "@/lib/i18n/translate";
 
-export default function SystemAdminConfigPage() {
+export default async function SystemAdminConfigPage() {
+  const session = await getSession();
+  if (!session) {
+    redirect("/login");
+  }
+  const t = createTranslator(session.language);
+  const menus = [
+    {
+      href: "/system-admin/config/clients",
+      title: t("systemAdmin.config.menu.clients.title"),
+      description: t("systemAdmin.config.menu.clients.description"),
+      icon: Users,
+    },
+    {
+      href: "/system-admin/config/system",
+      title: t("systemAdmin.config.menu.system.title"),
+      description: t("systemAdmin.config.menu.system.description"),
+      icon: Settings2,
+    },
+    {
+      href: "/system-admin/config/stores-users",
+      title: t("systemAdmin.config.menu.storesUsers.title"),
+      description: t("systemAdmin.config.menu.storesUsers.description"),
+      icon: Store,
+    },
+    {
+      href: "/system-admin/config/security",
+      title: t("systemAdmin.config.menu.security.title"),
+      description: t("systemAdmin.config.menu.security.description"),
+      icon: ShieldCheck,
+    },
+  ];
+
   return (
     <section className="space-y-4">
       <header className="space-y-1">
-        <h1 className="text-xl font-semibold">Config Center</h1>
-        <p className="text-sm text-muted-foreground">
-          รวมเมนูตั้งค่าหลักสำหรับผู้ดูแลระบบ POS ทั้งระบบ
-        </p>
+        <h1 className="text-xl font-semibold">{t("systemAdmin.config.title")}</h1>
+        <p className="text-sm text-muted-foreground">{t("systemAdmin.config.description")}</p>
       </header>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">

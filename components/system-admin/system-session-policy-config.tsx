@@ -1,28 +1,36 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { authFetch } from "@/lib/auth/client-token";
+import { createTranslator } from "@/lib/i18n/translate";
+import type { AppLanguage } from "@/lib/i18n/types";
+import { translateSystemAdminApiMessage } from "@/lib/system-admin/i18n";
 
 type SystemSessionPolicyConfigProps = {
+  language: AppLanguage;
   initialConfig: {
     defaultSessionLimit: number;
   };
 };
 
-export function SystemSessionPolicyConfig({ initialConfig }: SystemSessionPolicyConfigProps) {
+export function SystemSessionPolicyConfig({
+  initialConfig,
+  language,
+}: SystemSessionPolicyConfigProps) {
   const [defaultSessionLimit, setDefaultSessionLimit] = useState(
     String(initialConfig.defaultSessionLimit),
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const t = useMemo(() => createTranslator(language), [language]);
 
   const save = async () => {
     const parsed = Number(defaultSessionLimit);
     if (!Number.isInteger(parsed) || parsed < 1 || parsed > 10) {
-      setErrorMessage("Default session limit ต้องเป็นตัวเลข 1-10");
+      setErrorMessage(t("systemAdmin.sessionPolicy.validation.limit"));
       setSuccessMessage(null);
       return;
     }
@@ -51,7 +59,16 @@ export function SystemSessionPolicyConfig({ initialConfig }: SystemSessionPolicy
       | null;
 
     if (!response.ok) {
-      setErrorMessage(data?.message ?? "บันทึก Session Policy ไม่สำเร็จ");
+      setErrorMessage(
+        translateSystemAdminApiMessage({
+          message: data?.message,
+          t,
+          fallbackKey: "systemAdmin.sessionPolicy.saveFailed",
+          overrides: {
+            "ข้อมูลตั้งค่าไม่ถูกต้อง": "systemAdmin.sessionPolicy.invalidPayload",
+          },
+        }),
+      );
       setIsSubmitting(false);
       return;
     }
@@ -60,20 +77,20 @@ export function SystemSessionPolicyConfig({ initialConfig }: SystemSessionPolicy
       setDefaultSessionLimit(String(data.config.defaultSessionLimit));
     }
 
-    setSuccessMessage("บันทึก Session Policy แล้ว");
+    setSuccessMessage(t("systemAdmin.sessionPolicy.saveSuccess"));
     setIsSubmitting(false);
   };
 
   return (
     <article className="space-y-3 rounded-xl border bg-white p-4">
-      <h2 className="text-sm font-semibold">Global Session Policy</h2>
+      <h2 className="text-sm font-semibold">{t("systemAdmin.sessionPolicy.title")}</h2>
       <p className="text-sm text-muted-foreground">
-        กำหนดจำนวน session เริ่มต้นต่อผู้ใช้ (ใช้เมื่อ user ไม่ได้ตั้งค่า override)
+        {t("systemAdmin.sessionPolicy.description")}
       </p>
 
       <div className="space-y-2">
         <label className="text-xs text-muted-foreground" htmlFor="global-session-limit">
-          Default Session Limit (1-10)
+          {t("systemAdmin.sessionPolicy.limitLabel")}
         </label>
         <input
           id="global-session-limit"
@@ -88,7 +105,7 @@ export function SystemSessionPolicyConfig({ initialConfig }: SystemSessionPolicy
       </div>
 
       <Button className="h-10 w-full" onClick={save} disabled={isSubmitting}>
-        {isSubmitting ? "กำลังบันทึก..." : "บันทึก Session Policy"}
+        {isSubmitting ? t("systemAdmin.sessionPolicy.saving") : t("systemAdmin.sessionPolicy.save")}
       </Button>
 
       {successMessage ? <p className="text-sm text-emerald-700">{successMessage}</p> : null}
